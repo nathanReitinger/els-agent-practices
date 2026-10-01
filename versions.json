@@ -4,7 +4,13 @@
   "repo": "nathanReitinger/els-agent-practices",
   "branch": "main",
   "site": "https://nathanreitinger.github.io/els-agent-practices/",
-  "latest": null,
-  "draft": "0.1.0-draft",
-  "versions": []
+  "latest": "0.1.0",
+  "draft": "0.2.0-draft",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "date": "2026-10-01",
+      "summary": "First published version: eight principles, 55 practices by research stage, a pre-submission checklist, a starter CLAUDE.md for ELS projects, and a verified reading list."
+    }
+  ]
 }
