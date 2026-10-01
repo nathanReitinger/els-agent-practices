@@ -421,5 +421,3 @@ Anyone can edit this guide, and every edit is logged, so nothing is ever lost.
 Published versions are numbered and never change, so cite the version you used and its permanent link (both at the top of the published file). Version numbers work like software releases: patch versions (0.1.1) fix wording and references, minor versions (0.2.0) add practices, and major versions (1.0.0, 2.0.0) remove or reverse advice. Versions below 1.0 are community drafts.
 
 **Contributors:** Nathan Reitinger (Northwestern Law)
-
-*(Test edit: checking that draft edits merge automatically. The next edit removes this line.)*
