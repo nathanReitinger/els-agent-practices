@@ -1,0 +1,8 @@
+# ELS Agent Practices
+
+> Best practices for working with AI agents in empirical legal research, and a starter instruction file (CLAUDE.md / AGENTS.md) for empirical legal studies projects. Published versions are numbered and never change; the draft changes often.
+
+- [Starter instruction file for an ELS project (save as CLAUDE.md or AGENTS.md)](latest/starter-CLAUDE.md)
+- [Full guide, latest published version](latest/agent-best-practices.md)
+- [All published versions](versions.json)
+- [Working draft](draft/agent-best-practices.md)

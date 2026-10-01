@@ -1,0 +1,48 @@
+# Anyone can edit the draft. A pull request that changes only Markdown files in
+# draft/ is merged automatically, so every edit lands in the git history, where
+# it is logged and can be undone. Changes to anything else wait for a maintainer.
+#
+# Safety: pull_request_target runs with write access, so this workflow never
+# checks out or runs anything from the pull request. It only reads the list of
+# changed files and asks GitHub to merge.
+name: Merge draft edits
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: merge-draft-edits-${{ github.event.pull_request.number }}
+
+jobs:
+  merge:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge if only the draft changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          files=$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path')
+          printf 'Changed files:\n%s\n' "$files"
+          if [ -z "$files" ] || printf '%s\n' "$files" | grep -qvE '^draft/[^/]+\.md$'; then
+            if [ "$ACTION" = "opened" ]; then
+              gh pr comment "$PR" --repo "$REPO" --body "Thanks! This changes files outside \`draft/\`, so a maintainer will review it before it's merged. Edits that change only the draft are merged automatically."
+            fi
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if gh pr merge "$PR" --repo "$REPO" --squash; then
+              exit 0
+            fi
+            sleep 20
+          done
+          gh pr comment "$PR" --repo "$REPO" --body "This edit couldn't be merged automatically, usually because someone else changed the same passage first. Please re-apply it to the latest draft, or a maintainer will merge it by hand."
+          exit 1
