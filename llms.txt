@@ -1,9 +1,7 @@
 # AGENTS.md for Empirical Legal Scholars
 
-> AGENTS.md for empirical legal research: standing instructions for AI coding agents working on empirical legal studies projects, plus a guide that explains the reason behind each rule. Versions 0.0.x are comment drafts; each published version is a frozen snapshot, and the draft changes often.
+> A general AGENTS.md for empirical legal research: standing instructions for AI coding agents working with empirical legal scholars. It assumes no folder layout. Versions 0.0.x are comment drafts; each published version is a frozen snapshot, and the draft changes often.
 
 - [AGENTS.md, latest published version (save in a project folder as AGENTS.md or CLAUDE.md)](latest/AGENTS.md)
-- [The guide, latest published version](latest/agent-best-practices.md)
 - [All published versions](versions.json)
-- [Working draft of AGENTS.md](draft/AGENTS.md)
-- [Working draft of the guide](draft/agent-best-practices.md)
+- [Working draft](draft/AGENTS.md)

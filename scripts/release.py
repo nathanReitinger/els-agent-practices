@@ -3,7 +3,7 @@
 
     python3 scripts/release.py 0.0.2 "One-line summary of this release"
 
-Copies the draft guide and AGENTS.md from draft/ to versions/vX.Y.Z/, stamping
+Copies draft/AGENTS.md to versions/vX.Y.Z/, stamping
 each with its version, date, and permanent link; writes that version's pages;
 makes latest/ an exact copy of the new version; records the release in
 versions.json and CHANGELOG.md; and moves the draft on to the next version.
@@ -31,9 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pages import archive_pages  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-GUIDE = "agent-best-practices.md"
 AGENTS = "AGENTS.md"
-FILES = (GUIDE, AGENTS)  # released if present in draft/
+FILES = (AGENTS,)  # the one file the project publishes
 MANIFEST = ROOT / "versions.json"
 CHANGELOG = ROOT / "CHANGELOG.md"
 CHANGELOG_MARKER = "<!-- releases -->"
@@ -68,8 +67,7 @@ def comment_label(version: str) -> str:
 def published_line(name: str, version: str, today: str, site: str) -> str:
     base = f"{site}versions/v{version}/"
     if name == AGENTS:
-        return (f"*Version {version}{comment_label(version)} · Published {today} · Permanent link: <{base}{AGENTS}> · "
-                f"The reasons behind each rule: <{base}>*")
+        return f"*Version {version}{comment_label(version)} · Published {today} · Permanent link: <{base}{AGENTS}>*"
     return f"*Version {version}{comment_label(version)} · Published {today} · Permanent link: <{base}>*"
 
 
@@ -118,8 +116,8 @@ def main() -> None:
     check_repo_is_current()
 
     drafts = {name: (ROOT / "draft" / name).read_text() for name in FILES if (ROOT / "draft" / name).exists()}
-    if GUIDE not in drafts:
-        die(f"draft/{GUIDE} is missing")
+    if AGENTS not in drafts:
+        die(f"draft/{AGENTS} is missing")
     for name, text in drafts.items():
         if not VERSION_LINE.search(text):
             die(f"draft/{name} is missing its '*Version ...*' line near the top")
@@ -132,7 +130,7 @@ def main() -> None:
     for name, text in drafts.items():
         (out_dir / name).write_text(VERSION_LINE.sub(published_line(name, version, today, site), text, count=1))
         (ROOT / "draft" / name).write_text(VERSION_LINE.sub(draft_line(name, following, site), text, count=1))
-    for page, html in archive_pages(version, AGENTS in drafts).items():
+    for page, html in archive_pages(version).items():
         (out_dir / page).write_text(html)
 
     # latest/ is an exact copy of the newest version's files.

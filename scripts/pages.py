@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Write the site's HTML pages. Every page is the same shell; assets/app.js fills it in.
+"""Write the site's HTML pages. Each page is the same shell; assets/app.js fills it in.
 
     python3 scripts/pages.py
 
-Rewrites the fixed pages and the page shells of every published version (the
-frozen Markdown files are never touched). scripts/release.py also uses
+The site shows one file, AGENTS.md: the latest published version at the root,
+the working draft in the Drafter (draft/), and each frozen version under
+versions/vX.Y.Z/. Addresses from earlier layouts redirect to these pages.
+The frozen Markdown files are never touched. scripts/release.py also uses
 archive_pages() for each new version.
 """
 
@@ -16,13 +18,19 @@ from html import escape
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+SITE_NAME = "AGENTS.md for Empirical Legal Scholars"
 
 FONTS = ("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500"
+         "&family=IBM+Plex+Sans:wght@400;500;600;700"
          "&family=Playfair:ital,opsz,wght@0,5..1200,300..900;1,5..1200,300..900&display=swap")
 
 ICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E"
-        "%3Crect width='32' height='32' rx='7' fill='%23{color}'/%3E%3Ctext x='16' y='23' font-size='20' "
-        "text-anchor='middle' fill='white' font-family='Georgia,serif'%3E%C2%A7%3C/text%3E%3C/svg%3E")
+        "%3Crect width='32' height='32' rx='7' fill='%23{color}'/%3E%3Ctext x='16' y='22' font-size='15' "
+        "text-anchor='middle' fill='white' font-family='Menlo,monospace' font-weight='700'%3EMD%3C/text%3E%3C/svg%3E")
+
+FILE_ICON = ('<svg class="file-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" '
+             'stroke-width="1.6" stroke-linejoin="round" d="M6 2.8h8.2L19 7.6v13.6H6z"/><path fill="none" '
+             'stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M14 2.8v5h5"/></svg>')
 
 MOON = ('<svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" '
         'd="M20.6 14.6A8.6 8.6 0 0 1 9.4 3.4a.6.6 0 0 0-.8-.7A9.6 9.6 0 1 0 21.3 15.4a.6.6 0 0 0-.7-.8z"/></svg>')
@@ -54,15 +62,13 @@ SHELL = """<!doctype html>
   <link rel="stylesheet" href="{fonts}">
   <link rel="stylesheet" href="{root}/assets/style.css?v={asset}">
 </head>
-<body data-mode="{mode}" data-file="{file}" data-root="{root}"{version_attr}>
+<body data-mode="{mode}" data-root="{root}"{version_attr}>
   <div class="progress" aria-hidden="true"><span></span></div>
   <header class="site-header">
     <a class="brand" href="{root}/"><span class="brand-file">AGENTS.md</span> <span class="brand-for">for Empirical Legal Scholars</span></a>
     <nav class="site-nav" aria-label="Site">
-      <a href="{root}/agents/" data-nav="agents">AGENTS.md</a>
-      <a href="{root}/" data-nav="guide">Guide</a>
-      <a href="{root}/draft/" data-nav="draft">Draft</a>
-      <a href="{root}/versions/" data-nav="versions">Versions</a>
+      <a href="{root}/" data-nav="file">AGENTS.md</a>
+      <a href="{root}/draft/" data-nav="drafter">Drafter</a>
       <a href="https://github.com/" data-repo-link>GitHub</a>
     </nav>
     <div class="reader-controls" role="group" aria-label="Reading settings">
@@ -72,21 +78,40 @@ SHELL = """<!doctype html>
     </div>
   </header>
   <div class="layout">
-    <div id="banner" class="banner" hidden></div>
-    <nav id="toc" class="toc" aria-label="Contents" hidden></nav>
-    <main id="main"><article id="doc" class="doc"><p class="loading">Loading…</p></article></main>
+    <nav id="toc" class="toc" aria-label="Outline" hidden></nav>
+    <main id="main">
+      <div id="intro"></div>
+      <section class="file" aria-label="AGENTS.md">
+        <div class="file-bar">
+          <span class="file-name">{file_icon}AGENTS.md</span>
+          <span class="file-meta" id="file-meta"></span>
+          <span class="file-actions" id="file-actions"></span>
+        </div>
+        <article id="doc" class="doc"><p class="loading">Loading…</p></article>
+      </section>
+      <div id="after"></div>
+    </main>
   </div>
   <footer id="footer" class="site-footer"></footer>
-{scripts}</body>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="{root}/assets/app.js?v={asset}"></script>
+</body>
 </html>
 """
 
-RENDERERS = """  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+REDIRECT = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Moved · {site_name}</title>
+  <meta http-equiv="refresh" content="0; url={target}">
+  <link rel="canonical" href="{target}">
+  <script>var t="{target}",i=t.indexOf("#");location.replace((i<0?t:t.slice(0,i))+location.search+(location.hash||(i<0?"":t.slice(i))))</script>
+</head>
+<body><p>This page moved: <a href="{target}">{site_name}</a>.</p></body>
+</html>
 """
-
-GUIDE_TITLE = "Best Practices for Working with AI Agents in Empirical Legal Research"
-SITE_NAME = "AGENTS.md for Empirical Legal Scholars"
 
 
 def asset_version() -> str:
@@ -97,65 +122,61 @@ def asset_version() -> str:
     return digest.hexdigest()[:8]
 
 
-def render(mode: str, file: str, root: str, title: str, description: str, version: str | None = None) -> str:
-    needs_markdown = mode not in ("history", "versions")
-    color = "8a5300" if mode in ("draft", "history") else "8a2432"
-    asset = asset_version()
+def render(mode: str, root: str, title: str, description: str, version: str | None = None) -> str:
     return SHELL.format(
         title=escape(title),
         description=escape(description),
         site_name=escape(SITE_NAME),
-        icon=ICON.format(color=color),
+        icon=ICON.format(color="8a5300" if mode == "drafter" else "8a2432"),
         prefs=PREFS,
         fonts=FONTS,
         root=root,
-        asset=asset,
+        asset=asset_version(),
         mode=mode,
-        file=file,
         version_attr=f' data-version="{escape(version)}"' if version else "",
+        file_icon=FILE_ICON,
         moon=MOON,
         sun=SUN,
-        scripts=(RENDERERS if needs_markdown else "") + f'  <script src="{root}/assets/app.js?v={asset}"></script>\n',
     )
 
 
-def archive_pages(version: str, with_agents: bool) -> dict[str, str]:
+def redirect(target: str) -> str:
+    return REDIRECT.format(target=escape(target), site_name=escape(SITE_NAME))
+
+
+def archive_pages(version: str) -> dict[str, str]:
     """The pages for one published version, keyed by file name."""
-    pages = {"index.html": render("archive", "guide", "../..", f"Version {version} guide · {SITE_NAME}",
-                                  f"Version {version} of {GUIDE_TITLE}.", version)}
-    if with_agents:
-        pages["agents.html"] = render("archive", "agents", "../..", f"Version {version} · {SITE_NAME}",
-                                      f"Version {version} of AGENTS.md for empirical legal research projects.", version)
-    return pages
+    return {
+        "index.html": render("archive", "../..", f"Version {version} · {SITE_NAME}",
+                             f"Version {version} of AGENTS.md for empirical legal research. Published versions never change.",
+                             version),
+        "agents.html": redirect("./"),  # an address from an earlier layout
+    }
 
 
 FIXED = {
-    "index.html": ("published", "guide", ".", f"The guide · {SITE_NAME}",
-                   f"{GUIDE_TITLE}, with an AGENTS.md for empirical legal research projects. Comment on any passage."),
-    "agents/index.html": ("published", "agents", "..", SITE_NAME,
-                          "AGENTS.md: standing instructions for AI agents working on empirical legal research projects."),
-    "draft/index.html": ("draft", "guide", "..", f"Draft guide · {SITE_NAME}",
-                         "Working draft of the guide. Anyone can edit it, and every edit is logged."),
-    "draft/agents.html": ("draft", "agents", "..", f"Draft · {SITE_NAME}",
-                          "Working draft of AGENTS.md. Anyone can edit it, and every edit is logged."),
-    "draft/history.html": ("history", "guide", "..", f"Edit history · {SITE_NAME}",
-                           "Every edit to the draft guide and AGENTS.md, with links to view or restore any revision."),
-    "versions/index.html": ("versions", "guide", "..", f"All versions · {SITE_NAME}",
-                            f"Every published version of {GUIDE_TITLE} and AGENTS.md."),
+    "index.html": render("published", ".", SITE_NAME,
+                         "AGENTS.md: standing instructions for AI agents working with empirical legal scholars. Download it, or comment on the draft."),
+    "draft/index.html": render("drafter", "..", f"Drafter · {SITE_NAME}",
+                               "The working draft of AGENTS.md. Anyone can comment on it or make a new version, and every version is kept."),
+    # Addresses from earlier layouts.
+    "agents/index.html": redirect("../"),
+    "draft/agents.html": redirect("./"),
+    "draft/history.html": redirect("./#history"),
+    "versions/index.html": redirect("../draft/#versions"),
 }
 
 
 def main() -> None:
-    for path, (mode, file, root, title, description) in FIXED.items():
+    for path, html in FIXED.items():
         target = ROOT / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(render(mode, file, root, title, description))
+        target.write_text(html)
         print(f"wrote {path}")
-    # Published versions: refresh their page shells so every version gets the current design.
     manifest = json.loads((ROOT / "versions.json").read_text())
     for release in manifest.get("versions", []):
         folder = ROOT / "versions" / f"v{release['version']}"
-        for name, html in archive_pages(release["version"], "AGENTS.md" in release.get("files", [])).items():
+        for name, html in archive_pages(release["version"]).items():
             (folder / name).write_text(html)
             print(f"wrote versions/v{release['version']}/{name}")
 

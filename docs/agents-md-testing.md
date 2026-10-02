@@ -1,5 +1,7 @@
 # How AGENTS.md was drafted and tested
 
+*These tests were run on versions 0.0.0 and 0.0.1, when AGENTS.md cited the practices of a companion guide. Version 0.0.2 rewrote it as one general workflow file with no assumed folder layout; rerunning the scenarios on the new text is still to do.*
+
 AGENTS.md is a comment draft. This page records how its first version was built and checked, so anyone can see the evidence, judge its limits, and rerun the tests on a later version.
 
 ## Drafting
