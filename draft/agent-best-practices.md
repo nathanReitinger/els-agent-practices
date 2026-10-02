@@ -8,7 +8,7 @@
 
 **Why a separate guide.** Agents can now do much of the mechanical work of an empirical project: collecting and cleaning data, coding documents, running models, building dashboards, drafting and checking prose. They are fast and capable, and they fail differently than human research assistants do. They also inherit every old problem in empirical legal research, from unrepresentative case samples to unreliable coding, and can make those problems faster and harder to see. These practices aim to keep the speed while making sure the work survives a referee, a replication attempt, and a skeptical reader.
 
-**How it's organized.** Part 1 is the short version: eight principles. Part 2 turns them into practices by research stage, numbered so you can cite them ("see D6"). Part 3 is a pre-submission checklist. The appendices have a starter instruction file for your agent and prompts worth reusing. Sources are cited by author and year and listed under Further reading.
+**How it's organized.** Part 1 is the short version: eight principles. Part 2 turns them into practices by research stage, numbered so you can refer to them ("see D6"). Part 3 is a pre-submission checklist. Appendix A introduces the companion AGENTS.md, which turns these practices into instructions your agent follows, and Appendix B has prompts worth reusing. Sources are cited by author and year and listed under Further reading.
 
 *Nothing here replaces your institution's policies, your IRB, or a venue's rules.*
 
@@ -66,7 +66,7 @@ my-project/
 
 **A6. Work in a language you can read, or verify outputs instead.** If you read Stata or R, have the agent use it; agents tend to default to Python. If you don't read code, you can still do rigorous work, but your checks have to be on outputs: known answers (C6), side-by-side viewers (C7), and counts (C4). Either way, ask for a plain-English account of each step and of what each model estimates.
 
-**A7. Give the agent a standing instruction file.** This is a short file in the project folder that the agent reads at the start of every session: what the project is, the rules for data, analysis, and citations, and the quirks of your data. Claude Code reads `CLAUDE.md` (recent versions also read `AGENTS.md`); many other agents read `AGENTS.md`. Keep it with your replication materials, since it shaped the agent's work (H2). Appendix A has a starter.
+**A7. Give the agent a standing instruction file.** This is a short file in the project folder that the agent reads at the start of every session: what the project is, the rules for data, analysis, and citations, and the quirks of your data. Claude Code reads `CLAUDE.md` (recent versions also read `AGENTS.md`); many other agents read `AGENTS.md`. Keep it with your replication materials, since it shaped the agent's work (H2). The companion AGENTS.md (Appendix A) is a ready-made one for empirical legal research.
 
 **A8. Record where every dataset came from.** Source, URL, date accessed, version or release, license or terms, and the query or steps used to get it. Agents keep this log well if asked, and not at all if not.
 
@@ -203,52 +203,13 @@ Pulling the docket number, date, court, and parties from a document is *extracti
 
 ---
 
-## Appendix A: Starter instruction file
+## Appendix A: AGENTS.md
 
-Save this as `CLAUDE.md` (Claude Code) or `AGENTS.md` (many other agents) in the project folder, and adapt it. Keep it short: agents follow a page of specific rules better than ten pages of general ones. Describe the research question, not the result you expect. The agent can create the files it mentions.
+This guide has a companion file, **AGENTS.md**, that turns its practices into standing instructions an agent reads at the start of every session. Get the latest version at <https://nathanreitinger.github.io/els-agent-practices/agents/>, save it in your project folder as `AGENTS.md` (or rename it `CLAUDE.md` for Claude Code), fill in the [bracketed] parts, and delete the sections your project doesn't need. Each rule ends with the ID of the practice it comes from, such as (C4), so you can look up the reason here.
 
-```
-# Project: [title]
+Keep it short and specific. Agents follow a page of specific rules better than ten pages of general ones, so cut what you don't need rather than adding more. Describe the research question, not the result you expect, and add your data's quirks to its "Notes on our data" section as you find them (B7).
 
-## About this project
-[Two or three sentences: research question, data, methods, intended venue.]
-Unit of analysis: [opinion / case / docket / issue / vote / defendant]. Count consolidated cases, multiple opinions, and mixed dispositions as the codebook says.
-I am the author and am accountable for every number, quote, and citation. You are a research assistant. Make your work easy for me to check.
-
-## Data
-- data/raw/ is read-only. Never modify, move, or overwrite anything in it. Scripts write to data/derived/.
-- Never edit data by hand or fix individual values in place. If something looks wrong, tell me.
-- Never drop, deduplicate, impute, recode, or filter observations without printing row counts before and after and logging the step in DECISIONS.md.
-- Record every search (query, database, date, number of hits) in docs/search-log.md, and save the hit list.
-- [If applicable: Never open data/restricted/. Develop against data/synthetic/.]
-
-## Analysis
-- Follow ANALYSIS_PLAN.md. Do not change the outcome, sample, variables, model, or standard errors without asking me.
-- Log every model you run in LOG.md, including ones that fail or that I won't report: date, specification, key estimate.
-- Never change a test, a check, a coding rule, or the data to make code run or a result appear. Stop and tell me.
-- Write code in [Stata / R / Python]. Set and record random seeds.
-
-## Coding documents with a model
-- Code documents through a script that sends each one to the model with only the codebook. Don't code documents yourself in this conversation.
-- Don't show the model the case outcome unless the codebook calls for it, and never show it the hypotheses.
-- Once I approve the prompts, don't change them. Record the exact model identifier, prompt, settings, and date for every run, and save every raw response in output/.
-
-## Sources and citations
-- Never cite a case, statute, article, or quotation from memory. Find the source and give me the exact supporting passage, the pin cite, and where you found it.
-- If you cannot find or open a source, say so. "I couldn't verify this" is always an acceptable answer.
-
-## Working with me
-- Before any multi-step task, give me a short plan, your assumptions, and the judgment calls you expect to make. Ask about anything that could affect results.
-- Stop and ask before decisions about sample definitions, exclusions, variable construction, ambiguous cases, or model choice, and before anything hard to undo (large downloads, paid model runs, deleting files).
-- When you extract or code information from documents, give me a way to check it against the source, such as a side-by-side viewer.
-- When you say something is done, show evidence: the command, its output, row counts, test results. Separate what you verified from what you assumed.
-- Tell me when you are uncertain. Report null, weak, or surprising results as clearly as strong ones.
-- Log judgment calls in DECISIONS.md: date, decision, alternatives considered, reason.
-
-## Notes on our data (add to this as you go)
-- [Example: In the AO/FJC data, award amounts are in thousands and 9999 can mean missing; treat 9999 as missing (DECISIONS.md, entry 4).]
-- [Example: In this dataset, "dismissed" includes voluntary dismissals; code them per codebook §3.2.]
-```
+How AGENTS.md was drafted and tested, including the simulated situations it was checked against, is in [docs/agents-md-testing.md](https://github.com/nathanReitinger/els-agent-practices/blob/main/docs/agents-md-testing.md).
 
 ## Appendix B: Prompts worth reusing
 
@@ -409,15 +370,15 @@ Concrete stories teach more than principles. Add yours; three lines is plenty.
 
 ## How to contribute
 
-Anyone can edit this guide, and every edit is logged, so nothing is ever lost.
+Everything here is a comment draft, and anyone can help.
 
-- **Edit the draft:** go to <https://nathanreitinger.github.io/els-agent-practices/draft/> and click "Edit this draft." Edits that change only the draft are merged automatically. You'll need a free GitHub account.
-- **Comment:** highlight any passage on the draft page.
+- **Comment:** on any page of the site, select a passage and choose Annotate. Comments appear right away for everyone (they use Hypothesis, which asks for a free account).
+- **Edit the draft:** open the draft of the guide (<https://nathanreitinger.github.io/els-agent-practices/draft/>) or of AGENTS.md (<https://nathanreitinger.github.io/els-agent-practices/draft/agents.html>) and click Edit. Edits that change only the draft are merged automatically. You'll need a free GitHub account.
 - **See or undo edits:** the draft's edit history shows every change, and any earlier revision can be viewed and restored.
 - **Keep the format:** a bold one-sentence rule, then a sentence or two on why or how. Specific beats general: name the dataset, the tool, the failure. Cite only sources you've read, by author and year, and add them to Further reading.
-- **Practice numbers are permanent** once published. Add a new practice at the end of its section with the next free number.
+- **Practice numbers are permanent** once published. Add a new practice at the end of its section with the next free number, and add a matching rule to AGENTS.md.
 - **Add a field note** when something goes wrong, and add yourself to the contributors list.
 
-Published versions are numbered and never change, so cite the version you used and its permanent link (both at the top of the published file). Version numbers work like software releases: patch versions (0.1.1) fix wording and references, minor versions (0.2.0) add practices, and major versions (1.0.0, 2.0.0) remove or reverse advice. Versions below 1.0 are community drafts.
+Each published version is a frozen snapshot with a permanent link at the top of the file. Versions 0.0.x are comment drafts: nothing is final. Version 1.0.0 will be the first one the contributors are ready to recommend as a standard; after that, patch versions fix wording and references, minor versions add practices, and major versions remove or reverse advice.
 
 **Contributors:** Nathan Reitinger (Northwestern Law)
