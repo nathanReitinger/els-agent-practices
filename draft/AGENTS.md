@@ -1,4 +1,4 @@
-# AGENTS.md: empirical legal research
+# AGENTS.md for Empirical Legal Scholars
 
 *Version 0.0.1-draft · Working draft: anyone can edit it, and every edit is logged · Latest published version: <https://nathanreitinger.github.io/els-agent-practices/latest/AGENTS.md>*
 
