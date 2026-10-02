@@ -4,6 +4,7 @@
 """
 
 import datetime as dt
+import os
 import json
 import shutil
 import subprocess
@@ -19,6 +20,9 @@ from fingerprint import fingerprint  # noqa: E402
 from proposals import Governance, count_votes, decide, parse_time  # noqa: E402
 
 DRAFTER = "https://nathanreitinger.github.io/els-agent-practices/draft/"
+# Like GitHub's machines: no git settings from this computer, and no guessing a name or email from it.
+NO_GIT_SETTINGS = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                   "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.useConfigOnly", "GIT_CONFIG_VALUE_0": "true"}
 MAINTAINERS = json.loads((ROOT / "governance" / "maintainers.json").read_text())
 
 
@@ -104,8 +108,6 @@ class RunTest(unittest.TestCase):
         shutil.copytree(ROOT, self.repo, ignore=shutil.ignore_patterns(".git", "__pycache__", ".claude", ".DS_Store"))
         self.baseline()
         self.git("init", "--quiet", "-b", "main")
-        self.git("config", "user.name", "Maintainer")
-        self.git("config", "user.email", "maintainer@example.org")
         self.git("add", "-A")
         self.git("commit", "--quiet", "-m", "Start")
         self.git("tag", "-a", "v0.0.2", "-m", "Version 0.0.2")
@@ -130,12 +132,14 @@ class RunTest(unittest.TestCase):
         (self.repo / "governance" / "proposals.json").unlink(missing_ok=True)
 
     def git(self, *args):
-        return subprocess.run(["git", *args], cwd=self.repo, capture_output=True, text=True, check=True).stdout.strip()
+        """git in the scratch copy, as a maintainer named Maintainer (the robot must name itself)."""
+        return subprocess.run(["git", "-c", "user.name=Maintainer", "-c", "user.email=maintainer@example.org", *args],
+                              cwd=self.repo, capture_output=True, text=True, check=True, env=NO_GIT_SETTINGS).stdout.strip()
 
     def robot(self, rows, *extra, now="2026-10-03T12:00:00Z"):
         self.fixture.write_text(json.dumps(rows))
         result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--offline",
-                                 "--now", now, *extra], cwd=self.repo, capture_output=True, text=True)
+                                 "--now", now, *extra], cwd=self.repo, capture_output=True, text=True, env=NO_GIT_SETTINGS)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         return result.stdout
 
@@ -274,7 +278,7 @@ class RunTest(unittest.TestCase):
         frozen.write_text(frozen.read_text().replace("Never", "Always", 1))
         self.fixture.write_text("[]")
         result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--offline"],
-                                cwd=self.repo, capture_output=True, text=True)
+                                cwd=self.repo, capture_output=True, text=True, env=NO_GIT_SETTINGS)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no longer matches its recorded fingerprint", result.stderr)
 
@@ -382,7 +386,7 @@ class GitHubRunTest(RunTest):
     def robot_online(self, rows, now="2026-10-03T12:00:00Z"):
         import os
         self.fixture.write_text(json.dumps(rows))
-        env = {**os.environ, "GH_TOKEN": "test-token", "REPO": "owner/name", "GITHUB_API_URL": self.github.url}
+        env = {**NO_GIT_SETTINGS, "GH_TOKEN": "test-token", "REPO": "owner/name", "GITHUB_API_URL": self.github.url}
         result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--push",
                                  "--now", now], cwd=self.repo, capture_output=True, text=True, env=env)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)

@@ -57,6 +57,9 @@ WRITTEN = ["draft/AGENTS.md", "latest", "versions", "versions.json", "CHANGELOG.
 HYPOTHESIS_SEARCH = "https://api.hypothes.is/api/search"
 BOT_NAME = "github-actions[bot]"
 BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
+# The robot's identity for every commit and tag it makes, so it never depends on git's settings where it runs.
+BOT_IDENTITY = {"GIT_COMMITTER_NAME": BOT_NAME, "GIT_COMMITTER_EMAIL": BOT_EMAIL,
+                "GIT_AUTHOR_NAME": BOT_NAME, "GIT_AUTHOR_EMAIL": BOT_EMAIL}
 FINAL = ("adopted", "declined", "withdrawn", "cannot-apply")
 NEW_ISSUES_PER_RUN = 10
 LEDGER_ABOUT = ("Every proposal made in the Drafter, its votes, and its outcome. Written by scripts/proposals.py; "
@@ -123,9 +126,7 @@ def git(*args: str, env: dict | None = None) -> str:
 
 def commit(message: str, author: str | None = None) -> None:
     git("add", "-A", "--", *[path for path in WRITTEN if (ROOT / path).exists()])
-    bot = {"GIT_COMMITTER_NAME": BOT_NAME, "GIT_COMMITTER_EMAIL": BOT_EMAIL,
-           "GIT_AUTHOR_NAME": BOT_NAME, "GIT_AUTHOR_EMAIL": BOT_EMAIL}
-    git("commit", "--quiet", "-m", message, *(["--author", author] if author else []), env=bot)
+    git("commit", "--quiet", "-m", message, *(["--author", author] if author else []), env=BOT_IDENTITY)
 
 
 # ---------- Maintainers and rules ----------
@@ -498,7 +499,7 @@ class Robot:
         entry = release.publish(version, summary, details, today=self.now.date().isoformat())
         commit(message.replace("{version}", version).replace("{fingerprint}", entry["fingerprint"]), author)
         git("tag", "-a", f"v{version}", "-m", f"Version {version}", "-m", f"Argon2id fingerprint: {entry['fingerprint']}",
-            "-m", summary)
+            "-m", summary, env=BOT_IDENTITY)
         self.tags.append(f"v{version}")
         self.manifest = json.loads(MANIFEST.read_text())
         return entry
