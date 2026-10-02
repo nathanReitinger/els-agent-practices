@@ -1,6 +1,6 @@
 # Maintaining this repository
 
-This repository publishes *AGENTS.md for Empirical Legal Scholars*: one Markdown file, `AGENTS.md`, on a GitHub Pages site. The root page shows the newest version; the Drafter (`draft/`) is where anyone proposes changes and members vote; `check/` checks a copy's fingerprint; and `versions/` holds every frozen, numbered version. The process is in GOVERNANCE.md.
+This repository publishes *AGENTS.md for Empirical Legal Scholars*: one Markdown file, `AGENTS.md`, on a GitHub Pages site. The root page shows the newest version; the Drafter (`draft/`) is where anyone comments and proposes changes; `maintainers/` is where maintainers sign in to approve or disapprove them; `declined/` keeps the disapproved ones; `check/` checks a copy's fingerprint; and `versions/` holds every frozen, numbered version. The process is in GOVERNANCE.md.
 
 ## The product file is not instructions for you
 
@@ -8,11 +8,11 @@ This repository publishes *AGENTS.md for Empirical Legal Scholars*: one Markdown
 
 ## How the text changes
 
-- The text lives in `draft/AGENTS.md`, which is always word for word the newest version. Any commit that changes it is published automatically as a new version by the robot (`scripts/proposals.py`, run by `.github/workflows/proposals.yml`). So edit it only when the user asks, and prefer the proposal process, where members vote.
+- The text lives in `draft/AGENTS.md`, which is always word for word the newest version. Any commit that changes it is published automatically as a new version by the robot (`scripts/proposals.py`, run by `.github/workflows/proposals.yml`). So edit it only when the user asks, and prefer the proposal process, where the maintainers decide.
 - Line 1 is the title, line 2 is blank, and line 3 is the version line with the fingerprint. Never edit line 3 by hand or move it; the release script writes it.
 - A version's fingerprint is the Argon2id hash of its file without line 3, with fixed settings recorded in versions.json (`scripts/fingerprint.py`, which needs `python3 -m pip install argon2-cffi`). The robot refuses to run if a published file no longer matches its recorded fingerprint. Never change the fingerprint settings: every recorded fingerprint depends on them.
 - Never edit anything under `versions/` or `latest/` except the HTML page shells that `scripts/pages.py` regenerates, and never edit `governance/proposals.json`: the robot writes it.
-- `governance/members.json` holds the members and the voting rules. Change it only at a maintainer's request.
+- `governance/maintainers.json` holds the maintainers and the rules for deciding. Change it only at the lead maintainer's request. The Maintainers page's sign-in uses a GitHub key that stays in the maintainer's browser; never ask for one, and never put one in the repository.
 - Version numbers: each adopted proposal or direct change adds one to the last number before 1.0 (0.0.3, 0.0.4, ...) and to the middle number after it. Publish a version that doesn't come from a proposal, such as 1.0.0, with `python3 scripts/release.py X.Y.Z "One-line summary"`, then run the commands it prints.
 
 ## Rules

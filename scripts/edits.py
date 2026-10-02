@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 
 KINDS = ("delete", "replace", "insert", "rule")
 
-# Plain-English reasons a proposal can't be applied, shown to the proposer and the members.
+# Plain-English reasons a proposal can't be applied, shown to the proposer and the maintainers.
 REASONS = {
     "not-found": "The selected words aren't in the current version of AGENTS.md. They may have changed since the "
                  "proposal was made, or they were selected outside the text of AGENTS.md.",

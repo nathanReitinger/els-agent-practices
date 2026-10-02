@@ -1,5 +1,6 @@
 /* AGENTS.md for Empirical Legal Scholars: shows one Markdown file, AGENTS.md, rendered for reading;
-   the Drafter, where anyone can propose a change and members vote on it; and a page that checks
+   the Drafter, where anyone can comment and propose a change; the Maintainers page, where maintainers sign in to
+   approve or disapprove proposals; the Declined page; and a page that checks
    whether a copy is exactly a published version.
    Each page says what to show with attributes on <body>:
      data-mode     published (latest version) | drafter | archive (one version) | check
@@ -13,7 +14,7 @@
   const FILE = "AGENTS.md";
   const DRAFT_PATH = `draft/${FILE}`;
   const LEDGER_PATH = "governance/proposals.json";
-  const MEMBERS_PATH = "governance/members.json";
+  const MAINTAINERS_PATH = "governance/maintainers.json";
   const HYPOTHESIS_SEARCH = "https://api.hypothes.is/api/search";
   const CHECK_EVERY = "15 minutes";
   const FINAL = ["adopted", "declined", "withdrawn", "cannot-apply"];
@@ -411,7 +412,7 @@
     }
   }
 
-  // The robot's files (the members, and every proposal and vote) are read from GitHub too, for the same reason.
+  // The robot's files (the maintainers, and every proposal and vote) are read from GitHub too, for the same reason.
   async function loadRecord(cfg, path) {
     if (!isLocal) {
       try { return await fetchJSON(`https://raw.githubusercontent.com/${cfg.repo}/${cfg.branch}/${path}`); } catch { /* the site's copy */ }
@@ -457,10 +458,10 @@
   function ruleSentence(rules = {}) {
     const n = rules.approvals_needed ?? 1;
     let text = n === 1
-      ? "One member's approval adopts a proposal, unless at least as many members reject it."
-      : `A proposal is adopted once ${n} members approve it, as long as more members approve than reject it.`;
+      ? "One maintainer's approval adopts a proposal, unless at least as many maintainers disapprove it."
+      : `A proposal is adopted once ${n} maintainers approve it, as long as more approve than disapprove it.`;
     if (rules.hours_open_before_adoption) text += ` It stays open for at least ${rules.hours_open_before_adoption} hours first.`;
-    if (rules.members_may_approve_their_own_proposals === false) text += " Members can't approve their own proposals.";
+    if (rules.maintainers_may_approve_their_own_proposals === false) text += " Maintainers can't approve their own proposals.";
     return text;
   }
 
@@ -470,11 +471,11 @@
     const need = rules.approvals_needed ?? 1;
     const approvals = (p.votes || []).filter((v) => v.vote === "approve").length;
     return {
-      new: ["New", `Received. New proposals are checked every ${CHECK_EVERY}.`],
-      open: ["Open for votes", `${approvals} of ${plural(need, "member approval")} so far`],
+      new: ["New", `Received. It reaches the maintainers within ${CHECK_EVERY}.`],
+      open: ["Waiting for a maintainer", need > 1 ? `${approvals} of ${need} approvals so far` : ""],
       "needs-fix": ["Needs a fix", p.note],
       adopted: ["Adopted", `In version ${p.version}${p.decided ? `, ${formatDate(p.decided)}` : ""}`],
-      declined: ["Declined", p.decided ? formatDate(p.decided) : ""],
+      declined: ["Disapproved", p.decided ? formatDate(p.decided) : ""],
       withdrawn: ["Withdrawn", p.note],
       "cannot-apply": ["Can't be applied", p.note],
     }[p.status] || [p.status, ""];
@@ -519,13 +520,13 @@
     const names = (kind) => votes.filter((v) => v.vote === kind).map((v) => `${v.name} (${v.via}, ${formatDate(v.when)})`).join(", ");
     const parts = [];
     if (names("approve")) parts.push(h("span", {}, h("strong", { text: "Approved by " }), names("approve")));
-    if (names("reject")) parts.push(h("span", {}, h("strong", { text: "Rejected by " }), names("reject")));
+    if (names("reject")) parts.push(h("span", {}, h("strong", { text: "Disapproved by " }), names("reject")));
     if (p.support) parts.push(h("span", { text: `${plural(p.support, "reader")} in favor` }));
-    if (p.stale_votes) parts.push(h("span", { text: `${plural(p.stale_votes, "member")} voted before the proposal was last edited and must vote again` }));
+    if (p.stale_votes) parts.push(h("span", { text: `${plural(p.stale_votes, "maintainer")} voted before the proposal was last edited and must vote again` }));
     return parts.length ? h("p", { class: "votes" }, ...joined(parts)) : null;
   }
 
-  function proposalCard(p, cfg, rules, replies) {
+  function proposalCard(p, cfg, rules, replies, extra = null) {
     const [label, detail] = proposalStatus(p, rules);
     const count = replies.get(p.id) || 0;
     const open = !FINAL.includes(p.status);
@@ -544,61 +545,73 @@
       ].filter(Boolean))),
       votesView(p),
       h("p", { class: "proposal-links" }, ...joined([
-        external(open ? (count ? `Vote or discuss (${plural(count, "reply", "replies")})` : "Vote or discuss") :
+        external(open ? (count ? `Comment on it (${plural(count, "reply", "replies")})` : "Comment on it") :
           (count ? `Read the discussion (${plural(count, "reply", "replies")})` : "Read the proposal"), p.link),
         p.issue ? external(`GitHub issue #${p.issue}`, `https://github.com/${cfg.repo}/issues/${p.issue}`) : null,
-      ].filter(Boolean))));
+      ].filter(Boolean))),
+      extra);
   }
 
-  async function showProposals(cfg, governance, ledger, section) {
-    const rules = governance?.rules || {};
+  // Every proposal: from the robot's record, plus any made since it last looked.
+  async function loadProposals(cfg, governance, ledger) {
     const records = ledger?.proposals || [];
     const rows = await liveComments(cfg);
     const replies = new Map();
     for (const row of rows) if (row.references) replies.set(row.references[0], (replies.get(row.references[0]) || 0) + 1);
     const fresh = newProposals(rows, new Set(records.map((r) => r.id)), governance);
     const newest = (a, b) => (b.created || "").localeCompare(a.created || "");
-    const open = [...fresh, ...records.filter((r) => !FINAL.includes(r.status))].sort(newest);
-    const decided = records.filter((r) => FINAL.includes(r.status))
-      .sort((a, b) => (b.decided || b.created || "").localeCompare(a.decided || a.created || ""));
+    const latestDecision = (a, b) => (b.decided || b.created || "").localeCompare(a.decided || a.created || "");
+    return {
+      replies,
+      open: [...fresh, ...records.filter((r) => !FINAL.includes(r.status))].sort(newest),
+      adopted: records.filter((r) => r.status === "adopted").sort(latestDecision),
+      closed: records.filter((r) => FINAL.includes(r.status) && r.status !== "adopted").sort(latestDecision),
+    };
+  }
 
+  async function showProposals(cfg, governance, ledger, section) {
+    const rules = governance?.rules || {};
+    const { replies, open, adopted, closed } = await loadProposals(cfg, governance, ledger);
     section.replaceChildren(
       h("h2", { text: "Proposals" }),
-      h("p", { text: `${ruleSentence(rules)} The robot that counts votes runs every ${CHECK_EVERY}; a vote on a proposal's GitHub issue is counted within a minute or two.` }));
-    if (!open.length) section.append(h("p", { class: "empty" }, "No proposals are open right now. ", h("a", { href: "#propose", text: "Make one" }), "."));
-    else section.append(h("h3", { text: `Open (${open.length})` }), ...open.map((p) => proposalCard(p, cfg, rules, replies)));
-    if (decided.length) {
-      const shown = decided.slice(0, 8), rest = decided.slice(8);
-      section.append(h("h3", { text: `Decided (${decided.length})` }), ...shown.map((p) => proposalCard(p, cfg, rules, replies)));
-      if (rest.length) section.append(h("details", { class: "more" }, h("summary", { text: `Show ${plural(rest.length, "earlier decision")}` }),
+      h("p", {}, "Each proposed change waits for the ", h("a", { href: at("maintainers/"), text: "maintainers" }),
+        `, who approve or disapprove it. ${ruleSentence(rules)} An approved change is published as a new version within a minute or two.`));
+    if (!open.length) section.append(h("p", { class: "empty" }, "No proposals are waiting right now. ", h("a", { href: "#propose", text: "Make one" }), "."));
+    else section.append(h("h3", { text: `Waiting for a maintainer (${open.length})` }), ...open.map((p) => proposalCard(p, cfg, rules, replies)));
+    if (adopted.length) {
+      const shown = adopted.slice(0, 8), rest = adopted.slice(8);
+      section.append(h("h3", { text: `Adopted (${adopted.length})` }), ...shown.map((p) => proposalCard(p, cfg, rules, replies)));
+      if (rest.length) section.append(h("details", { class: "more" }, h("summary", { text: `Show ${plural(rest.length, "earlier change")}` }),
         ...rest.map((p) => proposalCard(p, cfg, rules, replies))));
     }
-    section.append(h("p", { class: "muted" }, "Every proposal, vote, and outcome is recorded in ",
-      external(LEDGER_PATH, repoFile(cfg, LEDGER_PATH)), " and kept in the history."));
+    section.append(h("p", { class: "muted" }, "Proposals that maintainers disapprove, and ones that are withdrawn or can't be applied, move to the ",
+      h("a", { href: at("declined/"), text: "Declined page" }), closed.length ? ` (${closed.length} so far)` : "",
+      ". Every proposal, vote, and outcome is also recorded in ", external(LEDGER_PATH, repoFile(cfg, LEDGER_PATH)), "."));
 
     const count = $("#proposal-count");
     if (count) {
       count.replaceChildren(open.length
-        ? h("a", { href: "#proposals" }, `${plural(open.length, "proposal is", "proposals are")} open for votes. See ${open.length === 1 ? "it" : "them"} below the text.`)
-        : decided.length ? h("a", { href: "#proposals", text: "No proposals are open right now. See past decisions below the text." })
+        ? h("a", { href: "#proposals" }, `${plural(open.length, "proposal is", "proposals are")} waiting for a maintainer. See ${open.length === 1 ? "it" : "them"} below the text.`)
+        : adopted.length || closed.length ? h("a", { href: "#proposals", text: "No proposals are waiting right now. See past decisions below the text." })
           : h("span", { text: "No proposals yet. Yours could be the first." }));
     }
   }
 
-  function membersView(cfg, governance) {
-    const members = governance?.members || [];
-    const how = (m) => [m.hypothesis && `${m.hypothesis} on Hypothesis`, m.github && `${m.github} on GitHub`].filter(Boolean).join(" or ");
-    return h("section", { class: "versions", id: "members" },
-      h("h2", { text: "Members" }),
-      h("p", { text: `Members vote on proposals: they reply Approve or Reject to a proposal in the comments, or comment /approve or /reject on its GitHub issue. ${ruleSentence(governance?.rules)} Only a member's latest vote counts.` }),
-      h("ul", { class: "member-list" }, ...members.map((m) => h("li", {},
-        h("strong", { text: m.name }),
-        m.role === "maintainer" ? h("span", { class: "badge badge-soft", text: "maintainer" }) : null,
-        h("span", { class: "muted", text: ` · votes as ${how(m)}${m.since ? ` · since ${formatDate(m.since)}` : ""}` })))),
-      h("p", { class: "muted" }, "Maintainers add members and set the rules in ", external(MEMBERS_PATH, repoFile(cfg, MEMBERS_PATH)),
-        ", and every change to that list is public. To become a member, ask a maintainer", cfg.community ? [" (for example, in the ",
-          h("a", { href: at("join/"), text: "community's Google group" }), ")"] : "", ". The whole process is described in ",
-        external("GOVERNANCE.md", repoFile(cfg, "GOVERNANCE.md")), "."));
+  function maintainerList(governance) {
+    const how = (m) => [m.github && `${m.github} on GitHub`, m.hypothesis && `${m.hypothesis} on Hypothesis`].filter(Boolean).join(", ");
+    return h("ul", { class: "member-list" }, ...(governance?.maintainers || []).map((m) => h("li", {},
+      h("strong", { text: m.name }),
+      m.role && m.role !== "maintainer" ? h("span", { class: "badge badge-soft", text: m.role }) : null,
+      h("span", { class: "muted", text: ` · ${how(m)}${m.since ? ` · since ${formatDate(m.since)}` : ""}` }))));
+  }
+
+  // In the Drafter: who decides, and where to read more.
+  function maintainersNote(governance) {
+    const names = (governance?.maintainers || []).map((m) => m.name);
+    return h("aside", { class: "note" },
+      h("p", {}, h("strong", { text: "Who decides? " }),
+        `The maintainers${names.length ? ` (${names.join(", ")})` : ""} approve or disapprove each proposal. Anyone else can comment, and propose changes, but can't change the text.`),
+      h("p", {}, secondary("How it works, and the maintainers", at("maintainers/"))));
   }
 
   // ---------- Pages ----------
@@ -607,7 +620,7 @@
     return h("aside", { class: "note" },
       h("p", {}, h("strong", { text: "Nothing here is final. " }),
         "This is a comment draft. Anyone can propose a change in the ", h("a", { href: at("draft/"), text: "Drafter" }),
-        ". Members vote, and each approved change is published as a new version, with its own number and fingerprint."),
+        ". The maintainers approve or disapprove each proposal, and each approved change is published as a new version, with its own number and fingerprint."),
       h("p", {}, button("Open the Drafter", at("draft/"))));
   }
 
@@ -667,14 +680,15 @@
   function drafterIntro(governance) {
     return h("section", { class: "intro" },
       h("h1", { text: "Drafter" }),
-      h("p", { class: "lede", text: "Anyone can propose a change to AGENTS.md here. Members vote on each proposal, and every approved change is published right away as a new version." }),
+      h("p", { class: "lede", text: "Anyone can comment on AGENTS.md here, and propose changes. The maintainers approve or disapprove each proposal, and every approved change is published right away as a new version." }),
       h("ol", { class: "steps" },
         h("li", {}, h("strong", { text: "Propose. " }), "Select words in the text, choose ", h("em", { text: "Annotate" }),
           ", and write one of the commands below. It uses ", external("Hypothesis", "https://web.hypothes.is/start"),
           ", which asks for a free account. You don't need GitHub."),
-        h("li", {}, h("strong", { text: "Members vote. " }), "A member replies ", h("em", { text: "Approve" }), " or ",
-          h("em", { text: "Reject" }), " to your proposal. ", ruleSentence(governance?.rules)),
-        h("li", {}, h("strong", { text: "It's published. " }), `Within about ${CHECK_EVERY} of approval, the change is made and published as a new version with its own number and fingerprint. Every proposal, vote, and version is kept, so nothing is ever lost.`)),
+        h("li", {}, h("strong", { text: "A maintainer decides. " }), "The ", h("a", { href: at("maintainers/"), text: "maintainers" }),
+          " approve or disapprove each proposal. ", ruleSentence(governance?.rules)),
+        h("li", {}, h("strong", { text: "It's published, or set aside. " }), "An approved change is published within a minute or two as a new version, with its own number and fingerprint. A disapproved one moves to the ",
+          h("a", { href: at("declined/"), text: "Declined page" }), ". Every proposal, decision, and version is kept, so nothing is ever lost.")),
       commandGuide(),
       h("p", { class: "proposal-count", id: "proposal-count" }));
   }
@@ -682,7 +696,7 @@
   async function showDrafter(cfg) {
     if (rev) return showRevision(cfg, rev);
     const [governance, ledger, { markdown, commit }] = await Promise.all([
-      loadRecord(cfg, MEMBERS_PATH), loadRecord(cfg, LEDGER_PATH), loadDraft(cfg)]);
+      loadRecord(cfg, MAINTAINERS_PATH), loadRecord(cfg, LEDGER_PATH), loadDraft(cfg)]);
     $("#intro").replaceChildren(drafterIntro(governance));
     const version = stampedVersion(markdown) || cfg.latest;
     const changed = commit
@@ -692,7 +706,7 @@
       [button("Propose a change", "#propose"), secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton(), rawToggle()]);
     renderMarkdown(markdown);
     const proposals = h("section", { class: "versions proposals", id: "proposals" }, h("h2", { text: "Proposals" }), h("p", { class: "loading", text: "Loading proposals…" }));
-    $("#after").replaceChildren(proposals, membersView(cfg, governance), communityNote(cfg) || "");
+    $("#after").replaceChildren(proposals, maintainersNote(governance), communityNote(cfg) || "");
     setCanonical(at("draft/"));
     loadHypothesis();
     await Promise.all([showProposals(cfg, governance, ledger, proposals), showEveryVersion(cfg)]);
@@ -872,6 +886,190 @@
     addCopyButtons($("#after"));
   }
 
+  // ---------- Maintainers ----------
+  // Maintainers sign in with a GitHub key (a personal access token) that stays in their browser. The page uses it
+  // only to post their vote on the proposal's GitHub issue, opening the issue first if the robot hasn't yet. The
+  // robot then checks that the voter is on the list of maintainers and acts on the vote.
+
+  const KEY_STORE = "els-maintainer-key";
+  const KEY_FOR_LEAD = "https://github.com/settings/personal-access-tokens/new";
+  const KEY_FOR_OTHERS = "https://github.com/settings/tokens/new?scopes=public_repo&description=AGENTS.md%20for%20Empirical%20Legal%20Scholars%20maintainer";
+
+  function storedKey() {
+    try { return sessionStorage.getItem(KEY_STORE) || localStorage.getItem(KEY_STORE); } catch { return null; }
+  }
+  function storeKey(key, stay = false) {
+    try {
+      sessionStorage.removeItem(KEY_STORE);
+      localStorage.removeItem(KEY_STORE);
+      if (key) (stay ? localStorage : sessionStorage).setItem(KEY_STORE, key);
+    } catch { /* storage blocked: signed in for this page only */ }
+  }
+
+  async function githubAs(key, method, path, body) {
+    const res = await fetch(`https://api.github.com${path}`, {
+      method, cache: "no-store", body: body ? JSON.stringify(body) : undefined,
+      headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${key}`, "X-GitHub-Api-Version": "2022-11-28",
+        ...(body ? { "Content-Type": "application/json" } : {}) },
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(detail.message || `GitHub answered ${res.status}`), { status: res.status });
+    }
+    return res.status === 204 ? null : res.json();
+  }
+
+  // The proposal's GitHub issue: the robot's, or one this page opens (with the marker the robot looks for).
+  async function issueFor(cfg, key, p) {
+    if (p.issue) return p.issue;
+    const marker = `<!-- proposal:${p.id} -->`;
+    for (let page = 1; page <= 5; page++) {
+      const issues = await githubAs(key, "GET", `/repos/${cfg.repo}/issues?state=all&per_page=100&page=${page}`);
+      const found = issues.find((issue) => (issue.body || "").includes(marker));
+      if (found) return found.number;
+      if (issues.length < 100) break;
+    }
+    const made = await githubAs(key, "POST", `/repos/${cfg.repo}/issues`, {
+      title: `Proposal: ${KIND_LABELS[p.kind] || "Change"} “${squash(p.old).slice(0, 48)}”`,
+      body: `A proposal from the Drafter by ${p.proposer?.name || "a reader"}, filed on the Maintainers page so it can be decided. The robot adds the details.\n\n${marker}`,
+      labels: ["proposal"],
+    });
+    return made.number;
+  }
+
+  // After a vote, watch the issue: the robot closes it with the outcome.
+  async function outcomeOf(cfg, key, number) {
+    for (let i = 0; i < 24; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10000));
+      try {
+        const issue = await githubAs(key, "GET", `/repos/${cfg.repo}/issues/${number}`);
+        if (issue.state === "closed") return issue.state_reason === "completed" ? "adopted" : "declined";
+      } catch { /* try again */ }
+    }
+    return null;
+  }
+
+  function voteButtons(cfg, key, p) {
+    const status = h("p", { class: "vote-status", "aria-live": "polite" });
+    const say = (text, kind = "") => { status.className = `vote-status ${kind}`; status.textContent = text; };
+    const approve = action("Approve", () => cast("approve"), "button");
+    const disapprove = action("Disapprove", () => cast("reject"), "button secondary");
+    if (p.status === "needs-fix") { approve.disabled = true; approve.title = "It needs a fix before it can be approved"; }
+    async function cast(vote) {
+      approve.disabled = disapprove.disabled = true;
+      try {
+        say(vote === "approve" ? "Approving…" : "Disapproving…");
+        const number = await issueFor(cfg, key, p);
+        await githubAs(key, "POST", `/repos/${cfg.repo}/issues/${number}/comments`,
+          { body: `/${vote}\n\n${vote === "approve" ? "Approved" : "Disapproved"} on the Maintainers page.` });
+        say(vote === "approve" ? "Approved. The robot is publishing it as a new version (usually a minute or two)…"
+          : "Disapproved. The robot is moving it to the Declined page (usually a minute or two)…", "pending");
+        const outcome = await outcomeOf(cfg, key, number);
+        if (outcome === "adopted") say("Done: it's published as a new version. Reload the Drafter to see it.", "done");
+        else if (outcome === "declined") say("Done: it's on the Declined page.", "done");
+        else say("Your vote is in. The robot hasn't finished yet; reload this page in a few minutes to see the result.", "pending");
+      } catch (error) {
+        say(`That didn't work: ${error.message}`, "failed");
+        approve.disabled = p.status === "needs-fix";
+        disapprove.disabled = false;
+      }
+    }
+    return h("div", { class: "vote" }, h("p", { class: "vote-buttons" }, approve, " ", disapprove), status);
+  }
+
+  function showSignIn(cfg, governance, ledger, section, problem = "") {
+    const input = h("input", { type: "password", class: "key-input", autocomplete: "off", spellcheck: "false",
+      placeholder: "Paste your key here", "aria-label": "Your GitHub key" });
+    const stay = h("input", { type: "checkbox", id: "stay-signed-in" });
+    const go = () => {
+      const key = input.value.trim();
+      if (!key) return input.focus();
+      storeKey(key, stay.checked);
+      showReview(cfg, governance, ledger, section, key);
+    };
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") go(); });
+    section.replaceChildren(
+      h("h2", { text: "Approve or disapprove proposals" }),
+      h("p", { text: "Maintainers sign in here with a key from GitHub. The key stays in this browser, and your votes are posted on GitHub under your name. Readers don't need to sign in: they comment in the Drafter." }),
+      problem ? h("p", { class: "error", text: problem }) : "",
+      h("ol", { class: "signin-steps" },
+        h("li", {}, h("strong", { text: "Create a key on GitHub. " }),
+          "The lead maintainer: ", external("create a fine-grained key", KEY_FOR_LEAD),
+          ", choose “Only select repositories” and pick ", h("code", { text: cfg.repo.split("/")[1] }),
+          ", then under Repository permissions set Issues to “Read and write.” Other maintainers: ",
+          external("create a classic key", KEY_FOR_OTHERS), " (the form is filled in for you). Either way, choose how long it lasts (90 days is fine), choose Generate token, and copy the key."),
+        h("li", {}, h("strong", { text: "Paste it here and sign in. " }), h("span", { class: "key-row" }, input, action("Sign in", go, "button"))),
+        h("li", {}, h("label", { for: "stay-signed-in" }, stay, " Stay signed in on this computer. Otherwise you're signed out when you close this tab."))),
+      h("p", { class: "muted", text: "The key lets this page post comments on GitHub for you, and it's sent only to GitHub. Anyone who has it could do the same, so don't share it. You can delete it any time in GitHub's settings." }));
+  }
+
+  async function showReview(cfg, governance, ledger, section, key = storedKey()) {
+    if (!key) return showSignIn(cfg, governance, ledger, section);
+    section.replaceChildren(h("h2", { text: "Approve or disapprove proposals" }), h("p", { class: "loading", text: "Signing in…" }));
+    let user;
+    try {
+      user = await githubAs(key, "GET", "/user");
+    } catch (error) {
+      storeKey(null);
+      return showSignIn(cfg, governance, ledger, section, error.status === 401
+        ? "GitHub didn't accept that key. It may have expired or been mistyped; create a new one." : `Couldn't sign in: ${error.message}`);
+    }
+    const me = (governance?.maintainers || []).find((m) => m.github && m.github.toLowerCase() === user.login.toLowerCase());
+    const { replies, open } = await loadProposals(cfg, governance, ledger);
+    section.replaceChildren(
+      h("h2", { text: "Approve or disapprove proposals" }),
+      h("p", { class: `signed-in${me ? "" : " not-maintainer"}` }, "Signed in as ", h("strong", { text: user.name || user.login }),
+        ` (${user.login} on GitHub)`, me ? ", a maintainer. " : ". That account isn't on the list of maintainers, so its votes won't count. ",
+        action("Sign out", () => { storeKey(null); showSignIn(cfg, governance, ledger, section); }, "button secondary small")));
+    if (!open.length) return section.append(h("p", { class: "empty", text: "Nothing is waiting for a decision right now." }));
+    section.append(h("p", { class: "muted", text: `${plural(open.length, "proposal is", "proposals are")} waiting. Your vote is posted on the proposal's GitHub issue under your name, and the robot acts on it, usually within a minute or two. ${ruleSentence(governance?.rules)}` }));
+    for (const p of open) section.append(proposalCard(p, cfg, governance?.rules || {}, replies, voteButtons(cfg, key, p)));
+  }
+
+  async function showMaintainers(cfg) {
+    $(".file").hidden = true;
+    const [governance, ledger] = await Promise.all([loadRecord(cfg, MAINTAINERS_PATH), loadRecord(cfg, LEDGER_PATH)]);
+    const rules = governance?.rules || {};
+    $("#intro").replaceChildren(h("section", { class: "intro" },
+      h("h1", { text: "Maintainers" }),
+      h("p", { class: "lede", text: "Anyone can comment on AGENTS.md. The maintainers decide which proposed changes go in: they approve or disapprove each one, and every approved change is published as a new version." }),
+      h("ol", { class: "steps" },
+        h("li", {}, h("strong", { text: "Anyone comments. " }), "Readers comment in the ", h("a", { href: at("draft/"), text: "Drafter" }),
+          ". A comment that starts with Delete, Replace with:, Add after:, or Add rule: proposes a change. Readers can't change the text themselves."),
+        h("li", {}, h("strong", { text: "A maintainer decides. " }), `Each proposal waits for a maintainer to approve or disapprove it, here on this page. ${ruleSentence(rules)}`),
+        h("li", {}, h("strong", { text: "Approved: a new version. " }), "Within a minute or two, the change is made and published as a new version, with its own number and fingerprint. The record says who proposed it and who approved it."),
+        h("li", {}, h("strong", { text: "Disapproved: set aside. " }), "It leaves the Drafter's list and moves to the ",
+          h("a", { href: at("declined/"), text: "Declined page" }), ", where it's kept for the record."))));
+    const review = h("section", { class: "versions", id: "review" });
+    $("#after").replaceChildren(
+      h("section", { class: "versions", id: "maintainers" },
+        h("h2", { text: "The maintainers" }),
+        maintainerList(governance),
+        h("p", {}, "Maintainers can change the text too: they propose a change like anyone else, then approve it. The lead maintainer can also edit the text directly, and keeps this list in ",
+          external(MAINTAINERS_PATH, repoFile(cfg, MAINTAINERS_PATH)), ", where every change is public."),
+        h("p", { class: "muted" }, "To become a maintainer, ask the lead maintainer", cfg.community ? [", for example in the ",
+          h("a", { href: at("join/"), text: "community's Google group" })] : "", ". The full rules are in ",
+          external("GOVERNANCE.md", repoFile(cfg, "GOVERNANCE.md")), ".")),
+      review);
+    await showReview(cfg, governance, ledger, review);
+    highlightTarget(true);
+  }
+
+  async function showDeclined(cfg) {
+    $(".file").hidden = true;
+    const [governance, ledger] = await Promise.all([loadRecord(cfg, MAINTAINERS_PATH), loadRecord(cfg, LEDGER_PATH)]);
+    $("#intro").replaceChildren(h("section", { class: "intro" },
+      h("h1", { text: "Declined proposals" }),
+      h("p", { class: "lede", text: "Proposed changes that the maintainers disapproved, or that were withdrawn or couldn't be applied. They're kept here for the record and no longer appear in the Drafter's list." })));
+    const list = h("section", { class: "versions proposals" }, h("p", { class: "loading", text: "Loading…" }));
+    $("#after").replaceChildren(list);
+    const { replies, closed } = await loadProposals(cfg, governance, ledger);
+    list.replaceChildren(...(closed.length ? closed.map((p) => proposalCard(p, cfg, governance?.rules || {}, replies))
+      : [h("p", { class: "empty", text: "Nothing has been declined yet." })]),
+      h("p", { class: "muted" }, "A proposal's comment stays with the person who wrote it, so it can still appear in the Drafter's comment sidebar. ",
+        h("a", { href: at("draft/"), text: "Back to the Drafter" }), "."));
+  }
+
   // ---------- Join the community ----------
 
   function addressLine(address, label) {
@@ -917,7 +1115,7 @@
         h("p", {}, "You can also read and reply to conversations ", external("on Google Groups", group.page), ". To leave, send an email to ",
           h("code", { text: groupAddress(cfg, "+unsubscribe") }), "."),
         h("p", { class: "muted" }, "The group is for conversation. To change AGENTS.md itself, propose the change in the ",
-          h("a", { href: at("draft/"), text: "Drafter" }), ", where members vote on it."))));
+          h("a", { href: at("draft/"), text: "Drafter" }), ", where the maintainers decide on it."))));
   }
 
   function showFooter(cfg) {
@@ -926,7 +1124,7 @@
       h("p", {}, ...joined([
         external("Source on GitHub", `https://github.com/${cfg.repo}`),
         external("Changelog", repoFile(cfg, "CHANGELOG.md")),
-        external("How decisions are made", repoFile(cfg, "GOVERNANCE.md")),
+        h("a", { href: at("maintainers/"), text: "How changes are approved" }),
         cfg.community ? h("a", { href: at("join/"), text: "Join the group" }) : null,
         h("a", { href: at("check/"), text: "Check a copy" }),
         h("a", { href: at("llms.txt"), text: "llms.txt" }),
@@ -935,7 +1133,8 @@
 
   async function main() {
     setupReaderControls();
-    const views = { published: showPublished, drafter: showDrafter, archive: showArchive, check: showCheck, join: showJoin };
+    const views = { published: showPublished, drafter: showDrafter, archive: showArchive, check: showCheck, join: showJoin,
+      maintainers: showMaintainers, declined: showDeclined };
     try {
       const cfg = JSON.parse(await fetchText(at("versions.json")));
       if (cfg.fingerprint) fingerprintSettings = { ...fingerprintSettings, ...cfg.fingerprint };

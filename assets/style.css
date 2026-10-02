@@ -566,6 +566,28 @@ details.more summary { margin: 0.4rem 0 0.8rem; color: var(--accent); font-weigh
 .line-diff del, .line-diff ins { overflow-wrap: anywhere; }
 table.fingerprints td:first-child { font-weight: 600; white-space: nowrap; }
 
+/* Maintainers: sign-in and votes */
+.button.small { padding: 0.18rem 0.65rem; font-size: 0.8rem; }
+.button:disabled { opacity: 0.45; cursor: default; filter: none; }
+.signed-in { padding: 0.7rem 0.9rem; border: 1px solid var(--rule); border-left: 3px solid var(--good); border-radius: 10px; background: var(--good-soft); }
+.signed-in.not-maintainer { border-left-color: var(--warn); background: var(--warn-soft); }
+.signed-in .button { margin-left: 0.3rem; vertical-align: 0.05em; }
+.signin-steps { margin: 0.6rem 0 0.9rem; padding-left: 1.3rem; font-family: var(--serif); line-height: 1.6; }
+.signin-steps li { margin: 0.55rem 0; }
+.signin-steps strong { font-family: var(--sans); font-weight: 600; }
+.signin-steps code { font-family: var(--mono); font-size: 0.85em; }
+.signin-steps label { cursor: pointer; }
+.key-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.4rem; }
+.key-input { flex: 1 1 16rem; min-width: 0; padding: 0.45rem 0.7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: 0.85rem var(--mono); }
+.key-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.vote { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--rule); }
+.vote-buttons { margin: 0 !important; }
+.vote-status { margin: 0.45rem 0 0 !important; font-size: 0.9rem; }
+.vote-status:empty { display: none; }
+.vote-status.pending { color: var(--muted); }
+.vote-status.done { color: var(--good); font-weight: 600; }
+.vote-status.failed { color: var(--bad); }
+
 /* Join the community */
 .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; margin-top: 1.4rem; }
 @media (max-width: 640px) { .ways { grid-template-columns: minmax(0, 1fr); } }

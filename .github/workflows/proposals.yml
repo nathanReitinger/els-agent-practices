@@ -1,15 +1,15 @@
 name: Proposals
-# Counts members' votes on the changes proposed in the Drafter, and publishes each approved change
+# Counts maintainers' votes on the changes proposed in the Drafter, and publishes each approved change
 # as a new version. The robot is scripts/proposals.py; the rules are in GOVERNANCE.md.
 
 on:
   schedule:
     - cron: "7-59/15 * * * *"  # every 15 minutes (GitHub sometimes runs these late)
-  issue_comment:  # a member voted on a proposal's issue
+  issue_comment:  # a maintainer voted on a proposal's issue
     types: [created, edited]
-  push:  # a maintainer changed the text or the members
+  push:  # a maintainer changed the text or the list of maintainers
     branches: [main]
-    paths: ["draft/AGENTS.md", "governance/members.json"]
+    paths: ["draft/AGENTS.md", "governance/maintainers.json"]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -30,7 +30,7 @@ jobs:
   proposals:
     if: >-
       github.event_name != 'issue_comment' ||
-      (contains(github.event.issue.labels.*.name, 'proposal') && github.event.comment.user.type != 'Bot')
+      (contains(github.event.issue.body, '<!-- proposal:') && github.event.comment.user.type != 'Bot')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

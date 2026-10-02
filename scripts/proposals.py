@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The proposals robot: counts members' votes on proposed changes and publishes the approved ones.
+"""The proposals robot: counts maintainers' votes on proposed changes and publishes the approved ones.
 
     python3 scripts/proposals.py --dry-run   # say what would happen, and change nothing
     python3 scripts/proposals.py             # make the changes and commit them in this copy
@@ -15,7 +15,7 @@ Each run:
    that starts with a command (Delete, Replace with:, Add after:, Add rule:) is a
    proposal; a reply that starts with Approve or Reject is a vote (scripts/commands.py).
 4. Checks each open proposal against the current text (scripts/edits.py) and counts
-   the votes of the members in governance/members.json. Members can also vote by
+   the votes of the maintainers in governance/maintainers.json. Maintainers can also vote by
    commenting /approve or /reject on the proposal's GitHub issue.
 5. Applies each approved proposal and publishes it as the next version
    (scripts/release.py), one version per proposal, each with its own commit and tag.
@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DRAFT = ROOT / "draft" / "AGENTS.md"
 LATEST = ROOT / "latest" / "AGENTS.md"
 MANIFEST = ROOT / "versions.json"
-MEMBERS = ROOT / "governance" / "members.json"
+MAINTAINERS = ROOT / "governance" / "maintainers.json"
 LEDGER = ROOT / "governance" / "proposals.json"
 WRITTEN = ["draft/AGENTS.md", "latest", "versions", "versions.json", "CHANGELOG.md", "governance/proposals.json"]
 
@@ -128,10 +128,10 @@ def commit(message: str, author: str | None = None) -> None:
     git("commit", "--quiet", "-m", message, *(["--author", author] if author else []), env=bot)
 
 
-# ---------- Members and rules ----------
+# ---------- Maintainers and rules ----------
 
 @dataclass(frozen=True)
-class Member:
+class Maintainer:
     name: str
     role: str
     hypothesis: str
@@ -143,32 +143,32 @@ class Governance:
         try:
             rules = data["rules"]
             self.approvals_needed = int(rules["approvals_needed"])
-            self.self_approval = bool(rules["members_may_approve_their_own_proposals"])
+            self.self_approval = bool(rules["maintainers_may_approve_their_own_proposals"])
             self.hours_open = float(rules.get("hours_open_before_adoption", 0))
             self.count_from = parse_time(rules["proposals_count_from"])
-            self.members = [Member(m["name"], m.get("role", "member"), m.get("hypothesis") or "", m.get("github") or "")
-                            for m in data["members"]]
+            self.maintainers = [Maintainer(m["name"], m.get("role", "maintainer"), m.get("hypothesis") or "",
+                                           m.get("github") or "") for m in data["maintainers"]]
             ignored = data.get("ignored_accounts", {})
             self.ignored_hypothesis = {u.lower() for u in ignored.get("hypothesis", [])}
             self.ignored_github = {u.lower() for u in ignored.get("github", [])}
         except (KeyError, TypeError, ValueError) as error:
-            raise SystemExit(f"governance/members.json isn't in the expected form ({error!r}); see GOVERNANCE.md")
-        if self.approvals_needed < 1 or not self.members:
-            raise SystemExit("governance/members.json needs at least one member and approvals_needed of at least 1")
-        if any(not (m.hypothesis or m.github) for m in self.members):
-            raise SystemExit("every member in governance/members.json needs a Hypothesis or GitHub username")
+            raise SystemExit(f"governance/maintainers.json isn't in the expected form ({error!r}); see GOVERNANCE.md")
+        if self.approvals_needed < 1 or not self.maintainers:
+            raise SystemExit("governance/maintainers.json needs at least one maintainer and approvals_needed of at least 1")
+        if any(not (m.hypothesis or m.github) for m in self.maintainers):
+            raise SystemExit("every maintainer in governance/maintainers.json needs a Hypothesis or GitHub username")
 
-    def by_hypothesis(self, user: str) -> Member | None:
+    def by_hypothesis(self, user: str) -> Maintainer | None:
         name = username(user).lower()
-        return next((m for m in self.members if m.hypothesis and m.hypothesis.lower() == name), None)
+        return next((m for m in self.maintainers if m.hypothesis and m.hypothesis.lower() == name), None)
 
-    def by_github(self, login: str) -> Member | None:
-        return next((m for m in self.members if m.github and m.github.lower() == (login or "").lower()), None)
+    def by_github(self, login: str) -> Maintainer | None:
+        return next((m for m in self.maintainers if m.github and m.github.lower() == (login or "").lower()), None)
 
     def rule_sentence(self) -> str:
         n = self.approvals_needed
-        text = ("One member's approval adopts a proposal, unless at least as many members reject it." if n == 1 else
-                f"A proposal is adopted once {n} members approve it, as long as more members approve than reject it.")
+        text = ("One maintainer's approval adopts a proposal, unless at least as many maintainers disapprove it." if n == 1
+                else f"A proposal is adopted once {n} maintainers approve it, as long as more approve than disapprove it.")
         if self.hours_open:
             text += f" It stays open for at least {self.hours_open:g} hours first."
         return text
@@ -178,37 +178,37 @@ class Governance:
 
 @dataclass
 class Vote:
-    member: Member
+    maintainer: Maintainer
     vote: str
     when: dt.datetime
     via: str
     link: str
 
     def record(self) -> dict:
-        return {"name": self.member.name, "vote": self.vote, "when": self.when.isoformat(), "via": self.via,
+        return {"name": self.maintainer.name, "vote": self.vote, "when": self.when.isoformat(), "via": self.via,
                 "link": self.link}
 
 
 def count_votes(record: dict, replies: list[dict], comments: list[dict], gov: Governance) -> tuple[list[Vote], int, int]:
-    """Each member's latest vote cast since the proposal was last edited; readers in favor; votes made stale by an edit."""
+    """Each maintainer's latest vote cast since the proposal was last edited; readers in favor; votes made stale by an edit."""
     since = parse_time(record["updated"])
     proposer = record["proposer"]["hypothesis"].lower()
     latest: dict[str, Vote] = {}
     stale: set[str] = set()
     support: set[str] = set()
 
-    def consider(member: Member | None, vote: str, when: dt.datetime, via: str, link: str, voter: str) -> None:
-        if member is None:
+    def consider(maintainer: Maintainer | None, vote: str, when: dt.datetime, via: str, link: str, voter: str) -> None:
+        if maintainer is None:
             if vote == "approve":
                 support.add(voter)
             return
         if when < since:
-            stale.add(member.name)
+            stale.add(maintainer.name)
             return
-        if vote == "approve" and not gov.self_approval and member.hypothesis.lower() == proposer:
+        if vote == "approve" and not gov.self_approval and maintainer.hypothesis.lower() == proposer:
             return
-        if member.name not in latest or when > latest[member.name].when:
-            latest[member.name] = Vote(member, vote, when, via, link)
+        if maintainer.name not in latest or when > latest[maintainer.name].when:
+            latest[maintainer.name] = Vote(maintainer, vote, when, via, link)
 
     for reply in replies:
         vote = vote_of(reply.get("text", ""))
@@ -304,11 +304,18 @@ class GitHub:
             page += 1
 
     def proposal_issues(self) -> dict[str, dict]:
-        found = {}
-        for issue in self.pages("/issues?labels=proposal&state=all"):
+        """Every issue for a proposal, found by the marker in its text: the robot opens most of them, but the
+        Maintainers page opens one when a maintainer votes on a proposal the robot hasn't filed yet."""
+        found: dict[str, dict] = {}
+        self.duplicates: list[tuple[dict, dict]] = []
+        for issue in sorted(self.pages("/issues?state=all"), key=lambda i: i["number"]):
             match = re.search(r"<!-- proposal:([\w-]+) -->", issue.get("body") or "")
-            if match and "pull_request" not in issue:
-                found.setdefault(match.group(1), issue)
+            if not match or "pull_request" in issue:
+                continue
+            if match.group(1) in found:  # two filed at once: keep the first
+                self.duplicates.append((issue, found[match.group(1)]))
+            else:
+                found[match.group(1)] = issue
         return found
 
     def ensure_label(self) -> None:
@@ -318,7 +325,7 @@ class GitHub:
             if error.code != 404:
                 raise
             self.call("POST", "/labels", {"name": "proposal", "color": "8a2432",
-                                          "description": "A change proposed in the Drafter, waiting for members' votes"})
+                                          "description": "A change proposed in the Drafter, waiting for the maintainers"})
 
 
 # ---------- Showing a proposal ----------
@@ -394,7 +401,7 @@ def status_sentence(record: dict, gov: Governance) -> str:
         text = f"open for votes: {approvals} of {need} approval{'s' if need != 1 else ''} needed"
         return text + (f", {rejections} rejection{'s' if rejections != 1 else ''}." if rejections else ".")
     if status == "needs-fix":
-        return f"needs a fix before members can adopt it. {record.get('note', '')}"
+        return f"needs a fix before maintainers can adopt it. {record.get('note', '')}"
     if status == "adopted":
         return f"adopted in version {record['version']}."
     return {"declined": "declined.", "withdrawn": "withdrawn.", "cannot-apply": "closed: it can't be applied."}[status]
@@ -424,9 +431,10 @@ def issue_body(record: dict, gov: Governance, site: str) -> str:
         "",
         "---",
         "",
-        f"**Members:** reply `/approve` or `/reject` here (replying to the notification email works too), or reply "
+        f"**Maintainers:** approve or disapprove it on the [Maintainers page]({site}maintainers/), reply `/approve` or `/reject` "
+        "here (replying to the notification email works too), or reply "
         f"**Approve** or **Reject** to [the proposal in the Drafter]({record['link']}). {gov.rule_sentence()} "
-        "Only a member's latest vote counts, and votes cast before the proposal was last edited don't count.",
+        "Only a maintainer's latest vote counts, and votes cast before the proposal was last edited don't count.",
         "",
         f"<!-- proposal:{record['id']} -->",
     ]
@@ -465,7 +473,7 @@ class Robot:
         self.o = options
         self.events: list[str] = []
         self.tags: list[str] = []
-        self.gov = Governance(json.loads(MEMBERS.read_text()))
+        self.gov = Governance(json.loads(MAINTAINERS.read_text()))
         self.manifest = json.loads(MANIFEST.read_text())
         self.site = self.manifest["site"]
         self.drafter = f"{self.site}draft/"
@@ -611,7 +619,7 @@ class Robot:
         details = [
             f"- Proposed by {md(who['name'])} (Hypothesis: {md(who['hypothesis'])}) on {record['created'][:10]}"
             + (f": “{md(short(record['reason'], 300))}”" if record.get("reason") else ""),
-            "- Approved by " + ", ".join(f"{md(v.member.name)} ({v.via}, {v.when.date().isoformat()})" for v in approvals),
+            "- Approved by " + ", ".join(f"{md(v.maintainer.name)} ({v.via}, {v.when.date().isoformat()})" for v in approvals),
             f"- Proposal: <{record['link']}>{issue}",
         ]
         author_name = re.sub(r"[<>\n]", "", who["name"]).strip() or who["hypothesis"]
@@ -620,7 +628,7 @@ class Robot:
             f"Version {{version}}: {summary_of(record)}", "",
             f"Proposal: {record['link']}",
             f"Suggested-by: {author_name} (Hypothesis: {who['hypothesis']})",
-            *[f"Approved-by: {v.member.name} ({v.via})" for v in approvals],
+            *[f"Approved-by: {v.maintainer.name} ({v.via})" for v in approvals],
             "Fingerprint (Argon2id): {fingerprint}",
         ])
         entry = self.publish(summary_of(record), details, message, f"{author_name} <{author_mail}@hypothes.is.invalid>")
@@ -661,16 +669,16 @@ class Robot:
             comments = self.github.pages(f"/issues/{record['issue']}/comments") if self.github and record.get("issue") else []
             votes, support, stale = count_votes(record, replies.get(record["id"], []), comments, self.gov)
             record.update(votes=[v.record() for v in votes], support=support, stale_votes=stale)
-            if edit is None:
+            if record["status"] in FINAL:  # it can't be applied any more
                 continue
             decision = decide(record, votes, self.gov, self.now)
-            if decision == "adopt":
+            if decision == "decline":  # a proposal that still needs a fix can be disapproved too
+                record.update(status="declined", decided=self.now.isoformat())
+                self.say(f"Declined proposal {record['id']}: {phrase(record)}")
+            elif decision == "adopt" and edit is not None:
                 self.adopt(record, edit, votes)
                 text = DRAFT.read_text() if not self.o.dry_run else edit.source
                 adopted = True
-            elif decision == "decline":
-                record.update(status="declined", decided=self.now.isoformat())
-                self.say(f"Declined proposal {record['id']}: {phrase(record)}")
         if adopted:  # the text changed: bring the other proposals' status and preview up to date with it
             for record in pending:
                 if record["status"] in ("open", "needs-fix"):
@@ -715,6 +723,11 @@ class Robot:
         self.say(f"Pushed to GitHub{' with ' + ', '.join(self.tags) if self.tags else ''}.")
 
     def update_issues(self, records: dict[str, dict], issues: dict[str, dict]) -> None:
+        for duplicate, original in getattr(self.github, "duplicates", []):
+            if duplicate.get("state") != "closed":
+                self.github.call("POST", f"/issues/{duplicate['number']}/comments",
+                                 {"body": f"This is the same proposal as #{original['number']}; votes here are counted there too."})
+                self.github.call("PATCH", f"/issues/{duplicate['number']}", {"state": "closed", "state_reason": "not_planned"})
         for record in records.values():
             issue = issues.get(record["id"])
             if not issue or issue.get("state") == "closed":
@@ -731,8 +744,12 @@ class Robot:
                 self.say(f"Closed issue #{number}: {record['status']}.")
             else:
                 body = issue_body(record, self.gov, self.site)
-                if body != (issue.get("body") or ""):
-                    self.github.call("PATCH", f"/issues/{number}", {"body": body})
+                labels = [label["name"] if isinstance(label, dict) else label for label in issue.get("labels") or []]
+                changes = {"body": body} if body != (issue.get("body") or "") else {}
+                if "proposal" not in labels:  # opened on the Maintainers page by someone who can't set labels
+                    changes["labels"] = [*labels, "proposal"]
+                if changes:
+                    self.github.call("PATCH", f"/issues/{number}", changes)
 
 
 def main() -> None:

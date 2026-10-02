@@ -1,6 +1,6 @@
 # AGENTS.md for Empirical Legal Scholars
 
-> A general AGENTS.md for empirical legal research: standing instructions for AI coding agents working with empirical legal scholars. It assumes no folder layout. Versions 0.0.x are comment drafts. Anyone can propose a change in the Drafter; members vote; each approved change is published as a new version. Every version has a fingerprint: the Argon2id hash of the file without line 3, its version line, with the settings recorded in versions.json.
+> A general AGENTS.md for empirical legal research: standing instructions for AI coding agents working with empirical legal scholars. It assumes no folder layout. Versions 0.0.x are comment drafts. Anyone can comment and propose a change in the Drafter; the maintainers approve or disapprove each proposal; each approved change is published as a new version. Every version has a fingerprint: the Argon2id hash of the file without line 3, its version line, with the settings recorded in versions.json.
 
 - [AGENTS.md, newest version (save in a project folder as AGENTS.md or CLAUDE.md)](latest/AGENTS.md)
 - [Every version, with its fingerprint](versions.json)

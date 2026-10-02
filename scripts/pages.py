@@ -4,9 +4,11 @@
     python3 scripts/pages.py
 
 The site shows one file, AGENTS.md: the latest published version at the root,
-the Drafter (draft/), where anyone can propose a change and members vote on it,
+the Drafter (draft/), where anyone can comment and propose a change,
 each frozen version under versions/vX.Y.Z/, a page that checks a copy's
-fingerprint (check/), and how to join the community's Google group (join/). Addresses from earlier layouts redirect to these pages.
+fingerprint (check/), how to join the community's Google group (join/), the
+maintainers and their sign-in for approving changes (maintainers/), and the
+declined proposals (declined/). Addresses from earlier layouts redirect to these pages.
 The frozen Markdown files are never touched. scripts/release.py also uses
 archive_pages() for each new version.
 """
@@ -70,6 +72,7 @@ SHELL = """<!doctype html>
     <nav class="site-nav" aria-label="Site">
       <a href="{root}/" data-nav="file">AGENTS.md</a>
       <a href="{root}/draft/" data-nav="drafter">Drafter</a>
+      <a href="{root}/maintainers/" data-nav="maintainers">Maintainers</a>
       <a href="{root}/join/" data-nav="join">Join</a>
       <a href="{root}/check/" data-nav="check">Check a copy</a>
       <a href="https://github.com/" data-repo-link>GitHub</a>
@@ -96,8 +99,8 @@ SHELL = """<!doctype html>
     </main>
   </div>
   <footer id="footer" class="site-footer"></footer>
-  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
   <script src="{root}/assets/commands.js?v={asset}"></script>
   <script src="{root}/assets/app.js?v={asset}"></script>
 </body>
@@ -131,7 +134,8 @@ def render(mode: str, root: str, title: str, description: str, version: str | No
         title=escape(title),
         description=escape(description),
         site_name=escape(SITE_NAME),
-        icon=ICON.format(color={"drafter": "8a5300", "check": "1f6f43", "join": "2f4f8a"}.get(mode, "8a2432")),
+        icon=ICON.format(color={"drafter": "8a5300", "check": "1f6f43", "join": "2f4f8a",
+                                "maintainers": "4a3a7a", "declined": "6f6a72"}.get(mode, "8a2432")),
         prefs=PREFS,
         fonts=FONTS,
         root=root,
@@ -162,7 +166,11 @@ FIXED = {
     "index.html": render("published", ".", SITE_NAME,
                          "AGENTS.md: standing instructions for AI agents working with empirical legal scholars. Download it, or propose a change."),
     "draft/index.html": render("drafter", "..", f"Drafter · {SITE_NAME}",
-                               "Propose a change to AGENTS.md. Members vote, and every approved change is published as a new version."),
+                               "Comment on AGENTS.md and propose changes. The maintainers approve or disapprove each one, and every approved change is published as a new version."),
+    "maintainers/index.html": render("maintainers", "..", f"Maintainers · {SITE_NAME}",
+                                     "Who approves changes to AGENTS.md, how a proposal becomes a new version, and where maintainers sign in to approve or disapprove proposals."),
+    "declined/index.html": render("declined", "..", f"Declined proposals · {SITE_NAME}",
+                                  "Proposed changes to AGENTS.md that maintainers disapproved, or that were withdrawn or couldn't be applied. Kept for the record."),
     "join/index.html": render("join", "..", f"Join · {SITE_NAME}",
                               "Join the Google group where people who use and shape AGENTS.md talk with each other."),
     "check/index.html": render("check", "..", f"Check a copy · {SITE_NAME}",

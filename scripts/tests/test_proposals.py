@@ -19,7 +19,7 @@ from fingerprint import fingerprint  # noqa: E402
 from proposals import Governance, count_votes, decide, parse_time  # noqa: E402
 
 DRAFTER = "https://nathanreitinger.github.io/els-agent-practices/draft/"
-MEMBERS = json.loads((ROOT / "governance" / "members.json").read_text())
+MAINTAINERS = json.loads((ROOT / "governance" / "maintainers.json").read_text())
 
 
 def note(id, user, text, exact=None, prefix="", suffix="", created="2026-10-03T10:00:00+00:00", updated=None,
@@ -42,18 +42,18 @@ def reply(id, user, text, to, when="2026-10-03T11:00:00+00:00"):
 
 class VotesTest(unittest.TestCase):
     def setUp(self):
-        self.gov = Governance(MEMBERS)
+        self.gov = Governance(MAINTAINERS)
         self.record = {"updated": "2026-10-03T10:00:00+00:00", "created": "2026-10-03T10:00:00+00:00",
                        "proposer": {"name": "Jane", "hypothesis": "jdoe"}}
 
-    def test_member_votes_count_and_readers_show_support(self):
+    def test_maintainer_votes_count_and_readers_show_support(self):
         votes, support, stale = count_votes(self.record, [
             reply("r1", "nathanReitinger", "Approve", "p"),
             reply("r2", "jdoe", "Approve", "p"),
             reply("r3", "reader", "approved!", "p"),
             reply("r4", "reader2", "Nice idea", "p"),
         ], [], self.gov)
-        self.assertEqual([(v.member.name, v.vote) for v in votes], [("Nathan Reitinger", "approve")])
+        self.assertEqual([(v.maintainer.name, v.vote) for v in votes], [("Nathan Reitinger", "approve")])
         self.assertEqual((support, stale), (2, 0))
 
     def test_votes_before_the_last_edit_are_stale(self):
@@ -72,8 +72,8 @@ class VotesTest(unittest.TestCase):
         self.assertEqual([(v.vote, v.via) for v in votes], [("reject", "GitHub")])
 
     def test_self_approval_can_be_turned_off(self):
-        data = json.loads(json.dumps(MEMBERS))
-        data["rules"]["members_may_approve_their_own_proposals"] = False
+        data = json.loads(json.dumps(MAINTAINERS))
+        data["rules"]["maintainers_may_approve_their_own_proposals"] = False
         gov = Governance(data)
         record = {**self.record, "proposer": {"name": "N", "hypothesis": "nathanReitinger"}}
         votes, _, _ = count_votes(record, [reply("r1", "nathanReitinger", "Approve", "p")], [], gov)
@@ -82,9 +82,9 @@ class VotesTest(unittest.TestCase):
     def test_decisions(self):
         gov = self.gov
         now = parse_time("2026-10-03T12:00:00Z")
-        member = gov.members[0]
-        from proposals import Member, Vote
-        other = Member("Other", "member", "other", "")
+        member = gov.maintainers[0]
+        from proposals import Maintainer, Vote
+        other = Maintainer("Other", "maintainer", "other", "")
         approve = Vote(member, "approve", now, "Hypothesis", "")
         reject = Vote(other, "reject", now, "Hypothesis", "")
         self.assertEqual(decide(self.record, [approve], gov, now), "adopt")
@@ -285,7 +285,7 @@ class FakeGitHub:
                 parts, query = self.route()
                 if parts == ["issues"]:
                     page = int(query.get("page", 1))
-                    items = [i for i in fake.issues.values() if "proposal" in i["labels_"]]
+                    items = list(fake.issues.values())
                     return self.reply(200, items[(page - 1) * 100:page * 100])
                 if len(parts) == 3 and parts[2] == "comments":
                     page = int(query.get("page", 1))
@@ -303,7 +303,7 @@ class FakeGitHub:
                 if parts == ["issues"]:
                     number = len(fake.issues) + 1
                     fake.issues[number] = {"number": number, "title": data["title"], "body": data["body"],
-                                           "state": "open", "labels_": data.get("labels", [])}
+                                           "state": "open", "labels": [{"name": n} for n in data.get("labels", [])]}
                     return self.reply(201, fake.issues[number])
                 if len(parts) == 3 and parts[2] == "comments":
                     fake.add_comment(int(parts[1]), "github-actions[bot]", data["body"], bot=True)
@@ -312,7 +312,10 @@ class FakeGitHub:
 
             def do_PATCH(self):
                 parts, _ = self.route()
-                fake.issues[int(parts[1])].update(self.body())
+                data = self.body()
+                if "labels" in data:
+                    data["labels"] = [{"name": n} for n in data["labels"]]
+                fake.issues[int(parts[1])].update(data)
                 self.reply(200, fake.issues[int(parts[1])])
 
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -372,7 +375,7 @@ class GitHubRunTest(RunTest):
         self.assertTrue(issue["title"].startswith("Proposal: Delete “(git)”"))
         self.assertIn("proposal", self.github.labels)
 
-        # A member votes on the issue; the next run adopts it, pushes, and closes the issue.
+        # A maintainer votes on the issue; the next run adopts it, pushes, and closes the issue.
         self.github.add_comment(number, "NathanReitinger", "/approve looks right")
         self.github.add_comment(number, "someone-else", "/reject")
         self.robot_online(rows, now="2026-10-03T13:00:00Z")
@@ -392,6 +395,25 @@ class GitHubRunTest(RunTest):
         self.robot_online(rows, now="2026-10-03T13:15:00Z")
         self.assertEqual(self.origin_git("rev-parse", "main"), head)
         self.assertEqual(len([c for c in self.github.comments[number] if c["user"]["type"] == "Bot"]), 1)
+
+    def test_an_issue_opened_on_the_maintainers_page_counts(self):
+        rows = [r for r in self.rows() if r["id"] in ("p2",)]
+        self.github.issues[1] = {"number": 1, "title": "Proposal", "state": "open", "labels": [],
+                                 "body": "Filed on the Maintainers page.\n\n<!-- proposal:p2 -->"}
+        self.github.add_comment(1, "nathanreitinger", "/approve\n\nApproved on the Maintainers page.")
+        self.robot_online(rows)
+        ledger = self.ledger()
+        self.assertEqual((ledger["p2"]["issue"], ledger["p2"]["status"], ledger["p2"]["version"]), (1, "adopted", "0.0.3"))
+        self.assertEqual(len(self.github.issues), 1)  # no second issue for the same proposal
+        self.assertEqual(self.github.issues[1]["state"], "closed")
+
+    def test_the_robot_labels_issues_it_finds_unlabeled(self):
+        rows = [r for r in self.rows() if r["id"] in ("p2",)]
+        self.github.issues[1] = {"number": 1, "title": "Proposal", "state": "open", "labels": [],
+                                 "body": "Filed on the Maintainers page.\n\n<!-- proposal:p2 -->"}
+        self.robot_online(rows)
+        self.assertEqual(self.github.issues[1]["labels"], [{"name": "proposal"}])
+        self.assertIn("**Maintainers:** approve or disapprove it on the [Maintainers page]", self.github.issues[1]["body"])
 
     def test_a_rejected_push_starts_again(self):
         # Someone else pushes first; the robot's push is rejected, so it starts over from GitHub's copy.

@@ -1,0 +1,22 @@
+{
+  "about": "The maintainers: the people who approve or disapprove proposed changes to AGENTS.md, and the rules for deciding. The lead maintainer edits this file, and every change to it is kept in the git history. GOVERNANCE.md explains the rules in plain English.",
+  "rules": {
+    "approvals_needed": 1,
+    "maintainers_may_approve_their_own_proposals": true,
+    "hours_open_before_adoption": 0,
+    "proposals_count_from": "2026-10-02T21:53:00Z"
+  },
+  "maintainers": [
+    {
+      "name": "Nathan Reitinger",
+      "role": "lead maintainer",
+      "hypothesis": "nathanReitinger",
+      "github": "nathanReitinger",
+      "since": "2026-10-02"
+    }
+  ],
+  "ignored_accounts": {
+    "hypothesis": [],
+    "github": []
+  }
+}
