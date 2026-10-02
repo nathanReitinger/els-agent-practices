@@ -3,7 +3,17 @@
   "repo": "nathanReitinger/els-agent-practices",
   "branch": "main",
   "site": "https://nathanreitinger.github.io/els-agent-practices/",
-  "latest": null,
-  "draft": "0.0.0-draft",
-  "versions": []
+  "latest": "0.0.0",
+  "draft": "0.0.1-draft",
+  "versions": [
+    {
+      "version": "0.0.0",
+      "date": "2026-10-01",
+      "summary": "First comment draft. AGENTS.md: standing instructions for agents in empirical legal research projects, with every rule linked to the guide practice behind it. The guide: eight principles, 55 practices, a pre-submission checklist, and a verified reading list. Nothing is final; comments welcome.",
+      "files": [
+        "agent-best-practices.md",
+        "AGENTS.md"
+      ]
+    }
+  ]
 }
