@@ -5,8 +5,8 @@
 
 The site shows one file, AGENTS.md: the latest published version at the root,
 the Drafter (draft/), where anyone can propose a change and members vote on it,
-each frozen version under versions/vX.Y.Z/, and a page that checks a copy's
-fingerprint (check/). Addresses from earlier layouts redirect to these pages.
+each frozen version under versions/vX.Y.Z/, a page that checks a copy's
+fingerprint (check/), and how to join the community's Google group (join/). Addresses from earlier layouts redirect to these pages.
 The frozen Markdown files are never touched. scripts/release.py also uses
 archive_pages() for each new version.
 """
@@ -70,6 +70,7 @@ SHELL = """<!doctype html>
     <nav class="site-nav" aria-label="Site">
       <a href="{root}/" data-nav="file">AGENTS.md</a>
       <a href="{root}/draft/" data-nav="drafter">Drafter</a>
+      <a href="{root}/join/" data-nav="join">Join</a>
       <a href="{root}/check/" data-nav="check">Check a copy</a>
       <a href="https://github.com/" data-repo-link>GitHub</a>
     </nav>
@@ -130,7 +131,7 @@ def render(mode: str, root: str, title: str, description: str, version: str | No
         title=escape(title),
         description=escape(description),
         site_name=escape(SITE_NAME),
-        icon=ICON.format(color={"drafter": "8a5300", "check": "1f6f43"}.get(mode, "8a2432")),
+        icon=ICON.format(color={"drafter": "8a5300", "check": "1f6f43", "join": "2f4f8a"}.get(mode, "8a2432")),
         prefs=PREFS,
         fonts=FONTS,
         root=root,
@@ -162,6 +163,8 @@ FIXED = {
                          "AGENTS.md: standing instructions for AI agents working with empirical legal scholars. Download it, or propose a change."),
     "draft/index.html": render("drafter", "..", f"Drafter · {SITE_NAME}",
                                "Propose a change to AGENTS.md. Members vote, and every approved change is published as a new version."),
+    "join/index.html": render("join", "..", f"Join · {SITE_NAME}",
+                              "Join the Google group where people who use and shape AGENTS.md talk with each other."),
     "check/index.html": render("check", "..", f"Check a copy · {SITE_NAME}",
                                "Check whether a copy of AGENTS.md is exactly a published version, using its SHA-256 fingerprint."),
     # Addresses from earlier layouts.

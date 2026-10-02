@@ -6,3 +6,4 @@
 - [Every version, with its fingerprint](versions.json)
 - [Proposals and votes](governance/proposals.json)
 - [How decisions are made](GOVERNANCE.md)
+- [Join the community's Google group](join/)

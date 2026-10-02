@@ -66,7 +66,7 @@ Each fingerprint is recorded in the file itself, in [versions.json](versions.jso
 
 ## Members
 
-- Maintainers add members: typically people who have contributed proposals or comments and who agree to these rules. To become a member, ask a maintainer, for example in a comment in the Drafter or an issue on GitHub.
+- Maintainers add members: typically people who have contributed proposals or comments and who agree to these rules. To become a member, ask a maintainer, for example in the community's Google group, [agentselsmd](https://nathanreitinger.github.io/els-agent-practices/join/), in a comment in the Drafter, or in an issue on GitHub.
 - Each member is listed with the Hypothesis and GitHub usernames they vote with. The list is public, and every change to it is kept in the history.
 - Maintainers can list accounts to ignore, such as spam, under `ignored_accounts` in governance/members.json.
 

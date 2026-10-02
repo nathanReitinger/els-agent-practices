@@ -10,6 +10,10 @@ This project is one file, **AGENTS.md**: standing instructions for AI agents wor
 
 When a member approves your proposal, it's published as a new version automatically. You can follow it in the Drafter's list of proposals.
 
+## Talk with others
+
+People who use and shape AGENTS.md talk with each other in a Google group, agentselsmd. To join, send any email to `agentselsmd+subscribe@googlegroups.com` and reply to the confirmation Google sends (no Google account needed), or join on [Google Groups](https://groups.google.com/g/agentselsmd). The site's [Join](https://nathanreitinger.github.io/els-agent-practices/join/) page explains both. Once you've joined, write to everyone at `agentselsmd@googlegroups.com`.
+
 ## Vote (members)
 
 Reply **Approve** or **Reject** to a proposal in the Drafter, or comment `/approve` or `/reject` on its GitHub issue. Replying to GitHub's notification email works too.

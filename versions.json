@@ -3,6 +3,11 @@
   "repo": "nathanReitinger/els-agent-practices",
   "branch": "main",
   "site": "https://nathanreitinger.github.io/els-agent-practices/",
+  "community": {
+    "name": "agentselsmd",
+    "email": "agentselsmd@googlegroups.com",
+    "page": "https://groups.google.com/g/agentselsmd"
+  },
   "latest": "0.0.2",
   "versions": [
     {

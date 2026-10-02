@@ -574,7 +574,8 @@
         m.role === "maintainer" ? h("span", { class: "badge badge-soft", text: "maintainer" }) : null,
         h("span", { class: "muted", text: ` · votes as ${how(m)}${m.since ? ` · since ${formatDate(m.since)}` : ""}` })))),
       h("p", { class: "muted" }, "Maintainers add members and set the rules in ", external(MEMBERS_PATH, repoFile(cfg, MEMBERS_PATH)),
-        ", and every change to that list is public. To become a member, ask a maintainer. The whole process is described in ",
+        ", and every change to that list is public. To become a member, ask a maintainer", cfg.community ? [" (for example, in the ",
+          h("a", { href: at("join/"), text: "community's Google group" }), ")"] : "", ". The whole process is described in ",
         external("GOVERNANCE.md", repoFile(cfg, "GOVERNANCE.md")), "."));
   }
 
@@ -586,6 +587,17 @@
         "This is a comment draft. Anyone can propose a change in the ", h("a", { href: at("draft/"), text: "Drafter" }),
         ". Members vote, and each approved change is published as a new version, with its own number and fingerprint."),
       h("p", {}, button("Open the Drafter", at("draft/"))));
+  }
+
+  // The community's Google group (versions.json: "community").
+  const groupAddress = (cfg, suffix = "") => cfg.community?.email.replace("@", `${suffix}@`);
+
+  function communityNote(cfg) {
+    if (!cfg.community) return null;
+    return h("aside", { class: "note community-note" },
+      h("p", {}, h("strong", { text: "Talk with others who use AGENTS.md. " }),
+        `People who use and shape this file talk with each other in a Google group, ${cfg.community.name}. You can join by email, with or without a Google account.`),
+      h("p", {}, button("Join the group", at("join/"))));
   }
 
   function fingerprintNote(release) {
@@ -608,7 +620,7 @@
       [h("span", { class: "badge", text: versionLabel(cfg.latest) }), ` Published ${formatDate(release.date)} · ${fileStats(markdown)}`],
       [button("Download", at(`latest/${FILE}`), { download: FILE }), copyButton(), rawToggle()]);
     renderMarkdown(markdown);
-    $("#after").replaceChildren(draftNote(), fingerprintNote(release) || "");
+    $("#after").replaceChildren(draftNote(), communityNote(cfg) || "", fingerprintNote(release) || "");
     setCanonical(at(`versions/v${cfg.latest}/`));
   }
 
@@ -658,7 +670,7 @@
       [button("Propose a change", "#propose"), secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton(), rawToggle()]);
     renderMarkdown(markdown);
     const proposals = h("section", { class: "versions proposals", id: "proposals" }, h("h2", { text: "Proposals" }), h("p", { class: "loading", text: "Loading proposals…" }));
-    $("#after").replaceChildren(proposals, membersView(cfg, governance));
+    $("#after").replaceChildren(proposals, membersView(cfg, governance), communityNote(cfg) || "");
     setCanonical(at("draft/"));
     loadHypothesis();
     await Promise.all([showProposals(cfg, governance, ledger, proposals), showEveryVersion(cfg)]);
@@ -725,7 +737,7 @@
       [h("span", { class: "badge", text: versionLabel(pageVersion) }), ` Published ${formatDate(release.date)}`, ...newer, ` · ${fileStats(markdown)}`],
       [button("Download", `./${FILE}`, { download: FILE }), copyButton(), rawToggle()]);
     renderMarkdown(markdown);
-    $("#after").replaceChildren(draftNote(), fingerprintNote(release) || "");
+    $("#after").replaceChildren(draftNote(), communityNote(cfg) || "", fingerprintNote(release) || "");
   }
 
   // ---------- Check a copy ----------
@@ -832,6 +844,54 @@
     addCopyButtons($("#after"));
   }
 
+  // ---------- Join the community ----------
+
+  function addressLine(address, label) {
+    const [user, domain] = address.split("@"); // a long address may break before the @, never mid-word
+    return h("p", { class: "address" }, h("code", {}, user, h("wbr"), `@${domain}`), " ",
+      action("Copy", (event) => copyText(address, event.currentTarget), "copy-inline"), label ? h("span", { class: "muted", text: ` ${label}` }) : null);
+  }
+
+  async function showJoin(cfg) {
+    $(".file").hidden = true;
+    const group = cfg.community;
+    if (!group) {
+      $("#intro").replaceChildren(h("section", { class: "intro" }, h("h1", { text: "Join the community" }),
+        h("p", { class: "lede", text: "There's no community group yet." })));
+      return;
+    }
+    const subscribe = groupAddress(cfg, "+subscribe");
+    $("#intro").replaceChildren(h("section", { class: "intro" },
+      h("h1", { text: "Join the community" }),
+      h("p", { class: "lede" }, `People who use and shape AGENTS.md for Empirical Legal Scholars talk with each other in a Google group, ${group.name}. Join it to ask questions, share what worked and what didn't, and talk through ideas.`),
+      h("div", { class: "ways" },
+        h("section", { class: "way" },
+          h("h2", { text: "Join by email" }),
+          h("p", { class: "way-for", text: "Works with any email address. You don't need a Google account." }),
+          h("ol", {},
+            h("li", { text: "Send an email to the address below. It can be empty; the subject and message don't matter." }),
+            h("li", { text: "Google emails you to confirm. Reply to that email." }),
+            h("li", { text: "You're in. If the group's managers approve new members first, you'll hear back once they do." })),
+          addressLine(subscribe),
+          h("p", {}, button("Write the email", `mailto:${subscribe}?subject=Join`))),
+        h("section", { class: "way" },
+          h("h2", { text: "Join on Google Groups" }),
+          h("p", { class: "way-for", text: "For people with a Google account." }),
+          h("ol", {},
+            h("li", { text: "Open the group and sign in to Google." }),
+            h("li", {}, "Choose ", h("em", { text: "Join group" }), " (or ", h("em", { text: "Ask to join group" }), ")."),
+            h("li", { text: "Choose how often you want emails, and you're in." })),
+          h("p", {}, secondary("Open the group", group.page, newTab)))),
+      h("section", { class: "versions" },
+        h("h2", { text: "Once you've joined" }),
+        h("p", { text: "To write to everyone in the group, send an email to:" }),
+        addressLine(group.email),
+        h("p", {}, "You can also read and reply to conversations ", external("on Google Groups", group.page), ". To leave, send an email to ",
+          h("code", { text: groupAddress(cfg, "+unsubscribe") }), "."),
+        h("p", { class: "muted" }, "The group is for conversation. To change AGENTS.md itself, propose the change in the ",
+          h("a", { href: at("draft/"), text: "Drafter" }), ", where members vote on it."))));
+  }
+
   function showFooter(cfg) {
     $("#footer")?.replaceChildren(
       h("p", {}, h("span", { class: "brand-file", text: "AGENTS.md" }), " ", h("em", { text: "for Empirical Legal Scholars" })),
@@ -839,14 +899,15 @@
         external("Source on GitHub", `https://github.com/${cfg.repo}`),
         external("Changelog", repoFile(cfg, "CHANGELOG.md")),
         external("How decisions are made", repoFile(cfg, "GOVERNANCE.md")),
+        cfg.community ? h("a", { href: at("join/"), text: "Join the group" }) : null,
         h("a", { href: at("check/"), text: "Check a copy" }),
         h("a", { href: at("llms.txt"), text: "llms.txt" }),
-      ])));
+      ].filter(Boolean))));
   }
 
   async function main() {
     setupReaderControls();
-    const views = { published: showPublished, drafter: showDrafter, archive: showArchive, check: showCheck };
+    const views = { published: showPublished, drafter: showDrafter, archive: showArchive, check: showCheck, join: showJoin };
     try {
       const cfg = JSON.parse(await fetchText(at("versions.json")));
       for (const link of $$("[data-repo-link]")) link.href = `https://github.com/${cfg.repo}`;

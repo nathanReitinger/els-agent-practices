@@ -8,6 +8,7 @@ It's a comment draft (version 0.0.x): nothing is final, and it grows out of prop
 - **Raw file:** https://nathanreitinger.github.io/els-agent-practices/latest/AGENTS.md
 - **Drafter (comment, propose a change, vote):** https://nathanreitinger.github.io/els-agent-practices/draft/
 - **Check a copy:** https://nathanreitinger.github.io/els-agent-practices/check/
+- **Talk with others who use it:** join the Google group agentselsmd (https://nathanreitinger.github.io/els-agent-practices/join/), by sending any email to agentselsmd+subscribe@googlegroups.com
 
 ## How it works
 
@@ -35,7 +36,7 @@ The rules are in [GOVERNANCE.md](GOVERNANCE.md); how to take part is in [CONTRIB
 | `scripts/release.py`, `scripts/fingerprint.py` | Publishing a version, and computing fingerprints |
 | `scripts/pages.py` | Writes the site's HTML pages |
 | `scripts/tests/` | Tests, run before every robot run |
-| `assets/`, `index.html`, `draft/`, `check/` | The website (GitHub Pages, no build step) |
+| `assets/`, `index.html`, `draft/`, `check/`, `join/` | The website (GitHub Pages, no build step) |
 | `docs/` | How AGENTS.md was drafted and tested |
 
 Versions 0.0.0 and 0.0.1 also included a companion guide. It's preserved in those versions' folders and in the git history.
