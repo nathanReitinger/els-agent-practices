@@ -192,23 +192,37 @@ body[data-mode="check"] [data-nav="check"] { color: var(--accent-contrast); back
 .theme-toggle .icon-sun { display: none; }
 .theme-toggle[data-current="dark"] .icon-sun { display: block; }
 .theme-toggle[data-current="dark"] .icon-moon { display: none; }
+/* Phones: everything centered, the menu wraps so every item shows, and the taller header scrolls away. */
 @media (max-width: 760px) {
-  .site-header { margin: 0.5rem 0.5rem 0; top: 0.5rem; border-radius: 22px; padding: 0.55rem 0.6rem 0.55rem 1rem; }
-  .site-nav { order: 3; width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .site-nav::-webkit-scrollbar { display: none; }
-  .site-nav a { flex: none; }
-  .reader-controls { border-left: 0; padding-left: 0; }
+  .site-header {
+    position: relative;
+    top: auto;
+    justify-content: center;
+    gap: 0.3rem 0.5rem;
+    margin: 0.5rem 0.5rem 0;
+    padding: 0.7rem 0.7rem 0.6rem;
+    border-radius: 22px;
+    text-align: center;
+  }
+  .brand { flex: 1 0 100%; margin-right: 0; }
+  .site-nav { order: 2; flex: 1 0 100%; flex-wrap: wrap; justify-content: center; gap: 0.15rem; }
+  .site-nav a { flex: none; padding: 0.28rem 0.75rem; }
+  .reader-controls { order: 3; border-left: 0; padding-left: 0; }
 }
 
-/* The comment tool (Hypothesis) puts a toolbar on the right edge; keep the header and text clear of it. */
+/* The comment tool (Hypothesis) puts a toolbar on the right edge; keep the header and text clear of it,
+   with the same space on the left so the page stays centered. Phones keep the space on the right only. */
 .has-annotations .site-header {
-  margin-left: max(0.75rem, calc((100% - 80rem) / 2));
+  margin-left: max(3.4rem, calc((100% - 80rem) / 2));
   margin-right: max(3.4rem, calc((100% - 80rem) / 2));
 }
 @media (max-width: 760px) {
   .has-annotations .site-header { margin-left: 0.5rem; margin-right: 3.1rem; }
 }
-@media (max-width: 1099px) {
+@media (min-width: 761px) and (max-width: 1099px) {
+  .has-annotations .layout, .has-annotations .site-footer { padding-left: 3rem; padding-right: 3rem; }
+}
+@media (max-width: 760px) {
   .has-annotations .layout, .has-annotations .site-footer { padding-right: 3rem; }
 }
 
@@ -229,6 +243,9 @@ body[data-mode="check"] [data-nav="check"] { color: var(--accent-contrast); back
     align-items: start;
   }
   .toc { position: sticky; top: 6rem; max-height: calc(100vh - 8rem); overflow: auto; }
+  /* Fixed columns, so pages without an outline (Join, Check a copy) stay centered too. */
+  .layout > .toc { grid-column: 1; }
+  .layout > main { grid-column: 2; }
 }
 
 /* Outline */
