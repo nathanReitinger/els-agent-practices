@@ -3,9 +3,17 @@
   "repo": "nathanReitinger/els-agent-practices",
   "branch": "main",
   "site": "https://nathanreitinger.github.io/els-agent-practices/",
-  "latest": "0.0.1",
-  "draft": "0.0.2-draft",
+  "latest": "0.0.2",
+  "draft": "0.0.3-draft",
   "versions": [
+    {
+      "version": "0.0.2",
+      "date": "2026-10-02",
+      "summary": "Comment draft 0.0.2: AGENTS.md is now one general workflow file. It assumes no folder layout or file names, needs no filling in, and no longer points to a separate guide.",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.1",
       "date": "2026-10-02",

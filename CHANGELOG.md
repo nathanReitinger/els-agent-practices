@@ -6,6 +6,15 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.2] - 2026-10-02
+
+Comment draft 0.0.2: AGENTS.md is now one general workflow file. It assumes no folder layout or file names, needs no filling in, and no longer points to a separate guide.
+
+Edits to the draft in this release:
+
+- AGENTS.md: one general workflow file; the guide is removed (#9) (Nathan Reitinger, 2026-10-02)
+
+
 ## [0.0.1] - 2026-10-02
 
 Comment draft 0.0.1: AGENTS.md is retitled AGENTS.md for Empirical Legal Scholars, to match the site. No other changes to the text.

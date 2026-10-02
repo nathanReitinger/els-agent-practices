@@ -1,6 +1,6 @@
 # AGENTS.md for Empirical Legal Scholars
 
-*Version 0.0.2-draft · Working draft: anyone can edit it, and every edit is logged · Latest published version: <https://nathanreitinger.github.io/els-agent-practices/latest/AGENTS.md>*
+*Version 0.0.3-draft · Working draft: anyone can edit it, and every edit is logged · Latest published version: <https://nathanreitinger.github.io/els-agent-practices/latest/AGENTS.md>*
 
 These are standing instructions for an AI agent working with me on empirical legal research. I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check.
 
