@@ -1,6 +1,6 @@
 # Changelog
 
-Published versions of AGENTS.md, newest first. Each version is a frozen snapshot with a SHA-256 fingerprint: the hash of the file without its version line (line 3), so anyone can check a copy. Versions published from approved proposals list who proposed and who approved them. Version numbers and the approval process are explained in CONTRIBUTING.md and GOVERNANCE.md.
+Published versions of AGENTS.md, newest first. Each version is a frozen snapshot with a fingerprint: the Argon2id hash of the file without its version line (line 3), so anyone can check a copy. Versions published from approved proposals list who proposed and who approved them. Version numbers and the approval process are explained in CONTRIBUTING.md and GOVERNANCE.md.
 
 Everything before 1.0 is a comment draft: nothing is final.
 
@@ -10,7 +10,7 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 Comment draft 0.0.2: AGENTS.md is now one general workflow file. It assumes no folder layout or file names, needs no filling in, and no longer points to a separate guide.
 
-SHA-256 fingerprint (computed on 2026-10-02, after publication): `7eef02c61599930082692f31107f50a8d97879ccb22fac333a47a9ea68c6e1b8`
+Argon2id fingerprint (computed on 2026-10-02, after publication): `bcffae6b9dc07c7cb688832248d59934e15f6db87ce3d7acba7b0bee7c82ddad`
 
 Edits to the draft in this release:
 
@@ -21,7 +21,7 @@ Edits to the draft in this release:
 
 Comment draft 0.0.1: AGENTS.md is retitled AGENTS.md for Empirical Legal Scholars, to match the site. No other changes to the text.
 
-SHA-256 fingerprint (computed on 2026-10-02, after publication): `17e56d7dcf266ba09e3b26fc6dcb3ffe63b20d5572f0a9a6b7262e96200ac9d2`
+Argon2id fingerprint (computed on 2026-10-02, after publication): `577dc486ff755b6736b58ee75382dec8bbe2b1ddadfc44c852099b44b3b3a7aa`
 
 Edits to the draft in this release:
 
@@ -32,7 +32,7 @@ Edits to the draft in this release:
 
 First comment draft. AGENTS.md: standing instructions for agents in empirical legal research projects, with every rule linked to the guide practice behind it. The guide: eight principles, 55 practices, a pre-submission checklist, and a verified reading list. Nothing is final; comments welcome.
 
-SHA-256 fingerprint (computed on 2026-10-02, after publication): `6850e93ff5f95aae663eff1494a0a193ac23a02a5fbaae9d270673d44ee58657`
+Argon2id fingerprint (computed on 2026-10-02, after publication): `9d8189fb34725bc56ed9f8334b6a3f46593747ddbaa8400b38885bd27118c5ad`
 
 Edits to the draft in this release:
 

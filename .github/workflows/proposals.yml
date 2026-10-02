@@ -38,6 +38,13 @@ jobs:
         with:
           fetch-depth: 0  # every version's tag, for the change log
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Argon2 (fingerprints are Argon2id hashes)
+        run: python3 -m pip install --quiet argon2-cffi==25.1.0
+
       - name: Test the robot
         run: python3 -m unittest discover -s scripts/tests -t scripts/tests
 

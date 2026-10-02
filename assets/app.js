@@ -18,7 +18,13 @@
   const CHECK_EVERY = "15 minutes";
   const FINAL = ["adopted", "declined", "withdrawn", "cannot-apply"];
   const KIND_LABELS = { delete: "Delete", replace: "Replace", insert: "Add words", rule: "Add a rule" };
-  const COMMAND = "tr -d '\\r' < AGENTS.md | sed 3d | shasum -a 256";
+  const COMMAND = "tr -d '\\r' < AGENTS.md | sed 3d | python3 -c \"import sys; from argon2.low_level import hash_secret_raw, Type; " +
+    "print(hash_secret_raw(sys.stdin.buffer.read(), b'AGENTS.md-ELS-v1', 3, 65536, 4, 32, Type.ID).hex())\"";
+  // The Argon2id library for checking a copy, pinned to one version and verified by the browser before it runs.
+  const ARGON2_LIBRARY = {
+    src: "https://cdn.jsdelivr.net/npm/hash-wasm@4.12.0/dist/argon2.umd.min.js",
+    integrity: "sha384-tP0Wy54CKmng7i9EoTlPySD0hBx6Octj0VS6MfwlnUu111MPa+JLm0CCbep6XJ1W",
+  };
   const TEXT_SIZES = [0.85, 0.92, 1, 1.08, 1.17, 1.27, 1.38];
   const WORDS_PER_MINUTE = 230;
 
@@ -276,9 +282,22 @@
   }
 
   // ---------- Fingerprints ----------
-  // A version's fingerprint is the SHA-256 hash of its file without line 3, the version line
+  // A version's fingerprint is the Argon2id hash of its file without line 3, the version line
   // (which states the fingerprint). Carriage returns are removed first, so line endings don't matter.
-  // scripts/fingerprint.py computes the same thing.
+  // The settings are fixed and public (versions.json, "fingerprint"); scripts/fingerprint.py computes the same thing.
+
+  let fingerprintSettings = { salt: "AGENTS.md-ELS-v1", iterations: 3, memory_kib: 65536, parallelism: 4, length_bytes: 32 };
+  let argon2Loading = null;
+
+  function loadArgon2() {
+    argon2Loading ||= new Promise((resolve, reject) => {
+      if (window.hashwasm?.argon2id) return resolve(window.hashwasm);
+      document.head.append(h("script", { src: ARGON2_LIBRARY.src, integrity: ARGON2_LIBRARY.integrity, crossorigin: "anonymous",
+        onload: () => resolve(window.hashwasm),
+        onerror: () => { argon2Loading = null; reject(new Error("The fingerprint tool couldn't be loaded. Check your connection and try again.")); } }));
+    });
+    return argon2Loading;
+  }
 
   function canonicalLines(text) {
     const lines = String(text).replace(/^﻿/, "").replace(/\r/g, "").split("\n");
@@ -290,14 +309,17 @@
   async function fingerprintOf(text) {
     const lines = canonicalLines(text);
     if (!lines) return null;
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(lines.join("\n")));
-    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const { argon2id } = await loadArgon2();
+    const encode = (value) => new TextEncoder().encode(value);
+    const settings = fingerprintSettings;
+    return argon2id({ password: encode(lines.join("\n")), salt: encode(settings.salt), iterations: settings.iterations,
+      parallelism: settings.parallelism, memorySize: settings.memory_kib, hashLength: settings.length_bytes, outputType: "hex" });
   }
 
-  function fingerprintLine(sha256, label = "SHA-256 fingerprint") {
-    if (!sha256) return null;
+  function fingerprintLine(value, label = "Fingerprint (Argon2id)") {
+    if (!value) return null;
     return h("div", { class: "fingerprint" }, h("span", { class: "muted", text: `${label} ` }),
-      h("code", { text: sha256 }), " ", action("Copy", (event) => copyText(sha256, event.currentTarget), "copy-inline"));
+      h("code", { text: value }), " ", action("Copy", (event) => copyText(value, event.currentTarget), "copy-inline"));
   }
 
   // ---------- Differences ----------
@@ -601,11 +623,11 @@
   }
 
   function fingerprintNote(release) {
-    if (!release?.sha256) return null;
+    if (!release?.fingerprint) return null;
     return h("aside", { class: "note" },
       h("p", {}, h("strong", { text: "Is a copy exactly this version? " }),
-        `Every version has a fingerprint: a SHA-256 hash of its file without the version line. Change one character and the fingerprint changes. Version ${release.version}'s is:`),
-      fingerprintLine(release.sha256, ""),
+        `Every version has a fingerprint: an Argon2id hash of its file without the version line. Change one character and the fingerprint changes. Version ${release.version}'s is:`),
+      fingerprintLine(release.fingerprint, ""),
       h("p", {}, secondary("Check a copy", at("check/"))));
   }
 
@@ -703,7 +725,7 @@
         r.version === cfg.latest ? h("span", { class: "badge", text: "latest" }) : null,
         h("span", { class: "muted", text: ` · ${formatDate(r.date)}` }),
         h("div", { class: "version-summary", text: r.summary }),
-        fingerprintLine(r.sha256),
+        fingerprintLine(r.fingerprint),
         h("div", { class: "muted" }, h("a", { href: at(`versions/v${r.version}/${FILE}`), download: `AGENTS-v${r.version}.md`, text: "Download this version" }))))));
     const history = h("section", { class: "versions", id: "history" }, h("h2", { text: "Every change to the text" }));
     $("#after").append(published, history);
@@ -766,22 +788,23 @@
 
   async function checkCopy(cfg, raw, pasted) {
     const trimmed = raw.trim();
-    const asFingerprint = trimmed.toLowerCase().replace(/^sha256:/, "");
+    const asFingerprint = trimmed.toLowerCase().replace(/^argon2id:/, "");
     if (/^[0-9a-f]{64}$/.test(asFingerprint)) {
-      const found = cfg.versions.filter((r) => r.sha256 === asFingerprint);
+      const found = cfg.versions.filter((r) => r.fingerprint === asFingerprint);
       return found.length
         ? checkResult("good", `That's the fingerprint of version ${found.map((r) => r.version).join(" and ")}.`,
           h("p", {}, h("a", { href: at(`versions/v${found[0].version}/`), text: `Read version ${found[0].version}` }), ` (published ${formatDate(found[0].date)}).`))
         : checkResult("bad", "That fingerprint doesn't belong to any published version.");
     }
     if (!trimmed) return checkResult("bad", "There's nothing to check yet. Choose a file, or paste its text.");
+    checkResult("busy", "Checking…", h("p", { text: "Computing the fingerprint takes a moment." }));
     const text = pasted && !raw.endsWith("\n") ? `${raw}\n` : raw; // pasting usually drops the final line break
     const sha = await fingerprintOf(text);
     if (!sha) return checkResult("bad", "This isn't AGENTS.md: it's shorter than three lines, so it has no version line.");
     const stamp = text.replace(/\r/g, "").split("\n")[2] || "";
     const claimed = stamp.match(/^\*Version (\S+)/)?.[1];
     const stated = stamp.match(/fingerprint[^:]*:\s*([0-9a-f]{64})/i)?.[1];
-    const matches = cfg.versions.filter((r) => r.sha256 === sha);
+    const matches = cfg.versions.filter((r) => r.fingerprint === sha);
     const yours = fingerprintLine(sha, "This copy's fingerprint:");
     if (matches.length) {
       const named = matches.find((r) => r.version === claimed);
@@ -826,20 +849,25 @@
     $("#after").replaceChildren(
       h("section", { class: "versions" },
         h("h2", { text: "How the fingerprint works" }),
-        h("p", { text: "A fingerprint is a SHA-256 hash: a 64-character code computed from the text. If even one character changes, the fingerprint changes, and no one can write a different text with the same fingerprint." }),
+        h("p", {}, "A fingerprint is a 64-character code computed from the text with Argon2id, a hash function standardized in ",
+          external("RFC 9106", "https://www.rfc-editor.org/rfc/rfc9106.html"),
+          ". If even one character changes, the fingerprint changes, and no one can write a different text with the same fingerprint."),
         h("p", { text: "Each version's fingerprint covers its whole file except line 3, the version line, because that line states the fingerprint. Line endings (Windows or Mac) don't matter. The fingerprint is recorded when the version is published: in the version line of the file itself, in the change log, and in the list below." }),
-        h("p", { text: "To compute it yourself on a Mac or Linux, open a terminal in the folder with the file and run:" }),
+        h("p", { text: `Anyone gets the same fingerprint, because the settings are fixed and public: the salt “${fingerprintSettings.salt}”, ${fingerprintSettings.iterations} passes, ${fingerprintSettings.parallelism} lanes, ${fingerprintSettings.memory_kib / 1024} MiB of memory, and a ${fingerprintSettings.length_bytes}-byte result (RFC 9106's second recommended settings).` }),
+        h("p", {}, "To compute it yourself on a Mac or Linux, install the Argon2 package for Python once (",
+          h("code", { text: "python3 -m pip install argon2-cffi" }), "), then run this in a terminal in the folder with the file:"),
         command,
-        h("p", { class: "muted" }, "On Windows, use this page. The robot that publishes versions computes it the same way (",
+        h("p", { class: "muted" }, "On Windows, use this page. (The ", h("code", { text: "argon2" }),
+          " command-line program can't do it: it refuses input longer than 127 bytes.) The robot that publishes versions computes it the same way (",
           external("scripts/fingerprint.py", repoFile(cfg, "scripts/fingerprint.py")), ").")),
       h("section", { class: "versions", id: "fingerprints" },
         h("h2", { text: "Every version's fingerprint" }),
         h("div", { class: "table-wrap" }, h("table", { class: "log fingerprints" },
-          h("thead", {}, h("tr", {}, ...["Version", "Published", "SHA-256 fingerprint"].map((t) => h("th", { text: t })))),
+          h("thead", {}, h("tr", {}, ...["Version", "Published", "Fingerprint (Argon2id)"].map((t) => h("th", { text: t })))),
           h("tbody", {}, ...cfg.versions.map((r) => h("tr", {},
             h("td", {}, h("a", { href: at(`versions/v${r.version}/`), text: r.version })),
             h("td", { text: formatDate(r.date) }),
-            h("td", {}, h("code", { text: r.sha256 || "" }))))))),
+            h("td", {}, h("code", { text: r.fingerprint || "" }))))))),
         h("p", { class: "muted", text: "Versions 0.0.0 to 0.0.2 were published before fingerprints existed; theirs were computed afterward from the frozen files, which have never changed." })));
     addCopyButtons($("#after"));
   }
@@ -910,6 +938,7 @@
     const views = { published: showPublished, drafter: showDrafter, archive: showArchive, check: showCheck, join: showJoin };
     try {
       const cfg = JSON.parse(await fetchText(at("versions.json")));
+      if (cfg.fingerprint) fingerprintSettings = { ...fingerprintSettings, ...cfg.fingerprint };
       for (const link of $$("[data-repo-link]")) link.href = `https://github.com/${cfg.repo}`;
       showFooter(cfg);
       await (views[mode] || showPublished)(cfg);

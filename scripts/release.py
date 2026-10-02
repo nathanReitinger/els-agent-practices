@@ -9,7 +9,7 @@ from a proposal, such as 1.0.0:
 
 Publishing a version:
 - stamps line 3 of the file with the version, the date, the fingerprint, and
-  the version's permanent link (the fingerprint is the SHA-256 hash of the file
+  the version's permanent link (the fingerprint is the Argon2id hash of the file
   without line 3; see scripts/fingerprint.py);
 - writes versions/vX.Y.Z/ (the frozen copy and its page) and makes latest/ an
   exact copy of it;
@@ -78,9 +78,9 @@ def comment_label(version: str) -> str:
     return " (comment draft; not final)" if version.startswith("0.") else ""
 
 
-def stamp(version: str, today: str, site: str, sha256: str) -> str:
+def stamp(version: str, today: str, site: str, fingerprint_hex: str) -> str:
     return (f"*Version {version}{comment_label(version)} · Published {today} · "
-            f"SHA-256 fingerprint of this file without this line: {sha256} · "
+            f"Argon2id fingerprint of this file without this line: {fingerprint_hex} · "
             f"Permanent link: <{site}versions/v{version}/{AGENTS}>*")
 
 
@@ -123,15 +123,15 @@ def publish(version: str, summary: str, details: list[str] | tuple[str, ...] = (
 
     draft_path = ROOT / "draft" / AGENTS
     draft = draft_path.read_text()
-    sha256 = fingerprint(draft)
+    value = fingerprint(draft)
     newest = next((r for r in manifest["versions"] if r["version"] == previous), {})
-    if newest.get("sha256") == sha256:
+    if newest.get("fingerprint") == value:
         raise ReleaseError(f"the text hasn't changed since version {previous}; there's nothing new to publish")
 
     today = today or dt.date.today().isoformat()
     site = manifest["site"]
-    text = with_stamp(draft, stamp(version, today, site, sha256))
-    assert fingerprint(text) == sha256
+    text = with_stamp(draft, stamp(version, today, site, value))
+    assert fingerprint(text) == value
 
     out_dir.mkdir(parents=True)
     (out_dir / AGENTS).write_text(text)
@@ -143,7 +143,7 @@ def publish(version: str, summary: str, details: list[str] | tuple[str, ...] = (
     shutil.copyfile(out_dir / AGENTS, latest / AGENTS)
     draft_path.write_text(text)
 
-    entry = {"version": version, "date": today, "summary": summary, "sha256": sha256, "files": [AGENTS]}
+    entry = {"version": version, "date": today, "summary": summary, "fingerprint": value, "files": [AGENTS]}
     manifest["latest"] = version
     manifest.pop("draft", None)
     manifest["versions"].insert(0, entry)
@@ -152,7 +152,7 @@ def publish(version: str, summary: str, details: list[str] | tuple[str, ...] = (
     block = f"## [{version}] - {today}\n\n{summary}\n"
     if details:
         block += "\n" + "\n".join(details) + "\n"
-    block += f"\nSHA-256 fingerprint: `{sha256}`\n"
+    block += f"\nArgon2id fingerprint: `{value}`\n"
     changelog = CHANGELOG.read_text()
     if CHANGELOG_MARKER not in changelog:
         raise ReleaseError(f"CHANGELOG.md is missing the '{CHANGELOG_MARKER}' line")
@@ -186,10 +186,10 @@ def main() -> None:
         entry = publish(version, summary, ["Changes to the text:", "", *edits.splitlines()] if edits else ())
     except ReleaseError as error:
         die(str(error))
-    print(f"Published version {version} to versions/v{version}/ and latest/ (fingerprint {entry['sha256']}).")
+    print(f"Published version {version} to versions/v{version}/ and latest/ (fingerprint {entry['fingerprint']}).")
     print("Review the changes, then run:")
     print(f'  git add -A && git commit -m "Version {version}" && '
-          f'git tag -a v{version} -m "Version {version}" -m "SHA-256 fingerprint: {entry["sha256"]}" '
+          f'git tag -a v{version} -m "Version {version}" -m "Argon2id fingerprint: {entry["fingerprint"]}" '
           f"&& git push --follow-tags")
 
 

@@ -9,13 +9,22 @@
     "page": "https://groups.google.com/g/agentselsmd"
   },
   "latest": "0.0.2",
+  "fingerprint": {
+    "method": "Argon2id (RFC 9106, version 0x13)",
+    "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
+    "salt": "AGENTS.md-ELS-v1",
+    "iterations": 3,
+    "memory_kib": 65536,
+    "parallelism": 4,
+    "length_bytes": 32
+  },
   "versions": [
     {
       "version": "0.0.2",
       "date": "2026-10-02",
       "summary": "Comment draft 0.0.2: AGENTS.md is now one general workflow file. It assumes no folder layout or file names, needs no filling in, and no longer points to a separate guide.",
-      "sha256": "7eef02c61599930082692f31107f50a8d97879ccb22fac333a47a9ea68c6e1b8",
-      "sha256_note": "Computed on 2026-10-02 from the frozen file, after this version was published.",
+      "fingerprint": "bcffae6b9dc07c7cb688832248d59934e15f6db87ce3d7acba7b0bee7c82ddad",
+      "fingerprint_note": "Computed on 2026-10-02 from the frozen file, after this version was published.",
       "files": [
         "AGENTS.md"
       ]
@@ -24,8 +33,8 @@
       "version": "0.0.1",
       "date": "2026-10-02",
       "summary": "Comment draft 0.0.1: AGENTS.md is retitled AGENTS.md for Empirical Legal Scholars, to match the site. No other changes to the text.",
-      "sha256": "17e56d7dcf266ba09e3b26fc6dcb3ffe63b20d5572f0a9a6b7262e96200ac9d2",
-      "sha256_note": "Computed on 2026-10-02 from the frozen file, after this version was published.",
+      "fingerprint": "577dc486ff755b6736b58ee75382dec8bbe2b1ddadfc44c852099b44b3b3a7aa",
+      "fingerprint_note": "Computed on 2026-10-02 from the frozen file, after this version was published.",
       "files": [
         "agent-best-practices.md",
         "AGENTS.md"
@@ -35,8 +44,8 @@
       "version": "0.0.0",
       "date": "2026-10-01",
       "summary": "First comment draft. AGENTS.md: standing instructions for agents in empirical legal research projects, with every rule linked to the guide practice behind it. The guide: eight principles, 55 practices, a pre-submission checklist, and a verified reading list. Nothing is final; comments welcome.",
-      "sha256": "6850e93ff5f95aae663eff1494a0a193ac23a02a5fbaae9d270673d44ee58657",
-      "sha256_note": "Computed on 2026-10-02 from the frozen file, after this version was published.",
+      "fingerprint": "9d8189fb34725bc56ed9f8334b6a3f46593747ddbaa8400b38885bd27118c5ad",
+      "fingerprint_note": "Computed on 2026-10-02 from the frozen file, after this version was published.",
       "files": [
         "agent-best-practices.md",
         "AGENTS.md"

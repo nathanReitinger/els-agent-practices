@@ -557,6 +557,8 @@ details.more summary { margin: 0.4rem 0 0.8rem; color: var(--accent); font-weigh
 .verdict-warn { border-left-color: var(--warn); background: var(--warn-soft); }
 .verdict-warn .verdict-title { color: var(--warn); }
 .verdict-bad { border-left-color: var(--bad); background: var(--bad-soft); }
+.verdict-busy { border-left-color: var(--faint); background: var(--panel); }
+.verdict-busy .verdict-title { color: var(--muted); }
 .verdict-bad .verdict-title { color: var(--bad); }
 .line-diff { margin: 0.6rem 0 0.2rem; padding: 0; list-style: none; font: 0.8rem/1.5 var(--mono); }
 .line-diff li { display: flex; gap: 0.5rem; padding: 0.15rem 0; }

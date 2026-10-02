@@ -440,7 +440,7 @@ def outcome_comment(record: dict, site: str) -> tuple[str, str]:
     names = ", ".join(v["name"] for v in record.get("votes", []) if v["vote"] == ("reject" if status == "declined" else "approve"))
     if status == "adopted":
         text = (f"**Adopted.** It's in [version {record['version']}]({site}versions/v{record['version']}/), "
-                f"published with SHA-256 fingerprint `{record['fingerprint']}`. Approved by {md(names)}.")
+                f"published with Argon2id fingerprint `{record['fingerprint']}`. Approved by {md(names)}.")
         return f"{text}\n\n{marker}", "completed"
     if status == "declined":
         return f"**Declined.** Rejected by {md(names)}.\n\n{marker}", "not_planned"
@@ -488,8 +488,8 @@ class Robot:
     def publish(self, summary: str, details: list[str], message: str, author: str | None = None) -> dict:
         version = self.next_version()
         entry = release.publish(version, summary, details, today=self.now.date().isoformat())
-        commit(message.replace("{version}", version).replace("{sha256}", entry["sha256"]), author)
-        git("tag", "-a", f"v{version}", "-m", f"Version {version}", "-m", f"SHA-256 fingerprint: {entry['sha256']}",
+        commit(message.replace("{version}", version).replace("{fingerprint}", entry["fingerprint"]), author)
+        git("tag", "-a", f"v{version}", "-m", f"Version {version}", "-m", f"Argon2id fingerprint: {entry['fingerprint']}",
             "-m", summary)
         self.tags.append(f"v{version}")
         self.manifest = json.loads(MANIFEST.read_text())
@@ -506,7 +506,7 @@ class Robot:
             self.say(f"Would publish a direct edit to the draft as version {self.next_version()}: {summary}")
             return
         details = ["Changes to the text:", ""] + [f"- {s}" for s in reversed(subjects)] if subjects else []
-        entry = self.publish(summary, details, "Version {version}: " + summary + "\n\nFingerprint: sha256:{sha256}")
+        entry = self.publish(summary, details, "Version {version}: " + summary + "\n\nFingerprint (Argon2id): {fingerprint}")
         self.say(f"Published a direct edit to the draft as version {entry['version']}.")
 
     # --- proposals ---
@@ -621,11 +621,11 @@ class Robot:
             f"Proposal: {record['link']}",
             f"Suggested-by: {author_name} (Hypothesis: {who['hypothesis']})",
             *[f"Approved-by: {v.member.name} ({v.via})" for v in approvals],
-            "Fingerprint: sha256:{sha256}",
+            "Fingerprint (Argon2id): {fingerprint}",
         ])
         entry = self.publish(summary_of(record), details, message, f"{author_name} <{author_mail}@hypothes.is.invalid>")
         record.update(status="adopted", decided=self.now.isoformat(), version=entry["version"],
-                      fingerprint=entry["sha256"], diff=edit.diff)
+                      fingerprint=entry["fingerprint"], diff=edit.diff)
         self.say(f"Adopted proposal {record['id']} as version {entry['version']}: {summary_of(record)}")
 
     def run(self) -> None:

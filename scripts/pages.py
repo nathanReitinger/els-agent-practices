@@ -166,7 +166,7 @@ FIXED = {
     "join/index.html": render("join", "..", f"Join · {SITE_NAME}",
                               "Join the Google group where people who use and shape AGENTS.md talk with each other."),
     "check/index.html": render("check", "..", f"Check a copy · {SITE_NAME}",
-                               "Check whether a copy of AGENTS.md is exactly a published version, using its SHA-256 fingerprint."),
+                               "Check whether a copy of AGENTS.md is exactly a published version, using its Argon2id fingerprint."),
     # Addresses from earlier layouts.
     "agents/index.html": redirect("../"),
     "draft/agents.html": redirect("./"),

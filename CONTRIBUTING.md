@@ -20,7 +20,7 @@ Reply **Approve** or **Reject** to a proposal in the Drafter, or comment `/appro
 
 ## Check a copy
 
-Every version has a SHA-256 fingerprint. [Check a copy](https://nathanreitinger.github.io/els-agent-practices/check/) tells you whether a file is exactly a published version and, if it isn't, what changed.
+Every version has a fingerprint, an Argon2id hash of its text. [Check a copy](https://nathanreitinger.github.io/els-agent-practices/check/) tells you whether a file is exactly a published version and, if it isn't, what changed.
 
 ## For GitHub users
 

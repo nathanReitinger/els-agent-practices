@@ -53,9 +53,9 @@ The site shows the new version within a few minutes.
 
 ## Fingerprints
 
-Every version has a fingerprint: the SHA-256 hash of its file without line 3, the version line, which states the fingerprint. Changing a single character anywhere else changes the fingerprint. Anyone can check a copy on the site's [Check a copy](https://nathanreitinger.github.io/els-agent-practices/check/) page, or in a terminal on a Mac or Linux:
+Every version has a fingerprint: the Argon2id hash ([RFC 9106](https://www.rfc-editor.org/rfc/rfc9106.html)) of its file without line 3, the version line, which states the fingerprint. Changing a single character anywhere else changes the fingerprint. The settings are fixed and public, so anyone gets the same result: the salt `AGENTS.md-ELS-v1`, 3 passes, 4 lanes, 64 MiB of memory, and a 32-byte result (RFC 9106's second recommended settings). Anyone can check a copy on the site's [Check a copy](https://nathanreitinger.github.io/els-agent-practices/check/) page, or in a terminal on a Mac or Linux, after installing the package once with `python3 -m pip install argon2-cffi`:
 
-    tr -d '\r' < AGENTS.md | sed 3d | shasum -a 256
+    tr -d '\r' < AGENTS.md | sed 3d | python3 -c "import sys; from argon2.low_level import hash_secret_raw, Type; print(hash_secret_raw(sys.stdin.buffer.read(), b'AGENTS.md-ELS-v1', 3, 65536, 4, 32, Type.ID).hex())"
 
 Each fingerprint is recorded in the file itself, in [versions.json](versions.json), in the change log, and in the version's git tag. The robot refuses to run if any published version no longer matches its fingerprint. Versions 0.0.0 to 0.0.2 came before fingerprints; theirs were computed afterward from the frozen files.
 

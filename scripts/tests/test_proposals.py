@@ -169,8 +169,8 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.git("tag", "--list", "v*").split(), ["v0.0.2", "v0.0.3", "v0.0.4"])
         for entry in manifest["versions"][:2]:
             frozen = (self.repo / "versions" / f"v{entry['version']}" / "AGENTS.md").read_text()
-            self.assertEqual(fingerprint(frozen), entry["sha256"])
-            self.assertIn(f"SHA-256 fingerprint of this file without this line: {entry['sha256']}", frozen.split("\n")[2])
+            self.assertEqual(fingerprint(frozen), entry["fingerprint"])
+            self.assertIn(f"Argon2id fingerprint of this file without this line: {entry['fingerprint']}", frozen.split("\n")[2])
         draft = (self.repo / "draft" / "AGENTS.md").read_text()
         self.assertEqual(draft, (self.repo / "latest" / "AGENTS.md").read_text())
         self.assertIn("Give me the estimated cost and how it's billed first.", draft)

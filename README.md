@@ -15,7 +15,7 @@ It's a comment draft (version 0.0.x): nothing is final, and it grows out of prop
 - **Anyone can propose a change** in the Drafter, with no GitHub account: select words, choose Annotate (Hypothesis; free account), and start the note with `Delete`, `Replace with:`, `Add after:`, or `Add rule:`.
 - **Members vote** by replying Approve or Reject, or with `/approve` on the proposal's GitHub issue. One member's approval adopts a proposal, unless at least as many members reject it.
 - **Approved changes are published automatically.** A robot (`scripts/proposals.py`, run every 15 minutes by `.github/workflows/proposals.yml`) applies each approved proposal, publishes it as the next version, and records who proposed and approved it.
-- **Every version has a fingerprint**, the SHA-256 hash of its file without line 3, so anyone can check that a copy is exact.
+- **Every version has a fingerprint**, the Argon2id hash of its file without line 3, so anyone can check that a copy is exact.
 - **Nothing is lost.** Every proposal, vote, and version is kept, and force-pushes to `main` are blocked, so the history can't be rewritten.
 
 The rules are in [GOVERNANCE.md](GOVERNANCE.md); how to take part is in [CONTRIBUTING.md](CONTRIBUTING.md).
