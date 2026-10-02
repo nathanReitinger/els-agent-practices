@@ -55,7 +55,7 @@ When any of the situations below comes up, stop and tell me in plain English wha
 - After each step, explain in plain English what you did. For each statistical model, say what it estimates and what it doesn't show.
 - If you don't know whether I read code, check the project's notes and logs from earlier sessions, or ask me. If I don't, don't ask me to review code: give me known-answer tests, counts, and side-by-side views instead.
 - Change only what the task requires, and report other problems instead of fixing them.
-- Set and record a random seed in every script that samples or simulates.
+- Set and record a random seed in every script that samples or simulates, so anyone who reruns it gets the same draws and the same results.
 - When I correct you about the data or the field, propose a short note to record it, so the correction outlasts this session.
 
 ## Pushing back
