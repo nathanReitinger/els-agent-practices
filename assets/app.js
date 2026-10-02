@@ -1,18 +1,21 @@
-/* ELS Agent Practices: renders the guide from Markdown and adds the version chrome.
+/* ELS Agent Practices: renders the guide and AGENTS.md from Markdown and adds the version chrome.
    Each page says what to show with attributes on <body>:
      data-mode     published | draft | history | versions | archive
+     data-file     guide | agents (default guide)
      data-root     path from the page to the site root: ".", "..", or "../.."
-     data-version  archive pages only, e.g. "0.1.0"
+     data-version  archive pages only, e.g. "0.0.1"
    There is no build step: GitHub Pages serves these files as they are. */
 (() => {
   "use strict";
 
-  const GUIDE = "agent-best-practices.md";
-  const STARTER = "starter-CLAUDE.md";
-  const DRAFT_PATH = `draft/${GUIDE}`;
+  const FILES = {
+    guide: { name: "agent-best-practices.md", label: "Guide" },
+    agents: { name: "AGENTS.md", label: "AGENTS.md" },
+  };
 
-  const { mode = "published", root = ".", version: pageVersion } = document.body.dataset;
+  const { mode = "published", file = "guide", root = ".", version: pageVersion } = document.body.dataset;
   const isLocal = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+  const rev = new URLSearchParams(location.search).get("rev");
 
   const $ = (sel, scope = document) => scope.querySelector(sel);
   const $$ = (sel, scope = document) => [...scope.querySelectorAll(sel)];
@@ -31,13 +34,14 @@
     node.append(...children.filter((child) => child != null && child !== false));
     return node;
   }
-  const external = (text, href, cls) => h("a", { class: cls, href, target: "_blank", rel: "noopener", text });
-  const button = (text, href, attrs = {}) => h("a", { class: "button", href, ...attrs, text });
   const newTab = { target: "_blank", rel: "noopener" };
+  const external = (text, href, cls) => h("a", { class: cls, href, ...newTab, text });
+  const button = (text, href, attrs = {}) => h("a", { class: "button", href, ...attrs, text });
+  const secondary = (text, href, attrs = {}) => button(text, href, { class: "button secondary", ...attrs });
 
   async function fetchText(url) {
     const res = await fetch(url, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText || "error"} for ${url}`);
+    if (!res.ok) throw Object.assign(new Error(`${res.status} ${res.statusText || "error"} for ${url}`), { status: res.status });
     return res.text();
   }
 
@@ -49,6 +53,8 @@
 
   const slugify = (text) =>
     text.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").trim().replace(/\s+/g, "-") || "section";
+  const isCommentDraft = (version) => /^0\./.test(version || "");
+  const versionLabel = (version) => `Version ${version}${isCommentDraft(version) ? " · comment draft" : ""}`;
 
   async function copyText(text, control, done = "Copied") {
     const label = control.textContent;
@@ -61,27 +67,51 @@
     setTimeout(() => (control.textContent = label), 2500);
   }
 
+  // ---------- Where things live ----------
+
+  const releaseFiles = (release) =>
+    release?.files || (release ? [FILES.guide.name] : []);
+  const hasAgents = (release) => releaseFiles(release).includes(FILES.agents.name);
+
+  function pageUrl(which, inMode = mode, version = pageVersion) {
+    const agents = which === "agents";
+    if (inMode === "draft") return at(agents ? "draft/agents.html" : "draft/");
+    if (inMode === "archive") return at(`versions/v${version}/${agents ? "agents.html" : ""}`);
+    return at(agents ? "agents/" : "");
+  }
+
+  // Practice IDs in AGENTS.md, like (C4) or (P5), link to the practice in the matching guide.
+  function guideHref(id) {
+    const anchor = /^P\d$/.test(id) ? `principle-${id.slice(1)}` : id;
+    if (mode === "draft") return `${at("draft/")}${rev ? `?rev=${rev}` : ""}#${anchor}`;
+    if (mode === "archive") return `./#${anchor}`;
+    return `${at("")}#${anchor}`;
+  }
+
   // ---------- Rendering ----------
 
+  let currentMarkdown = "";
+
   function renderMarkdown(markdown) {
+    currentMarkdown = markdown;
     const article = $("#doc");
+    article.classList.remove("raw");
     article.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
     addIds(article);
+    if (file === "agents") linkPracticeIds(article);
     addCopyButtons(article);
     for (const link of $$("a[href^='http']", article)) Object.assign(link, newTab);
     buildContents(article);
     highlightTarget();
   }
 
-  // The ids are added after the page loads, so CSS :target can miss them; mark the target ourselves.
-  function highlightTarget() {
-    $(".targeted")?.classList.remove("targeted");
-    const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
-    if (!target) return;
-    target.classList.add("targeted");
-    target.scrollIntoView();
+  function showRaw(show) {
+    const article = $("#doc");
+    if (!show) return renderMarkdown(currentMarkdown);
+    article.classList.add("raw");
+    article.replaceChildren(h("pre", { class: "raw-file" }, h("code", { text: currentMarkdown })));
+    addCopyButtons(article);
   }
-  addEventListener("hashchange", highlightTarget);
 
   // Headings get ids for the contents list. A paragraph that opens with a bold
   // practice number ("C4.") becomes #C4, and a principle ("3.") becomes
@@ -108,6 +138,34 @@
     }
   }
 
+  function linkPracticeIds(article) {
+    const ID = "(?:P[1-8]|[A-H]\\d{1,2})";
+    const pattern = new RegExp(`\\((${ID}(?:\\s*[,;]\\s*${ID})*)\\)`, "g");
+    const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => (node.parentElement.closest("pre, code, a") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const text = node.nodeValue;
+      const matches = [...text.matchAll(pattern)];
+      if (!matches.length) continue;
+      const parts = [];
+      let last = 0;
+      for (const m of matches) {
+        parts.push(text.slice(last, m.index), "(");
+        m[1].split(/\s*[,;]\s*/).forEach((id, i) => {
+          if (i) parts.push(", ");
+          parts.push(h("a", { class: "practice-ref", href: guideHref(id), title: `Why: practice ${id} in the guide`, text: id }));
+        });
+        parts.push(")");
+        last = m.index + m[0].length;
+      }
+      parts.push(text.slice(last));
+      node.replaceWith(...parts);
+    }
+  }
+
   function addCopyButtons(article) {
     for (const pre of $$("pre", article)) {
       const code = $("code", pre) || pre;
@@ -130,11 +188,37 @@
     toc.hidden = false;
   }
 
+  // The ids are added after the page loads, so CSS :target can miss them; mark the target ourselves.
+  function highlightTarget() {
+    $(".targeted")?.classList.remove("targeted");
+    const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (!target) return;
+    target.classList.add("targeted");
+    target.scrollIntoView();
+  }
+  addEventListener("hashchange", highlightTarget);
+
   function showBanner(kind, ...rows) {
     const banner = $("#banner");
     banner.className = `banner banner-${kind}`;
     banner.replaceChildren(...rows);
     banner.hidden = false;
+  }
+
+  // Guide | AGENTS.md switch for the same version or draft.
+  function fileSwitch(available = ["guide", "agents"]) {
+    return h("p", { class: "file-switch", role: "tablist", "aria-label": "Document" },
+      ...available.map((which) => h("a", {
+        class: which === file ? "active" : null, href: pageUrl(which), role: "tab",
+        "aria-selected": which === file ? "true" : "false", text: FILES[which].label })));
+  }
+
+  function commentNote() {
+    return h("p", { class: "banner-note comment-note" },
+      h("strong", { text: "Comment on anything: " }),
+      "select any passage and choose ", h("em", { text: "Annotate" }), ". Comments appear right away for everyone (they use ",
+      external("Hypothesis", "https://web.hypothes.is/start"), ", which asks for a free account). ",
+      "Existing comments are highlighted; open the panel on the right to read them.");
   }
 
   function showError(error) {
@@ -144,36 +228,13 @@
       h("p", {}, "Try reloading the page, or start from ", h("a", { href: at(""), text: "the home page" }), "."));
   }
 
-  function citation(cfg, version, date) {
-    const link = `${cfg.site}versions/v${version}/`;
-    return h("span", { class: "cite" }, "Cite as: ", `${cfg.authors}, `, h("em", { text: cfg.title }),
-      ` (version ${version}, ${String(date || "").slice(0, 4)}), `, h("a", { href: link, text: link }), ".");
-  }
 
-  // ---------- GitHub ----------
-
-  const editUrl = (cfg) => `https://github.com/${cfg.repo}/edit/${cfg.branch}/${DRAFT_PATH}`;
-  const repoFile = (cfg, file) => `https://github.com/${cfg.repo}/blob/${cfg.branch}/${file}`;
-
-  async function draftCommits(cfg, count) {
-    const url = `https://api.github.com/repos/${cfg.repo}/commits?sha=${cfg.branch}` +
-      `&path=${encodeURIComponent(DRAFT_PATH)}&per_page=${count}`;
-    const res = await fetch(url, { headers: { Accept: "application/vnd.github+json" } });
-    if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
-    return res.json();
-  }
-
-  // The draft is read from GitHub at its newest commit, so a merged edit shows up
-  // right away (the GitHub Pages copy can lag). Local previews use the local file.
-  async function loadDraft(cfg) {
-    if (isLocal) return { markdown: await fetchText(at(DRAFT_PATH)) };
-    try {
-      const [latest] = await draftCommits(cfg, 1);
-      const raw = `https://raw.githubusercontent.com/${cfg.repo}/${latest.sha}/${DRAFT_PATH}`;
-      return { markdown: await fetchText(raw), commit: latest };
-    } catch {
-      return { markdown: await fetchText(at(DRAFT_PATH)) };
-    }
+  // Comments (Hypothesis) attach to the canonical URL, so comments made on the
+  // "latest" pages stay with the version they were about.
+  function setCanonical(url) {
+    const absolute = new URL(url, location.href).href;
+    const link = $("link[rel=canonical]") || document.head.appendChild(h("link", { rel: "canonical" }));
+    link.href = absolute;
   }
 
   function loadHypothesis() {
@@ -184,78 +245,167 @@
       h("script", { src: "https://hypothes.is/embed.js", async: true }));
   }
 
+  // ---------- GitHub ----------
+
+  const editUrl = (cfg, which) => `https://github.com/${cfg.repo}/edit/${cfg.branch}/draft/${FILES[which].name}`;
+  const repoFile = (cfg, path) => `https://github.com/${cfg.repo}/blob/${cfg.branch}/${path}`;
+
+  async function draftCommits(cfg, count, path = "draft") {
+    const url = `https://api.github.com/repos/${cfg.repo}/commits?sha=${cfg.branch}` +
+      `&path=${encodeURIComponent(path)}&per_page=${count}`;
+    const res = await fetch(url, { headers: { Accept: "application/vnd.github+json" } });
+    if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
+    return res.json();
+  }
+
+  // The draft is read from GitHub at its newest commit, so a merged edit shows up
+  // right away (the GitHub Pages copy can lag). Local previews use the local file.
+  async function loadDraft(cfg, which) {
+    const path = `draft/${FILES[which].name}`;
+    if (isLocal) return { markdown: await fetchText(at(path)) };
+    try {
+      const [latest] = await draftCommits(cfg, 1, path);
+      const raw = `https://raw.githubusercontent.com/${cfg.repo}/${latest.sha}/${path}`;
+      return { markdown: await fetchText(raw), commit: latest };
+    } catch {
+      return { markdown: await fetchText(at(path)) };
+    }
+  }
+
   // ---------- Pages ----------
 
+  function downloadButtons(release, base, primary = true) {
+    const files = releaseFiles(release);
+    const buttons = [];
+    if (files.includes(FILES.agents.name)) {
+      buttons.push(button("Download AGENTS.md", `${base}${FILES.agents.name}`, { download: "AGENTS.md", class: primary ? "button" : "button secondary" }));
+    }
+    buttons.push(secondary("Download the guide (.md)", `${base}${FILES.guide.name}`, { download: FILES.guide.name }));
+    return buttons;
+  }
+
+  function agentsTools(markdownUrlForCurl) {
+    const rawToggle = h("button", { class: "button secondary", type: "button", text: "Show the raw file" });
+    rawToggle.addEventListener("click", () => {
+      const showing = $("#doc").classList.contains("raw");
+      showRaw(!showing);
+      rawToggle.textContent = showing ? "Show the raw file" : "Show it formatted";
+    });
+    return [
+      h("button", { class: "button secondary", type: "button", text: "Copy AGENTS.md",
+        onclick: (event) => copyText(currentMarkdown, event.currentTarget) }),
+      rawToggle,
+      markdownUrlForCurl ? h("p", { class: "banner-note fetch" }, "Or, in your project folder: ",
+        h("code", { text: `curl -O ${markdownUrlForCurl}` })) : null,
+    ];
+  }
+
+  const agentsIntro = () => h("p", { class: "banner-note" },
+    "Save it in your project folder as AGENTS.md (or rename it CLAUDE.md for Claude Code), fill in the [bracketed] parts, and delete what you don't need. ",
+    "Each rule ends with the guide practice it comes from, like (C4); click one to read why.");
+
   async function showPublished(cfg) {
-    if (!cfg.latest) {
+    const release = cfg.versions.find((r) => r.version === cfg.latest);
+    if (!release) {
       showBanner("draft", h("p", { class: "banner-title" }, "Nothing has been published yet. ",
-        h("a", { href: at("draft/"), text: "Read the working draft" }), "."));
+        h("a", { href: pageUrl(file, "draft"), text: "Read the working draft" }), "."));
       $("#doc").replaceChildren();
       return;
     }
-    const release = cfg.versions.find((r) => r.version === cfg.latest) || {};
-    showBanner("published",
-      h("p", { class: "banner-title" }, h("span", { class: "badge", text: `Version ${cfg.latest}` }),
-        `Published ${formatDate(release.date)}. Published versions never change.`),
-      h("p", { class: "banner-actions" },
-        button("Download the starter CLAUDE.md", at(`latest/${STARTER}`), { download: "CLAUDE.md" }),
-        button("Download the full guide (.md)", at(`latest/${GUIDE}`), { class: "button secondary", download: GUIDE })),
-      h("p", { class: "banner-note" }, "The next version is being written in the open: ",
-        h("a", { href: at("draft/"), text: "anyone can edit the draft" }), ".", citation(cfg, cfg.latest, release.date)));
-    renderMarkdown(await fetchText(at(`versions/v${cfg.latest}/${GUIDE}`)));
+    if (file === "agents" && !hasAgents(release)) {
+      showBanner("draft", fileSwitch(),
+        h("p", { class: "banner-title" }, "AGENTS.md isn't in a published version yet. ",
+          h("a", { href: pageUrl("agents", "draft"), text: "Read the working draft of AGENTS.md" }), "."));
+      $("#doc").replaceChildren();
+      return;
+    }
+    const permalink = pageUrl(file, "archive", cfg.latest);
+    const rows = [
+      fileSwitch(hasAgents(release) ? ["guide", "agents"] : ["guide"]),
+      h("p", { class: "banner-title" }, h("span", { class: "badge", text: versionLabel(cfg.latest) }),
+        `Published ${formatDate(release.date)}. `,
+        isCommentDraft(cfg.latest) ? "Nothing here is final; we want your comments." : "Published versions never change."),
+      h("p", { class: "banner-actions" }, ...downloadButtons(release, at("latest/"), true),
+        ...(file === "agents" ? agentsTools(`${cfg.site}latest/${FILES.agents.name}`) : [])),
+    ];
+    if (file === "agents") rows.push(agentsIntro());
+    rows.push(commentNote(),
+      h("p", { class: "banner-note" }, "To change the text itself, ",
+        h("a", { href: pageUrl(file, "draft"), text: "edit the draft" }), "; anyone can."));
+    showBanner("published", ...rows);
+    renderMarkdown(await fetchText(at(`versions/v${cfg.latest}/${FILES[file].name}`)));
+    setCanonical(permalink);
+    loadHypothesis();
   }
 
   async function showDraft(cfg) {
-    const rev = new URLSearchParams(location.search).get("rev");
     if (rev) return showRevision(cfg, rev);
     const lastEdit = h("span", { class: "muted" });
-    showBanner("draft",
+    const rows = [
+      fileSwitch(),
       h("p", { class: "banner-title" },
         h("span", { class: "badge badge-draft", text: `Draft of version ${cfg.draft.replace(/-draft$/, "")}` }),
         "Anyone can edit this draft. Every edit is logged and can be undone. ", lastEdit),
       h("p", { class: "banner-actions" },
-        button("Edit this draft", editUrl(cfg), newTab),
-        button("Edit history", at("draft/history.html"), { class: "button secondary" }),
-        button("How editing works", repoFile(cfg, "CONTRIBUTING.md"), { class: "button secondary", ...newTab })),
-      h("p", { class: "banner-note" }, "To comment instead, highlight any passage. Comments use ",
-        external("Hypothesis", "https://web.hypothes.is/"), ", which needs a free account. ",
-        cfg.latest
-          ? h("span", {}, "For a stable version to cite, use ", h("a", { href: at(""), text: `version ${cfg.latest}` }), ".")
-          : "No version has been published yet."));
-    const { markdown, commit } = await loadDraft(cfg);
+        button(`Edit ${file === "agents" ? "AGENTS.md" : "the guide"}`, editUrl(cfg, file), newTab),
+        secondary("Edit history", at("draft/history.html")),
+        secondary("How editing works", repoFile(cfg, "CONTRIBUTING.md"), newTab),
+        ...(file === "agents" ? agentsTools(null) : [])),
+    ];
+    if (file === "agents") rows.push(agentsIntro());
+    rows.push(commentNote());
+    if (cfg.latest) rows.push(h("p", { class: "banner-note" }, "For a frozen snapshot that won't change, see ",
+      h("a", { href: pageUrl(file, "published"), text: `version ${cfg.latest}` }), "."));
+    showBanner("draft", ...rows);
+    const { markdown, commit } = await loadDraft(cfg, file);
     renderMarkdown(markdown);
     if (commit) {
       const who = commit.author?.login ?? commit.commit.author.name;
       lastEdit.textContent = `Last edited ${formatDate(commit.commit.author.date)} by ${who}.`;
     }
+    setCanonical(pageUrl(file, "draft"));
     loadHypothesis();
   }
 
   async function showRevision(cfg, sha) {
     if (!/^[0-9a-f]{7,40}$/i.test(sha)) throw new Error("That revision id doesn't look right.");
-    const markdown = await fetchText(`https://raw.githubusercontent.com/${cfg.repo}/${sha}/${DRAFT_PATH}`);
+    const path = `draft/${FILES[file].name}`;
+    let markdown;
+    try {
+      markdown = await fetchText(`https://raw.githubusercontent.com/${cfg.repo}/${sha}/${path}`);
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      showBanner("archive", fileSwitch(), h("p", { class: "banner-title" },
+        `${FILES[file].label} didn't exist yet at revision ${sha.slice(0, 7)}. `,
+        h("a", { href: at("draft/history.html"), text: "Back to the edit history" }), "."));
+      $("#doc").replaceChildren();
+      return;
+    }
     showBanner("archive",
+      fileSwitch(),
       h("p", { class: "banner-title" }, h("span", { class: "badge", text: `Revision ${sha.slice(0, 7)}` }),
-        "This is how the draft looked after an earlier edit."),
+        `This is how ${file === "agents" ? "AGENTS.md" : "the guide"} looked after an earlier edit.`),
       h("p", { class: "banner-actions" },
-        button("Back to the current draft", at("draft/")),
+        button("Back to the current draft", pageUrl(file, "draft")),
         h("button", { class: "button secondary", type: "button", text: "Copy this revision's text",
           onclick: (event) => copyText(markdown, event.currentTarget, "Copied. Now open the editor and paste") }),
-        button("Open the editor", editUrl(cfg), { class: "button secondary", ...newTab }),
-        button("What changed in this edit", `https://github.com/${cfg.repo}/commit/${sha}`, { class: "button secondary", ...newTab })),
+        secondary("Open the editor", editUrl(cfg, file), newTab),
+        secondary("What changed in this edit", `https://github.com/${cfg.repo}/commit/${sha}`, newTab)),
       h("p", { class: "banner-note", text: "To restore this revision, copy its text, open the editor, " +
         "select everything there, paste, and propose the change. The restore is merged and logged like any other edit." }));
+    // The guide/AGENTS.md switch keeps the same revision.
+    for (const link of $$(".file-switch a")) link.href += `?rev=${sha}`;
     renderMarkdown(markdown);
   }
 
   async function showHistory(cfg) {
-    const fullLog = `https://github.com/${cfg.repo}/commits/${cfg.branch}/${DRAFT_PATH}`;
+    const fullLog = `https://github.com/${cfg.repo}/commits/${cfg.branch}/draft`;
     showBanner("draft",
       h("p", { class: "banner-title" }, h("span", { class: "badge badge-draft", text: "Edit history" }),
-        "Every edit to the draft, newest first. Nothing is lost: any revision can be viewed and restored."),
+        "Every edit to the draft guide and AGENTS.md, newest first. Nothing is lost: any revision can be viewed and restored."),
       h("p", { class: "banner-actions" },
         button("Back to the draft", at("draft/")),
-        button("Full log on GitHub", fullLog, { class: "button secondary", ...newTab })));
+        secondary("Full log on GitHub", fullLog, newTab)));
     const doc = $("#doc");
     let commits;
     try {
@@ -273,38 +423,49 @@
         h("td", { text: new Date(c.commit.author.date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) }),
         h("td", {}, c.author?.html_url ? external(who, c.author.html_url) : who),
         h("td", { text: c.commit.message.split("\n")[0] }),
-        h("td", { class: "actions" }, h("a", { href: `./?rev=${c.sha}`, text: "View" }), " · ", external("Changes", c.html_url)));
+        h("td", { class: "actions" },
+          h("a", { href: `./?rev=${c.sha}`, text: "Guide" }), " · ",
+          h("a", { href: `./agents.html?rev=${c.sha}`, text: "AGENTS.md" }), " · ",
+          external("Changes", c.html_url)));
     });
     doc.replaceChildren(
       h("h1", { text: "Edit history of the draft" }),
-      h("p", { class: "muted", text: commits.length === 100
+      h("p", { class: "muted", text: (commits.length === 100
         ? "The 100 most recent edits. Older ones are in the full log on GitHub."
-        : `${commits.length} edit${commits.length === 1 ? "" : "s"} so far.` }),
+        : `${commits.length} edit${commits.length === 1 ? "" : "s"} so far.`) +
+        " Click Guide or AGENTS.md to read that file as it was after the edit." }),
       h("div", { class: "table-wrap" }, h("table", { class: "log" },
-        h("thead", {}, h("tr", {}, ...["When", "Who", "What", ""].map((t) => h("th", { text: t })))),
+        h("thead", {}, h("tr", {}, ...["When", "Who", "What", "View"].map((t) => h("th", { text: t })))),
         h("tbody", {}, ...rows))));
   }
 
   function showVersions(cfg) {
+    const fileLinks = (r) => {
+      const files = releaseFiles(r);
+      const links = [h("a", { href: at(`versions/v${r.version}/`), text: "Guide" })];
+      if (files.includes(FILES.agents.name)) links.push(" · ", h("a", { href: at(`versions/v${r.version}/agents.html`), text: "AGENTS.md" }));
+      links.push(" · Raw files: ", ...files.flatMap((name, i) => [i ? ", " : "", h("a", { href: at(`versions/v${r.version}/${name}`), text: name })]));
+      return links;
+    };
     const items = cfg.versions.map((r) => h("li", {},
-      h("a", { href: at(`versions/v${r.version}/`), text: `Version ${r.version}` }),
+      h("a", { href: at(`versions/v${r.version}/`), text: versionLabel(r.version) }),
       r.version === cfg.latest ? h("span", { class: "badge", text: "latest" }) : null,
       h("span", { class: "muted", text: ` · ${formatDate(r.date)}` }),
       h("div", { text: r.summary }),
-      h("div", { class: "muted" },
-        h("a", { href: at(`versions/v${r.version}/${GUIDE}`), text: "Guide (.md)" }), " · ",
-        h("a", { href: at(`versions/v${r.version}/${STARTER}`), text: "Starter CLAUDE.md" }))));
+      h("div", { class: "muted" }, ...fileLinks(r))));
     $("#doc").replaceChildren(
       h("h1", { text: "All versions" }),
-      h("p", {}, "Published versions never change, so each can be cited by its number and permanent link. " +
-        "Changes happen in the ", h("a", { href: at("draft/"), text: `draft (${cfg.draft})` }), ", which anyone can edit."),
+      h("p", {}, "Each version is a frozen snapshot with a permanent link, so links and comments always point to the same text. Changes happen in the ",
+        h("a", { href: at("draft/"), text: `draft (${cfg.draft})` }), ", which anyone can edit."),
       items.length ? h("ul", { class: "versions" }, ...items) : h("p", { class: "muted", text: "Nothing has been published yet." }),
       h("h2", { text: "How version numbers work" }),
       h("ul", {},
-        h("li", {}, h("strong", { text: "Patch" }), " (0.1.0 → 0.1.1): wording, typos, links, and reference fixes. The advice doesn't change."),
-        h("li", {}, h("strong", { text: "Minor" }), " (0.1.0 → 0.2.0): new practices or other additions that don't contradict earlier advice."),
-        h("li", {}, h("strong", { text: "Major" }), " (1.0.0 → 2.0.0): a practice is removed or reversed, so someone following the earlier version would need to change what they do."),
-        h("li", {}, "Versions below 1.0 are community drafts. A practice number (like D3) keeps its meaning once published.")),
+        h("li", {}, h("strong", { text: "0.0.x: comment drafts." }), " Nothing is final. Each new comment draft adds one to the last number (0.0.1, 0.0.2, ...)."),
+        h("li", {}, h("strong", { text: "1.0.0" }), " will be the first version the contributors are ready to recommend as a standard."),
+        h("li", {}, "After 1.0: ", h("strong", { text: "patch" }), " (1.0.1) fixes wording and references, ",
+          h("strong", { text: "minor" }), " (1.1.0) adds practices, and ", h("strong", { text: "major" }),
+          " (2.0.0) removes or reverses advice."),
+        h("li", {}, "Practice numbers (like D3) keep their meaning once published.")),
       h("p", {}, "Details are in ", external("CONTRIBUTING.md", repoFile(cfg, "CONTRIBUTING.md")),
         ", and what changed in each version is in the ", external("changelog", repoFile(cfg, "CHANGELOG.md")), "."));
   }
@@ -313,15 +474,18 @@
     const release = cfg.versions.find((r) => r.version === pageVersion) || {};
     const current = pageVersion === cfg.latest;
     showBanner(current ? "published" : "archive",
-      h("p", { class: "banner-title" }, h("span", { class: "badge", text: `Version ${pageVersion}` }),
+      fileSwitch(hasAgents(release) ? ["guide", "agents"] : ["guide"]),
+      h("p", { class: "banner-title" }, h("span", { class: "badge", text: versionLabel(pageVersion) }),
         `Published ${formatDate(release.date)}. `,
         current ? "This is the current version."
-          : h("span", {}, "There's a newer version: ", h("a", { href: at(""), text: `version ${cfg.latest}` }), ".")),
-      h("p", { class: "banner-actions" },
-        button("Download the starter CLAUDE.md", `./${STARTER}`, { download: "CLAUDE.md" }),
-        button("Download this version (.md)", `./${GUIDE}`, { class: "button secondary", download: GUIDE })),
-      h("p", { class: "banner-note" }, citation(cfg, pageVersion, release.date)));
-    renderMarkdown(await fetchText(`./${GUIDE}`));
+          : h("span", {}, "There's a newer version: ", h("a", { href: pageUrl(file, "published"), text: `version ${cfg.latest}` }), ".")),
+      h("p", { class: "banner-actions" }, ...downloadButtons(release, "./", true),
+        ...(file === "agents" ? agentsTools(`${cfg.site}versions/v${pageVersion}/${FILES.agents.name}`) : [])),
+      file === "agents" ? agentsIntro() : null,
+      commentNote());
+    renderMarkdown(await fetchText(`./${FILES[file].name}`));
+    setCanonical(location.href.split(/[?#]/)[0]);
+    loadHypothesis();
   }
 
   function showFooter(cfg) {

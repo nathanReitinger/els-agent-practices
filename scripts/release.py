@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Publish the current draft as a numbered, frozen version of the guide.
+"""Publish the current draft as a numbered, frozen version.
 
-    python3 scripts/release.py 0.2.0 "One-line summary of this release"
+    python3 scripts/release.py 0.0.2 "One-line summary of this release"
 
-Copies draft/agent-best-practices.md to versions/vX.Y.Z/ (stamped with its
-version, date, and permanent link), extracts the starter instruction file from
-Appendix A, refreshes latest/, records the release in versions.json and
-CHANGELOG.md, and moves the draft on to the next "-draft" version.
+Copies the draft guide and AGENTS.md from draft/ to versions/vX.Y.Z/, stamping
+each with its version, date, and permanent link; writes that version's pages;
+makes latest/ an exact copy of the new version; records the release in
+versions.json and CHANGELOG.md; and moves the draft on to the next version.
+
+Before 1.0, every version is a comment draft (0.0.1, 0.0.2, ...), and the draft
+moves to the next patch number. From 1.0 on, the draft moves to the next minor
+version. The rules are in CONTRIBUTING.md.
 
 It never commits, tags, or pushes. It prints those commands so you can review
-the result first. The version-number rules are in CONTRIBUTING.md.
+the result first.
 """
 
 from __future__ import annotations
@@ -23,13 +27,15 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pages import archive_pages  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 GUIDE = "agent-best-practices.md"
-STARTER = "starter-CLAUDE.md"
-DRAFT = ROOT / "draft" / GUIDE
+AGENTS = "AGENTS.md"
+FILES = (GUIDE, AGENTS)  # released if present in draft/
 MANIFEST = ROOT / "versions.json"
 CHANGELOG = ROOT / "CHANGELOG.md"
-PAGE_TEMPLATE = ROOT / "assets" / "version-page.html"
 CHANGELOG_MARKER = "<!-- releases -->"
 
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
@@ -43,9 +49,34 @@ def die(message: str) -> NoReturn:
 def parse_version(text: str) -> tuple[int, int, int]:
     match = SEMVER.match(text)
     if not match:
-        die(f"'{text}' isn't a version number like 0.2.0")
+        die(f"'{text}' isn't a version number like 0.0.2")
     major, minor, patch = (int(part) for part in match.groups())
     return major, minor, patch
+
+
+def next_draft(number: tuple[int, int, int]) -> str:
+    major, minor, patch = number
+    if major == 0 and minor == 0:
+        return f"0.0.{patch + 1}-draft"
+    return f"{major}.{minor + 1}.0-draft"
+
+
+def comment_label(version: str) -> str:
+    return " (comment draft; not final)" if version.startswith("0.") else ""
+
+
+def published_line(name: str, version: str, today: str, site: str) -> str:
+    base = f"{site}versions/v{version}/"
+    if name == AGENTS:
+        return (f"*Version {version}{comment_label(version)} · Published {today} · Permanent link: <{base}{AGENTS}> · "
+                f"The reasons behind each rule: <{base}>*")
+    return f"*Version {version}{comment_label(version)} · Published {today} · Permanent link: <{base}>*"
+
+
+def draft_line(name: str, version: str, site: str) -> str:
+    latest = f"{site}latest/{AGENTS}" if name == AGENTS else site
+    return (f"*Version {version} · Working draft: anyone can edit it, and every edit is logged · "
+            f"Latest published version: <{latest}>*")
 
 
 def git(*args: str) -> str | None:
@@ -55,17 +86,6 @@ def git(*args: str) -> str | None:
     except (OSError, subprocess.CalledProcessError):
         return None
     return result.stdout.strip()
-
-
-def starter_file(markdown: str) -> str:
-    """The first fenced code block after the 'Appendix A' heading."""
-    heading = re.search(r"^## Appendix A\b.*$", markdown, re.MULTILINE)
-    if not heading:
-        die("couldn't find the '## Appendix A' heading in the draft")
-    block = re.search(r"^```[^\n]*\n(.*?)^```", markdown[heading.end():], re.MULTILINE | re.DOTALL)
-    if not block:
-        die("couldn't find the starter file's code block under Appendix A")
-    return block.group(1)
 
 
 def check_repo_is_current() -> None:
@@ -97,31 +117,33 @@ def main() -> None:
         die(f"versions/v{version}/ already exists; published versions are never overwritten")
     check_repo_is_current()
 
-    draft = DRAFT.read_text()
-    if not VERSION_LINE.search(draft):
-        die("the draft is missing its '*Version ...*' line near the top")
+    drafts = {name: (ROOT / "draft" / name).read_text() for name in FILES if (ROOT / "draft" / name).exists()}
+    if GUIDE not in drafts:
+        die(f"draft/{GUIDE} is missing")
+    for name, text in drafts.items():
+        if not VERSION_LINE.search(text):
+            die(f"draft/{name} is missing its '*Version ...*' line near the top")
+
     today = dt.date.today().isoformat()
     site = manifest["site"]
+    following = next_draft(number)
 
-    published = VERSION_LINE.sub(
-        f"*Version {version} · Published {today} · Permanent link: <{site}versions/v{version}/>*", draft, count=1)
     out_dir.mkdir(parents=True)
-    (out_dir / GUIDE).write_text(published)
-    (out_dir / STARTER).write_text(starter_file(published))
-    (out_dir / "index.html").write_text(PAGE_TEMPLATE.read_text().replace("{{VERSION}}", version))
+    for name, text in drafts.items():
+        (out_dir / name).write_text(VERSION_LINE.sub(published_line(name, version, today, site), text, count=1))
+        (ROOT / "draft" / name).write_text(VERSION_LINE.sub(draft_line(name, following, site), text, count=1))
+    for page, html in archive_pages(version, AGENTS in drafts).items():
+        (out_dir / page).write_text(html)
 
+    # latest/ is an exact copy of the newest version's files.
     latest = ROOT / "latest"
-    latest.mkdir(exist_ok=True)
-    for name in (GUIDE, STARTER):
+    shutil.rmtree(latest, ignore_errors=True)
+    latest.mkdir()
+    for name in drafts:
         shutil.copyfile(out_dir / name, latest / name)
 
-    next_draft = f"{number[0]}.{number[1] + 1}.0-draft"
-    DRAFT.write_text(VERSION_LINE.sub(
-        f"*Version {next_draft} · Working draft: anyone can edit it, and every edit is logged · "
-        f"Latest published version: <{site}>*", draft, count=1))
-
-    manifest.update(latest=version, draft=next_draft)
-    manifest["versions"].insert(0, {"version": version, "date": today, "summary": summary})
+    manifest.update(latest=version, draft=following)
+    manifest["versions"].insert(0, {"version": version, "date": today, "summary": summary, "files": list(drafts)})
     MANIFEST.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
 
     # The changelog gets the summary plus a line for every edit to the draft since the last release.
@@ -135,9 +157,11 @@ def main() -> None:
         die(f"CHANGELOG.md is missing the '{CHANGELOG_MARKER}' line")
     CHANGELOG.write_text(changelog.replace(CHANGELOG_MARKER, f"{CHANGELOG_MARKER}\n\n{entry}", 1))
 
-    print(f"Published version {version}: versions/v{version}/ and latest/. The draft is now {next_draft}.")
+    print(f"Published version {version} ({', '.join(drafts)}) to versions/v{version}/ and latest/. "
+          f"The draft is now {following}.")
     print("Review the changes, then run:")
-    print(f'  git add -A && git commit -m "Release v{version}" && git tag v{version} && git push --follow-tags')
+    print(f'  git add -A && git commit -m "Release v{version}" && git tag -a v{version} -m "Version {version}" '
+          f"&& git push --follow-tags")
 
 
 if __name__ == "__main__":

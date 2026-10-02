@@ -1,6 +1,6 @@
 # Best Practices for Working with AI Agents in Empirical Legal Research
 
-*Version 0.2.0-draft · Working draft: anyone can edit it, and every edit is logged · Latest published version: <https://nathanreitinger.github.io/els-agent-practices/>*
+*Version 0.0.0-draft · Working draft: anyone can edit it, and every edit is logged · Latest published version: <https://nathanreitinger.github.io/els-agent-practices/>*
 
 *A living document, started by Nathan Reitinger (Northwestern Law) with contributions from the people listed at the end. The first draft was written with Claude Code (Claude Opus 5.5). Anyone can edit it; see "How to contribute" at the end.*
 
