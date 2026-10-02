@@ -503,17 +503,38 @@ class Robot:
         self.manifest = json.loads(MANIFEST.read_text())
         return entry
 
-    def publish_direct_edit(self) -> None:
-        """A maintainer changed draft/AGENTS.md directly: publish it as the next version."""
+    def text_changes(self) -> list[tuple[str, str, str]]:
+        """(author, subject, message) for each commit since the newest version that changed the text itself,
+        not just its version line (line 3), oldest first."""
         latest = self.manifest["latest"]
-        log = git("log", "--format=%an\t%s", f"v{latest}..HEAD", "--", "draft/AGENTS.md").splitlines()
-        authors = sorted({line.split("\t")[0] for line in log if line} - {BOT_NAME}) or ["a maintainer"]
-        subjects = [line.split("\t", 1)[1] for line in log if "\t" in line]
-        summary = f"Edited directly by {', '.join(authors)}" + (f": {subjects[0]}" if len(subjects) == 1 else ".")
+        changes = []
+        for sha in git("rev-list", "--reverse", f"v{latest}..HEAD", "--", "draft/AGENTS.md").split():
+            after = git("show", f"{sha}:draft/AGENTS.md")
+            try:
+                before = git("show", f"{sha}^:draft/AGENTS.md")
+            except RuntimeError:
+                before = ""
+            if not before or fingerprint(before) != fingerprint(after):
+                author, subject, message = git("show", "-s", "--format=%an%x00%s%x00%B", sha).split("\0", 2)
+                changes.append((author, subject, message))
+        return changes
+
+    def publish_direct_edit(self) -> None:
+        """A maintainer changed draft/AGENTS.md directly: publish it as the next version.
+
+        A commit message can give the version's summary with a line "Version-summary: ..."; otherwise it
+        says who edited the text."""
+        changes = self.text_changes()
+        authors = sorted({author for author, _, _ in changes} - {BOT_NAME}) or ["a maintainer"]
+        subjects = [subject for _, subject, _ in changes]
+        given = [m.group(1).strip() for _, _, message in changes
+                 for m in [re.search(r"^Version-summary:[ \t]*(.+)$", message, re.M)] if m]
+        summary = given[-1] if given else (
+            f"Edited directly by {', '.join(authors)}" + (f": {subjects[0]}" if len(subjects) == 1 else "."))
         if self.o.dry_run:
             self.say(f"Would publish a direct edit to the draft as version {self.next_version()}: {summary}")
             return
-        details = ["Changes to the text:", ""] + [f"- {s}" for s in reversed(subjects)] if subjects else []
+        details = (["Changes to the text, by " + ", ".join(authors) + ":", ""] + [f"- {s}" for s in subjects]) if subjects else []
         entry = self.publish(summary, details, "Version {version}: " + summary + "\n\nFingerprint (Argon2id): {fingerprint}")
         self.say(f"Published a direct edit to the draft as version {entry['version']}.")
 

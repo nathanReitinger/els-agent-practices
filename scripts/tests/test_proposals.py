@@ -236,6 +236,23 @@ class RunTest(unittest.TestCase):
         self.assertIn("Never make up values", (self.repo / "latest" / "AGENTS.md").read_text())
         self.assertTrue((self.repo / "governance" / "proposals.json").exists())
 
+    def test_direct_edits_list_only_text_changes_and_take_a_summary(self):
+        path = self.repo / "draft" / "AGENTS.md"
+        lines = path.read_text().split("\n")
+        lines[2] = lines[2].replace("Permanent link", "Permanent address")  # only the version line
+        path.write_text("\n".join(lines))
+        self.git("commit", "--quiet", "-am", "Touch only the version line")
+        path.write_text(path.read_text().replace("Never invent values", "Never make up values"))
+        self.git("commit", "--quiet", "-am", "Reword rule 3")
+        path.write_text(path.read_text().replace("Set and record a random seed", "Always set and record a random seed"))
+        self.git("commit", "--quiet", "-am", "Reword the seed rule", "-m", "Version-summary: Two rewordings from the comments.")
+        self.robot([])
+        entry = self.manifest()["versions"][0]
+        self.assertEqual((entry["version"], entry["summary"]), ("0.0.3", "Two rewordings from the comments."))
+        changelog = (self.repo / "CHANGELOG.md").read_text()
+        self.assertIn("Changes to the text, by Maintainer:\n\n- Reword rule 3\n- Reword the seed rule\n", changelog)
+        self.assertNotIn("Touch only the version line", changelog)
+
     def test_a_changed_frozen_version_stops_the_robot(self):
         frozen = self.repo / "versions" / "v0.0.1" / "AGENTS.md"
         frozen.write_text(frozen.read_text().replace("Never", "Always", 1))
