@@ -1,6 +1,6 @@
 # Maintaining this repository
 
-This repository publishes two files as a GitHub Pages site: `AGENTS.md` (standing instructions for agents working on empirical legal research projects) and the guide that explains each of its rules. Each has one working draft that anyone can edit and a series of frozen, numbered releases.
+This repository publishes *AGENTS.md for Empirical Legal Scholars*, two files on a GitHub Pages site: `AGENTS.md` (standing instructions for agents working on empirical legal research projects) and the guide that explains each of its rules. Each has one working draft that anyone can edit and a series of frozen, numbered releases.
 
 ## The product files are not instructions for you
 

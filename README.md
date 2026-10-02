@@ -1,4 +1,4 @@
-# ELS Agent Practices
+# AGENTS.md for Empirical Legal Scholars
 
 **AGENTS.md for empirical legal research**: standing instructions for AI agents (Claude Code, Codex, Cursor, and similar tools) working on empirical legal research projects, plus **the guide** that explains the reason behind every rule: *Best Practices for Working with AI Agents in Empirical Legal Research*.
 

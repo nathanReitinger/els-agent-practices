@@ -1,4 +1,4 @@
-/* ELS Agent Practices: renders the guide and AGENTS.md from Markdown, adds the version
+/* AGENTS.md for Empirical Legal Scholars: renders the guide and AGENTS.md from Markdown, adds the version
    chrome, and gives readers controls for text size and light or dark mode.
    Each page says what to show with attributes on <body>:
      data-mode     published | draft | history | versions | archive
@@ -568,7 +568,7 @@
 
   function showFooter(cfg) {
     $("#footer")?.replaceChildren(
-      h("p", {}, h("em", { text: cfg.title })),
+      h("p", {}, h("em", { text: cfg.name || cfg.title })),
       h("p", {}, external("Source on GitHub", `https://github.com/${cfg.repo}`), " · ",
         external("Changelog", repoFile(cfg, "CHANGELOG.md")), " · ",
         external("How to contribute", repoFile(cfg, "CONTRIBUTING.md")), " · ",

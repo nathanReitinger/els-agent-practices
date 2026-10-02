@@ -1,4 +1,4 @@
-/* ELS Agent Practices: set in Playfair, for reading.
+/* AGENTS.md for Empirical Legal Scholars: set in Playfair, for reading.
    Colors are tokens. Light is the default; dark follows the reader's system setting
    unless they choose with the toggle (stored as <html data-theme>). Text size is
    --reading-scale, set by the size buttons. */
@@ -118,7 +118,9 @@ button { font: inherit; color: inherit; }
   background: var(--bg);
   box-shadow: var(--shadow);
 }
-.brand { margin-right: auto; color: var(--text); font-size: 1.12rem; font-style: italic; font-weight: 600; text-decoration: none; }
+.brand { margin-right: auto; color: var(--text); font-size: 1.1rem; text-decoration: none; line-height: 1.25; }
+.brand-file { font-weight: 700; letter-spacing: 0.01em; }
+.brand-for { font-style: italic; font-weight: 500; }
 .site-nav { display: flex; flex-wrap: wrap; gap: 0.15rem; }
 .site-nav a {
   padding: 0.28rem 0.75rem;
@@ -162,7 +164,9 @@ body[data-mode="archive"] [data-nav="versions"] { color: var(--accent-contrast);
 .theme-toggle[data-current="dark"] .icon-moon { display: none; }
 @media (max-width: 760px) {
   .site-header { margin: 0.5rem 0.5rem 0; top: 0.5rem; border-radius: 22px; padding: 0.55rem 0.6rem 0.55rem 1rem; }
-  .site-nav { order: 3; width: 100%; }
+  .site-nav { order: 3; width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .site-nav::-webkit-scrollbar { display: none; }
+  .site-nav a { flex: none; }
   .reader-controls { border-left: 0; padding-left: 0; }
 }
 

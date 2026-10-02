@@ -1,4 +1,4 @@
-# ELS Agent Practices
+# AGENTS.md for Empirical Legal Scholars
 
 > AGENTS.md for empirical legal research: standing instructions for AI coding agents working on empirical legal studies projects, plus a guide that explains the reason behind each rule. Versions 0.0.x are comment drafts; each published version is a frozen snapshot, and the draft changes often.
 

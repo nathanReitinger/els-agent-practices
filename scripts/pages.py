@@ -52,7 +52,7 @@ SHELL = """<!doctype html>
 <body data-mode="{mode}" data-file="{file}" data-root="{root}"{version_attr}>
   <div class="progress" aria-hidden="true"><span></span></div>
   <header class="site-header">
-    <a class="brand" href="{root}/">ELS Agent Practices</a>
+    <a class="brand" href="{root}/"><span class="brand-file">AGENTS.md</span> <span class="brand-for">for Empirical Legal Scholars</span></a>
     <nav class="site-nav" aria-label="Site">
       <a href="{root}/agents/" data-nav="agents">AGENTS.md</a>
       <a href="{root}/" data-nav="guide">Guide</a>
@@ -81,6 +81,7 @@ RENDERERS = """  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.
 """
 
 GUIDE_TITLE = "Best Practices for Working with AI Agents in Empirical Legal Research"
+SITE_NAME = "AGENTS.md for Empirical Legal Scholars"
 
 
 def asset_version() -> str:
@@ -114,26 +115,26 @@ def render(mode: str, file: str, root: str, title: str, description: str, versio
 
 def archive_pages(version: str, with_agents: bool) -> dict[str, str]:
     """The pages for one published version, keyed by file name."""
-    pages = {"index.html": render("archive", "guide", "../..", f"Version {version} · Guide · ELS Agent Practices",
+    pages = {"index.html": render("archive", "guide", "../..", f"Version {version} guide · {SITE_NAME}",
                                   f"Version {version} of {GUIDE_TITLE}.", version)}
     if with_agents:
-        pages["agents.html"] = render("archive", "agents", "../..", f"Version {version} · AGENTS.md · ELS Agent Practices",
+        pages["agents.html"] = render("archive", "agents", "../..", f"Version {version} · {SITE_NAME}",
                                       f"Version {version} of AGENTS.md for empirical legal research projects.", version)
     return pages
 
 
 FIXED = {
-    "index.html": ("published", "guide", ".", "ELS Agent Practices",
+    "index.html": ("published", "guide", ".", f"The guide · {SITE_NAME}",
                    f"{GUIDE_TITLE}, with an AGENTS.md for empirical legal research projects. Comment on any passage."),
-    "agents/index.html": ("published", "agents", "..", "AGENTS.md · ELS Agent Practices",
+    "agents/index.html": ("published", "agents", "..", SITE_NAME,
                           "AGENTS.md: standing instructions for AI agents working on empirical legal research projects."),
-    "draft/index.html": ("draft", "guide", "..", "Draft guide · ELS Agent Practices",
+    "draft/index.html": ("draft", "guide", "..", f"Draft guide · {SITE_NAME}",
                          "Working draft of the guide. Anyone can edit it, and every edit is logged."),
-    "draft/agents.html": ("draft", "agents", "..", "Draft AGENTS.md · ELS Agent Practices",
+    "draft/agents.html": ("draft", "agents", "..", f"Draft · {SITE_NAME}",
                           "Working draft of AGENTS.md. Anyone can edit it, and every edit is logged."),
-    "draft/history.html": ("history", "guide", "..", "Edit history · ELS Agent Practices",
+    "draft/history.html": ("history", "guide", "..", f"Edit history · {SITE_NAME}",
                            "Every edit to the draft guide and AGENTS.md, with links to view or restore any revision."),
-    "versions/index.html": ("versions", "guide", "..", "All versions · ELS Agent Practices",
+    "versions/index.html": ("versions", "guide", "..", f"All versions · {SITE_NAME}",
                             f"Every published version of {GUIDE_TITLE} and AGENTS.md."),
 }
 
