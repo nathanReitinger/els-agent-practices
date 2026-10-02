@@ -328,12 +328,13 @@ main { margin-top: 1rem; }
   border: 1px solid var(--rule);
   border-radius: 12px;
   background: var(--code-bg);
-  font-size: 0.74em;
+  font-size: 0.66em;
   line-height: 1.6;
 }
 .doc pre.has-copy { padding-top: 2.6em; }
-.doc pre code { padding: 0; background: none; font-size: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
-.doc.raw pre.raw-file { margin-top: 1.5em; }
+.doc pre code { padding: 0; background: none; font-size: inherit; white-space: pre; }
+.doc.raw pre.raw-file { margin-top: 1.5em; font-size: 0.72em; }
+.doc.raw pre.raw-file code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .copy {
   position: absolute;
   top: 0.6em;

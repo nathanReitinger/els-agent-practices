@@ -160,12 +160,12 @@
     article.classList.remove("raw");
     article.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
     addIds(article);
-    if (file === "agents") linkPracticeIds(article);
+    linkPracticeIds(article);
     addCopyButtons(article);
     for (const link of $$("a[href^='http']", article)) Object.assign(link, newTab);
     buildContents(article);
     showReadingTime(article);
-    highlightTarget();
+    highlightTarget(true);
     updateProgress();
   }
 
@@ -281,14 +281,18 @@
   }
 
   // The ids are added after the page loads, so CSS :target can miss them; mark the target ourselves.
-  function highlightTarget() {
+  // On first render, jump without animation (a smooth scroll can be cut short), and jump again once
+  // the web fonts arrive, since they reflow the page. Later clicks keep the browser's smooth scroll.
+  function highlightTarget(jump = false) {
     $(".targeted")?.classList.remove("targeted");
     const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
     if (!target) return;
     target.classList.add("targeted");
-    target.scrollIntoView();
+    if (!jump) return;
+    target.scrollIntoView({ behavior: "instant", block: "start" });
+    document.fonts?.ready.then(() => target.scrollIntoView({ behavior: "instant", block: "start" }));
   }
-  addEventListener("hashchange", highlightTarget);
+  addEventListener("hashchange", () => highlightTarget(false));
 
   function showBanner(kind, ...rows) {
     const banner = $("#banner");
