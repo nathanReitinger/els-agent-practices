@@ -354,6 +354,21 @@
     return res.json();
   }
 
+  // Edits to the text: commits that changed either file, merged and newest first.
+  async function textEdits(cfg, count) {
+    const lists = await Promise.all(["guide", "agents"].map((which) =>
+      draftCommits(cfg, count, `draft/${FILES[which].name}`).then((list) => list.map((c) => ({ which, c })))));
+    const bySha = new Map();
+    for (const { which, c } of lists.flat()) {
+      const entry = bySha.get(c.sha) || { ...c, files: [] };
+      entry.files.push(which);
+      bySha.set(c.sha, entry);
+    }
+    return [...bySha.values()]
+      .sort((a, b) => new Date(b.commit.author.date) - new Date(a.commit.author.date))
+      .slice(0, count);
+  }
+
   // The draft is read from GitHub at its newest commit, so a merged edit shows up
   // right away (the GitHub Pages copy can lag). Local previews use the local file.
   async function loadDraft(cfg, which) {
@@ -482,7 +497,7 @@
     const fullLog = `https://github.com/${cfg.repo}/commits/${cfg.branch}/draft`;
     showBanner("draft",
       h("div", { class: "doc-bar" }, h("span", { class: "badge badge-draft", text: "Edit history" }),
-        h("span", { class: "meta", text: "Every edit to the drafts, newest first" })),
+        h("span", { class: "meta", text: "Every edit to the text of the guide and AGENTS.md, newest first" })),
       h("p", { class: "banner-actions" },
         button("Back to the draft", at("draft/")),
         secondary("Full log on GitHub", fullLog, newTab)),
@@ -490,7 +505,7 @@
     const doc = $("#doc");
     let commits;
     try {
-      commits = await draftCommits(cfg, 100);
+      commits = await textEdits(cfg, 100);
     } catch (error) {
       doc.replaceChildren(h("h1", { text: "Edit history" }),
         h("p", {}, `The edit log couldn't be loaded from GitHub (${error.message}). `,
@@ -505,8 +520,7 @@
         h("td", {}, c.author?.html_url ? external(who, c.author.html_url) : who),
         h("td", { text: c.commit.message.split("\n")[0] }),
         h("td", { class: "actions" },
-          h("a", { href: `./?rev=${c.sha}`, text: "Guide" }), " · ",
-          h("a", { href: `./agents.html?rev=${c.sha}`, text: "AGENTS.md" }), " · ",
+          ...c.files.flatMap((which) => [h("a", { href: which === "agents" ? `./agents.html?rev=${c.sha}` : `./?rev=${c.sha}`, text: FILES[which].label }), " · "]),
           external("Changes", c.html_url)));
     });
     doc.replaceChildren(
@@ -514,7 +528,7 @@
       h("p", { class: "muted", text: (commits.length === 100
         ? "The 100 most recent edits. Older ones are in the full log on GitHub."
         : `${commits.length} edit${commits.length === 1 ? "" : "s"} so far.`) +
-        " Choose Guide or AGENTS.md to read that file as it was after the edit." }),
+        " Choose the file name to read it as it was after the edit." }),
       h("div", { class: "table-wrap" }, h("table", { class: "log" },
         h("thead", {}, h("tr", {}, ...["When", "Who", "What", "View"].map((t) => h("th", { text: t })))),
         h("tbody", {}, ...rows))));
