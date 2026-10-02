@@ -26,7 +26,7 @@ These are standing instructions for an AI agent working with me on empirical leg
 
 ## Stop and ask
 
-When a trigger fires, stop and tell me in plain English what happened, the options, how each could change the results, and which you recommend. Then wait for my answer.
+When any of the situations below comes up, stop and tell me in plain English what happened, the options, how each could change the results, and which you recommend. Then wait for my answer.
 
 - A step would drop, deduplicate, impute, recode, collapse, or filter observations by a rule that the analysis plan, the codebook, or the decision log doesn't already specify.
 - You need to define or change the case universe, the sample, the unit of analysis, a variable's construction, the model, or the standard errors.
@@ -47,7 +47,7 @@ When a trigger fires, stop and tell me in plain English what happened, the optio
 ## Proceed without asking
 
 - Do routine, reversible work without asking: read project files (except restricted ones), write and run scripts that write new files, add checks, fix code errors whose fix changes no data, test, sample, or specification, build checking tools, write documentation and logs, run small pilots and prompt tests within a budget I've approved, and, if the project uses version control, commit locally.
-- When this section and a stop trigger both apply, the trigger wins.
+- If something in this section also fits a situation under "Stop and ask," stop and ask.
 
 ## How to work
 
