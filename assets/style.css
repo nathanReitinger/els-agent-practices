@@ -1,27 +1,22 @@
-/* ELS Agent Practices: glass panels over a soft gradient. Colors are tokens so dark mode is one block. */
+/* ELS Agent Practices: a white page with light cards. Colors are tokens so dark mode is one block. */
 :root {
   color-scheme: light dark;
-  --bg: #eef1f7;
-  --blob-1: rgba(98, 140, 222, 0.55);
-  --blob-2: rgba(170, 120, 230, 0.42);
-  --blob-3: rgba(255, 186, 120, 0.45);
-  --blob-4: rgba(90, 200, 190, 0.35);
-  --glass: rgba(255, 255, 255, 0.52);
-  --glass-strong: rgba(255, 255, 255, 0.78);
-  --glass-border: rgba(255, 255, 255, 0.75);
-  --glass-edge: rgba(20, 30, 60, 0.08);
-  --shadow: 0 10px 40px rgba(30, 45, 90, 0.12), 0 1px 2px rgba(30, 45, 90, 0.06);
+  --bg: #ffffff;
+  --card: #ffffff;
+  --card-tint: #f6f8fc;
+  --border: rgba(20, 30, 60, 0.12);
+  --rule: rgba(20, 30, 60, 0.09);
+  --shadow: 0 1px 2px rgba(20, 30, 60, 0.05), 0 6px 22px rgba(20, 30, 60, 0.07);
   --text: #171a22;
   --muted: #545a68;
   --accent: #2550a0;
   --accent-contrast: #ffffff;
-  --accent-glass: rgba(37, 80, 160, 0.12);
+  --accent-soft: #eef3fb;
   --draft: #8a5300;
-  --draft-glass: rgba(255, 196, 92, 0.22);
+  --draft-soft: #fff8eb;
   --draft-border: rgba(214, 150, 40, 0.45);
-  --code-bg: rgba(24, 34, 60, 0.06);
-  --mark: rgba(255, 221, 87, 0.55);
-  --blur: 18px;
+  --code-bg: #f3f4f7;
+  --mark: #fff1a8;
   --radius: 18px;
   --font-body: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
@@ -31,26 +26,22 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0d0f17;
-    --blob-1: rgba(60, 100, 210, 0.42);
-    --blob-2: rgba(140, 80, 210, 0.36);
-    --blob-3: rgba(220, 120, 60, 0.24);
-    --blob-4: rgba(40, 170, 160, 0.26);
-    --glass: rgba(22, 25, 38, 0.5);
-    --glass-strong: rgba(18, 21, 32, 0.74);
-    --glass-border: rgba(255, 255, 255, 0.12);
-    --glass-edge: rgba(0, 0, 0, 0.3);
-    --shadow: 0 10px 40px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --bg: #111318;
+    --card: #181b22;
+    --card-tint: #1c2029;
+    --border: rgba(255, 255, 255, 0.11);
+    --rule: rgba(255, 255, 255, 0.08);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 22px rgba(0, 0, 0, 0.35);
     --text: #eceef4;
     --muted: #a8aebd;
     --accent: #9cc0ff;
     --accent-contrast: #0b1426;
-    --accent-glass: rgba(156, 192, 255, 0.14);
+    --accent-soft: #1b2433;
     --draft: #f5c66e;
-    --draft-glass: rgba(245, 198, 110, 0.12);
+    --draft-soft: #241e12;
     --draft-border: rgba(245, 198, 110, 0.32);
-    --code-bg: rgba(255, 255, 255, 0.06);
-    --mark: rgba(255, 214, 80, 0.3);
+    --code-bg: #20242d;
+    --mark: #4a4220;
   }
 }
 
@@ -60,39 +51,21 @@ html { -webkit-text-size-adjust: 100%; scroll-padding-top: 5rem; }
 body {
   margin: 0;
   min-height: 100vh;
+  background: var(--bg);
   color: var(--text);
   font: 18px/1.6 var(--font-body);
-  background-color: var(--bg);
-  background-image:
-    radial-gradient(38rem 30rem at 8% 6%, var(--blob-1), transparent 70%),
-    radial-gradient(34rem 28rem at 92% 14%, var(--blob-2), transparent 70%),
-    radial-gradient(40rem 32rem at 80% 88%, var(--blob-3), transparent 70%),
-    radial-gradient(34rem 30rem at 12% 82%, var(--blob-4), transparent 70%);
-  background-attachment: fixed;
 }
 a { color: var(--accent); text-underline-offset: 0.15em; }
 a:hover { text-decoration-thickness: 2px; }
 
-/* The glass recipe, shared by every panel. */
-.glass, .site-header, .banner, .toc details, main, .site-footer {
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(160%);
-  backdrop-filter: blur(var(--blur)) saturate(160%);
-}
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .site-header, .banner, .toc details, main, .site-footer { background: var(--glass-strong); }
-}
-@media (prefers-reduced-transparency: reduce) {
-  .site-header, .banner, .toc details, main, .site-footer {
-    background: var(--glass-strong);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
+/* Every panel is a solid card: no blur, no gradients. */
+.site-header, .banner, .toc details, main, .site-footer {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
 }
 
-/* Header: a floating glass bar */
+/* Header: a floating bar */
 .site-header {
   position: sticky;
   top: 0.75rem;
@@ -121,7 +94,7 @@ a:hover { text-decoration-thickness: 2px; }
   text-decoration: none;
   transition: background 0.15s, color 0.15s;
 }
-.site-nav a:hover { color: var(--text); background: var(--accent-glass); }
+.site-nav a:hover { color: var(--text); background: var(--accent-soft); }
 body[data-mode="published"][data-file="agents"] [data-nav="agents"],
 body[data-mode="published"][data-file="guide"] [data-nav="guide"],
 body[data-mode="draft"] [data-nav="draft"],
@@ -161,8 +134,9 @@ body[data-mode="archive"] [data-nav="versions"] {
   font: 0.95rem/1.5 var(--font-ui);
 }
 .banner p { margin: 0.35rem 0; }
-.banner-draft { background: linear-gradient(135deg, var(--draft-glass), transparent 70%), var(--glass); border-color: var(--draft-border); }
-.banner-published { background: linear-gradient(135deg, var(--accent-glass), transparent 70%), var(--glass); }
+.banner-published { background: var(--card-tint); }
+.banner-draft { background: var(--draft-soft); border-color: var(--draft-border); }
+.banner-archive { background: var(--card-tint); }
 .banner-title { font-weight: 500; }
 .banner-note { color: var(--muted); }
 .banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.7rem !important; }
@@ -189,9 +163,9 @@ body[data-mode="archive"] [data-nav="versions"] {
   gap: 0.15rem;
   margin: 0 0 0.6rem !important;
   padding: 0.2rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--glass-strong);
+  background: var(--card);
 }
 .file-switch a {
   padding: 0.25rem 0.85rem;
@@ -214,17 +188,11 @@ body[data-mode="archive"] [data-nav="versions"] {
   font: 500 0.88rem/1.3 var(--font-ui);
   text-decoration: none;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(37, 80, 160, 0.25);
   transition: transform 0.12s, filter 0.12s;
 }
 .button:hover { filter: brightness(1.08); transform: translateY(-1px); }
-.button.secondary {
-  border-color: var(--glass-border);
-  background: var(--glass-strong);
-  color: var(--accent);
-  box-shadow: none;
-}
-.button.secondary:hover { background: var(--accent-glass); }
+.button.secondary { border-color: var(--border); background: var(--card); color: var(--accent); }
+.button.secondary:hover { background: var(--accent-soft); filter: none; }
 button.button { appearance: none; }
 
 /* Contents */
@@ -237,16 +205,15 @@ button.button { appearance: none; }
 .toc a { color: var(--muted); text-decoration: none; }
 .toc a:hover { color: var(--accent); }
 
-/* Document: the reading panel is the most opaque glass, for long passages. */
+/* Document */
 main {
   margin-top: 1.25rem;
   padding: 0.5rem 2.25rem 2.25rem;
   border-radius: calc(var(--radius) + 4px);
-  background: var(--glass-strong);
 }
 @media (max-width: 760px) { main { padding: 0.25rem 1.1rem 1.5rem; } }
 .doc h1 { margin: 1.25rem 0 1rem; font-size: 2.1rem; line-height: 1.2; letter-spacing: -0.015em; }
-.doc h2 { margin: 2.75rem 0 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--glass-edge); font-size: 1.5rem; line-height: 1.25; }
+.doc h2 { margin: 2.75rem 0 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--rule); font-size: 1.5rem; line-height: 1.25; }
 .doc h3 { margin: 2rem 0 0.5rem; font-size: 1.2rem; }
 .doc hr { display: none; }
 .doc blockquote {
@@ -254,7 +221,7 @@ main {
   padding: 0.6rem 1rem;
   border-left: 3px solid var(--accent);
   border-radius: 0 12px 12px 0;
-  background: var(--accent-glass);
+  background: var(--accent-soft);
 }
 .doc blockquote p { margin: 0; }
 .doc code { padding: 0.1em 0.35em; border-radius: 5px; background: var(--code-bg); font: 0.84em var(--font-mono); }
@@ -262,7 +229,7 @@ main {
   position: relative;
   padding: 1rem;
   overflow-x: auto;
-  border: 1px solid var(--glass-edge);
+  border: 1px solid var(--rule);
   border-radius: 12px;
   background: var(--code-bg);
   font-size: 0.8rem;
@@ -276,9 +243,9 @@ main {
   top: 0.5rem;
   right: 0.5rem;
   padding: 0.2rem 0.6rem;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--glass-strong);
+  background: var(--card);
   color: var(--muted);
   font: 500 0.75rem/1.4 var(--font-ui);
   cursor: pointer;
@@ -301,7 +268,7 @@ main {
 .doc a.practice-ref {
   padding: 0 0.2em;
   border-radius: 4px;
-  background: var(--accent-glass);
+  background: var(--accent-soft);
   font: 600 0.8em var(--font-ui);
   text-decoration: none;
 }
@@ -315,12 +282,12 @@ main {
 /* Edit history and versions */
 .table-wrap { overflow-x: auto; }
 table.log { width: 100%; border-collapse: collapse; font: 0.9rem/1.45 var(--font-ui); }
-table.log th, table.log td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--glass-edge); text-align: left; vertical-align: top; }
+table.log th, table.log td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
 table.log th { color: var(--muted); font-weight: 600; }
-table.log tbody tr:hover { background: var(--accent-glass); }
+table.log tbody tr:hover { background: var(--accent-soft); }
 table.log td.actions { white-space: nowrap; }
 ul.versions { padding: 0; list-style: none; font: 0.95rem/1.55 var(--font-ui); }
-ul.versions li { padding: 0.85rem 0; border-bottom: 1px solid var(--glass-edge); }
+ul.versions li { padding: 0.85rem 0; border-bottom: 1px solid var(--rule); }
 ul.versions .badge { margin-left: 0.45rem; }
 
 /* Footer */
@@ -340,5 +307,5 @@ ul.versions .badge { margin-left: 0.45rem; }
 @media print {
   .site-header, .toc, .banner-actions, .file-switch, .copy, .anchor, .site-footer { display: none !important; }
   body { background: #fff; color: #000; font-size: 11pt; }
-  .banner, main { padding: 0; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
+  .banner, main { padding: 0; border: 0; background: none; box-shadow: none; }
 }
