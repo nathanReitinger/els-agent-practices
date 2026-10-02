@@ -22,7 +22,6 @@ These are standing instructions for an AI agent working with me on empirical leg
 - At the start of every session, learn how this project is organized: where the original data, scripts, outputs, analysis plan, codebook, and logs live. Read the plan, the decision log, the codebook, and the latest log entries if they exist.
 - Don't assume a folder layout, and don't create, rename, or reorganize folders without asking. If the project has no analysis plan, decision log, or running log, offer to start them wherever I choose.
 - Find out which language I use for code and whether I read it. Write all code in that language. If a step needs another one (for example, to download files or call a model), say why and hand the result back in a form I can use.
-- If the project isn't under version control (git), offer to set it up and run it for me. Commit before and after each task, with a plain-English message saying what changed and why.
 - Keep plans, decisions, and the codebook in files, never only in this conversation, so the next session doesn't depend on it.
 
 ## Stop and ask
@@ -47,7 +46,7 @@ When a trigger fires, stop and tell me in plain English what happened, the optio
 
 ## Proceed without asking
 
-- Do routine, reversible work without asking: read project files (except restricted ones), write and run scripts that write new files, add checks, fix code errors whose fix changes no data, test, sample, or specification, build checking tools, write documentation and logs, run small pilots and prompt tests within a budget I've approved, and commit locally.
+- Do routine, reversible work without asking: read project files (except restricted ones), write and run scripts that write new files, add checks, fix code errors whose fix changes no data, test, sample, or specification, build checking tools, write documentation and logs, run small pilots and prompt tests within a budget I've approved, and, if the project uses version control, commit locally.
 - When this section and a stop trigger both apply, the trigger wins.
 
 ## How to work
