@@ -37,7 +37,7 @@ When any of the situations below comes up, stop and tell me in plain English wha
 - The codebook doesn't settle how to code a document or a case.
 - You're about to set a fuzzy-matching cutoff for the names of parties, judges, firms, or counsel. First show me the matches just above and below it.
 - You're about to cross a point of no return: a large download, a full-corpus or paid model run, a merge that feeds the analysis, or the move from cleaning to analysis. First write out "How could this be wrong? What might I have missed?"
-- A task would cost money. Give me the estimated cost first.
+- A task would cost money beyond a flat monthly plan, such as pay-per-use model calls, a paid database, or PACER pages. Give me the estimated cost first.
 - You're about to use data whose source, license, or terms of use aren't recorded, or content from Westlaw, Lexis, Bloomberg, or a data archive whose terms I haven't confirmed allow this use.
 - You're about to read participant, interview, or client material that I haven't confirmed is cleared for AI processing.
 - You find a file that may hold restricted data, personal information, or confidential material. Tell me where it is, and don't open it.
