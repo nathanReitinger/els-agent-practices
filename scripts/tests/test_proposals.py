@@ -102,6 +102,7 @@ class RunTest(unittest.TestCase):
         self.dir = Path(tempfile.mkdtemp(prefix="els-robot-"))
         self.repo = self.dir / "repo"
         shutil.copytree(ROOT, self.repo, ignore=shutil.ignore_patterns(".git", "__pycache__", ".claude", ".DS_Store"))
+        self.baseline()
         self.git("init", "--quiet", "-b", "main")
         self.git("config", "user.name", "Maintainer")
         self.git("config", "user.email", "maintainer@example.org")
@@ -112,6 +113,21 @@ class RunTest(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
+
+    def baseline(self):
+        """Put the copy back to version 0.0.2 with no proposals, so the tests don't depend on later versions."""
+        manifest = json.loads((self.repo / "versions.json").read_text())
+        keep = {"0.0.0", "0.0.1", "0.0.2"}
+        for folder in (self.repo / "versions").iterdir():
+            if folder.is_dir() and folder.name.removeprefix("v") not in keep:
+                shutil.rmtree(folder)
+        manifest["versions"] = [r for r in manifest["versions"] if r["version"] in keep]
+        manifest["latest"] = "0.0.2"
+        (self.repo / "versions.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+        frozen = (self.repo / "versions" / "v0.0.2" / "AGENTS.md").read_bytes()
+        (self.repo / "latest" / "AGENTS.md").write_bytes(frozen)
+        (self.repo / "draft" / "AGENTS.md").write_bytes(frozen)
+        (self.repo / "governance" / "proposals.json").unlink(missing_ok=True)
 
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.repo, capture_output=True, text=True, check=True).stdout.strip()

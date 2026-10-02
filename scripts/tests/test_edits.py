@@ -12,7 +12,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from edits import Doc, Refused, apply, locate, plain_text, squeeze  # noqa: E402
 
-AGENTS = (ROOT / "draft" / "AGENTS.md").read_text()
+# A frozen version, so the tests don't change when the text does.
+AGENTS = (ROOT / "versions" / "v0.0.2" / "AGENTS.md").read_text()
 
 SAMPLE = """# Sample file
 
