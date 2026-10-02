@@ -6,6 +6,15 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.1] - 2026-10-02
+
+Comment draft 0.0.1: AGENTS.md is retitled AGENTS.md for Empirical Legal Scholars, to match the site. No other changes to the text.
+
+Edits to the draft in this release:
+
+- AGENTS.md: title it AGENTS.md for Empirical Legal Scholars (#7) (Nathan Reitinger, 2026-10-01)
+
+
 ## [0.0.0] - 2026-10-01
 
 First comment draft. AGENTS.md: standing instructions for agents in empirical legal research projects, with every rule linked to the guide practice behind it. The guide: eight principles, 55 practices, a pre-submission checklist, and a verified reading list. Nothing is final; comments welcome.

@@ -4,9 +4,18 @@
   "repo": "nathanReitinger/els-agent-practices",
   "branch": "main",
   "site": "https://nathanreitinger.github.io/els-agent-practices/",
-  "latest": "0.0.0",
-  "draft": "0.0.1-draft",
+  "latest": "0.0.1",
+  "draft": "0.0.2-draft",
   "versions": [
+    {
+      "version": "0.0.1",
+      "date": "2026-10-02",
+      "summary": "Comment draft 0.0.1: AGENTS.md is retitled AGENTS.md for Empirical Legal Scholars, to match the site. No other changes to the text.",
+      "files": [
+        "agent-best-practices.md",
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.0",
       "date": "2026-10-01",

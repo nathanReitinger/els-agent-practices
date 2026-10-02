@@ -1,6 +1,6 @@
 # AGENTS.md for Empirical Legal Scholars
 
-*Version 0.0.1-draft · Working draft: anyone can edit it, and every edit is logged · Latest published version: <https://nathanreitinger.github.io/els-agent-practices/latest/AGENTS.md>*
+*Version 0.0.2-draft · Working draft: anyone can edit it, and every edit is logged · Latest published version: <https://nathanreitinger.github.io/els-agent-practices/latest/AGENTS.md>*
 
 > **For the researcher:** fill in "About this project" and the other [square brackets] (bracketed numbers such as [10] are starting values you can change), delete any section or line marked "(delete if not applicable)", and save this file in your project folder as `AGENTS.md` (or rename it `CLAUDE.md`). Codes such as (C4) point to the practice in the guide that explains each rule, at <https://nathanreitinger.github.io/els-agent-practices/>; P5 means Principle 5. Rules here don't enforce themselves: keep restricted data and credentials where the agent can't reach them, and set hard spending limits in each paid service's own billing settings (A3, C9, C10). Each time you correct the agent, add the correction under "Notes on our data" (B7).
 
