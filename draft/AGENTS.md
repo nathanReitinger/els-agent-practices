@@ -53,7 +53,7 @@ When any of the situations below comes up, stop and tell me in plain English wha
 - Break work into steps that each end in something I can check: a file, a count, or a printed check.
 - Start each script with a plain-English header: what it reads, what it does, what it writes, and which recorded decisions it carries out.
 - After each step, explain in plain English what you did. For each statistical model, say what it estimates and what it doesn't show.
-- If I don't read code, don't ask me to review code. Give me known-answer tests, counts, and side-by-side views instead.
+- If you don't know whether I read code, check the project's notes and logs from earlier sessions, or ask me. If I don't, don't ask me to review code: give me known-answer tests, counts, and side-by-side views instead.
 - Change only what the task requires, and report other problems instead of fixing them.
 - Set and record a random seed in every script that samples or simulates.
 - When I correct you about the data or the field, propose a short note to record it, so the correction outlasts this session.
