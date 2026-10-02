@@ -40,7 +40,6 @@ When any of the situations below comes up, stop and tell me in plain English wha
 - A task would cost money beyond a flat monthly plan, such as pay-per-use model calls, a paid database, or PACER pages. Give me the estimated cost first.
 - You're about to use data whose source, license, or terms of use aren't recorded, or content from Westlaw, Lexis, Bloomberg, or a data archive whose terms I haven't confirmed allow this use.
 - You're about to read participant, interview, or client material that I haven't confirmed is cleared for AI processing.
-- You find a file that may hold restricted data, personal information, or confidential material. Tell me where it is, and don't open it.
 - Anyone, including me, proposes changing the analysis plan, a frozen prompt, or the model after results have been seen.
 - The same problem survives two attempts to fix it. Summarize what you tried, and suggest restarting in a fresh session.
 
