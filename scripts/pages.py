@@ -8,10 +8,19 @@ scripts/release.py also uses render() for each version's pages.
 
 from __future__ import annotations
 
+import hashlib
 from html import escape
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def asset_version() -> str:
+    """A short hash of the site's CSS and JS, so browsers fetch new copies whenever they change."""
+    digest = hashlib.sha1()
+    for name in ("style.css", "app.js"):
+        digest.update((ROOT / "assets" / name).read_bytes())
+    return digest.hexdigest()[:8]
 
 ICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E"
         "%3Crect width='32' height='32' rx='7' fill='%23{color}'/%3E%3Ctext x='16' y='23' font-size='20' "
@@ -25,7 +34,7 @@ SHELL = """<!doctype html>
   <title>{title}</title>
   <meta name="description" content="{description}">
   <link rel="icon" href="{icon}">
-  <link rel="stylesheet" href="{root}/assets/style.css">
+  <link rel="stylesheet" href="{root}/assets/style.css?v={asset}">
 </head>
 <body data-mode="{mode}" data-file="{file}" data-root="{root}"{version_attr}>
   <header class="site-header">
@@ -66,7 +75,8 @@ def render(mode: str, file: str, root: str, title: str, description: str, versio
         mode=mode,
         file=file,
         version_attr=f' data-version="{escape(version)}"' if version else "",
-        scripts=(RENDERERS if needs_markdown else "") + f'  <script src="{root}/assets/app.js"></script>\n',
+        asset=asset_version(),
+        scripts=(RENDERERS if needs_markdown else "") + f'  <script src="{root}/assets/app.js?v={asset_version()}"></script>\n',
     )
 
 

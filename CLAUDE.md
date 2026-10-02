@@ -16,7 +16,7 @@ This repository publishes two files as a GitHub Pages site: `AGENTS.md` (standin
 - Keep both files in plain Markdown: one paragraph or rule per line, no raw HTML.
 - Don't edit the "*Version ...*" line at the top of either draft by hand; the release script manages it.
 - Don't add a file named `CLAUDE.md` anywhere except this one.
-- Site pages are generated: change `scripts/pages.py`, then run `python3 scripts/pages.py`. The page logic is in `assets/app.js`.
+- Site pages are generated: change `scripts/pages.py`, then run `python3 scripts/pages.py`. The page logic is in `assets/app.js`. After changing anything in `assets/`, rerun `python3 scripts/pages.py` so the pages load the new version instead of a cached one.
 
 ## Releasing
 
