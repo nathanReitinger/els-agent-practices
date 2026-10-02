@@ -8,7 +8,7 @@
     "email": "agentselsmd@googlegroups.com",
     "page": "https://groups.google.com/g/agentselsmd"
   },
-  "latest": "0.0.2",
+  "latest": "0.0.3",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -19,6 +19,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.3",
+      "date": "2026-10-02",
+      "summary": "Changes from the lead maintainer's comments in the Drafter: the version-control (git) rule is struck, \"trigger\" is explained, cost estimates are only for costs beyond a flat monthly plan, two stop-and-ask rules are deleted, the agent checks earlier notes or asks whether the researcher reads code, and the random-seed rule gives its reason.",
+      "fingerprint": "700612b647a5c2a3b2f59b1df22287cf82e2c671b166c1e5a1f9bfcbdf160e3b",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.2",
       "date": "2026-10-02",

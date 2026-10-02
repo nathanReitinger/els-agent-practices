@@ -6,6 +6,23 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.3] - 2026-10-02
+
+Changes from the lead maintainer's comments in the Drafter: the version-control (git) rule is struck, "trigger" is explained, cost estimates are only for costs beyond a flat monthly plan, two stop-and-ask rules are deleted, the agent checks earlier notes or asks whether the researcher reads code, and the random-seed rule gives its reason.
+
+Changes to the text, by nathanReitinger:
+
+- Strike the version-control (git) rule; commit only where the project uses version control
+- Say what a stop trigger is: any situation listed under "Stop and ask"
+- Ask for a cost estimate only for costs beyond a flat monthly plan
+- Delete the stop-and-ask rule about files that may hold restricted data
+- Delete the stop-and-ask rule about changing the plan, a frozen prompt, or the model after results
+- If you don't know whether I read code, check earlier notes or ask
+- Give the reason for recording a random seed
+
+Argon2id fingerprint: `700612b647a5c2a3b2f59b1df22287cf82e2c671b166c1e5a1f9bfcbdf160e3b`
+
+
 ## [0.0.2] - 2026-10-02
 
 Comment draft 0.0.2: AGENTS.md is now one general workflow file. It assumes no folder layout or file names, needs no filling in, and no longer points to a separate guide.
