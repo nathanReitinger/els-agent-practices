@@ -52,16 +52,16 @@
 
 ```
 my-project/
-  CLAUDE.md          standing instructions for the agent (or AGENTS.md)
+  CLAUDE.md          instructions for the agent (or AGENTS.md)
   README.md          how to reproduce everything, start to finish
   ANALYSIS_PLAN.md   written before you look at results
-  DECISIONS.md       every judgment call: date, decision, alternatives, reason
-  LOG.md             what was done each session, including every model run
+  DECISIONS.md       every judgment call, with alternatives and reasons
+  LOG.md             what was done each session, including model runs
   data/raw/          original data; read-only
   data/derived/      written only by scripts
-  code/              numbered scripts: 01_collect, 02_clean, 03_code, 04_analyze
-  output/            tables, figures, model-coded data, raw model responses
-  docs/              codebook, search log, data sources and their terms, AI-use log
+  code/              numbered scripts: 01_collect, 02_clean, ...
+  output/            tables, figures, model-coded data and raw output
+  docs/              codebook, search log, data sources, AI-use log
 ```
 
 **A6. Work in a language you can read, or verify outputs instead.** If you read Stata or R, have the agent use it; agents tend to default to Python. If you don't read code, you can still do rigorous work, but your checks have to be on outputs: known answers (C6), side-by-side viewers (C7), and counts (C4). Either way, ask for a plain-English account of each step and of what each model estimates.
