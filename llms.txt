@@ -1,7 +1,8 @@
 # AGENTS.md for Empirical Legal Scholars
 
-> A general AGENTS.md for empirical legal research: standing instructions for AI coding agents working with empirical legal scholars. It assumes no folder layout. Versions 0.0.x are comment drafts; each published version is a frozen snapshot, and the draft changes often.
+> A general AGENTS.md for empirical legal research: standing instructions for AI coding agents working with empirical legal scholars. It assumes no folder layout. Versions 0.0.x are comment drafts. Anyone can propose a change in the Drafter; members vote; each approved change is published as a new version. Every version has a SHA-256 fingerprint: the hash of the file without line 3, its version line.
 
-- [AGENTS.md, latest published version (save in a project folder as AGENTS.md or CLAUDE.md)](latest/AGENTS.md)
-- [All published versions](versions.json)
-- [Working draft](draft/AGENTS.md)
+- [AGENTS.md, newest version (save in a project folder as AGENTS.md or CLAUDE.md)](latest/AGENTS.md)
+- [Every version, with its fingerprint](versions.json)
+- [Proposals and votes](governance/proposals.json)
+- [How decisions are made](GOVERNANCE.md)

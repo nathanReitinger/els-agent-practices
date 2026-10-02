@@ -9,4 +9,4 @@ labels: field-note
 
 **How it was caught:**
 
-**The rule it suggests** (and which practice it relates to, for example "C2"):
+**The rule it suggests, and where it might go in AGENTS.md:**

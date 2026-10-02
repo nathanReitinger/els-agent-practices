@@ -1,0 +1,769 @@
+#!/usr/bin/env python3
+"""The proposals robot: counts members' votes on proposed changes and publishes the approved ones.
+
+    python3 scripts/proposals.py --dry-run   # say what would happen, and change nothing
+    python3 scripts/proposals.py             # make the changes and commit them in this copy
+    python3 scripts/proposals.py --push      # ...then push them and update GitHub issues
+
+.github/workflows/proposals.yml runs it with --push every 15 minutes, and right away
+when someone comments on a proposal's GitHub issue or a maintainer changes the text.
+Each run:
+
+1. Checks that every published version still matches its recorded fingerprint.
+2. Publishes a maintainer's direct edit to draft/AGENTS.md as a new version.
+3. Reads every comment on the Drafter from Hypothesis. A comment on selected words
+   that starts with a command (Delete, Replace with:, Add after:, Add rule:) is a
+   proposal; a reply that starts with Approve or Reject is a vote (scripts/commands.py).
+4. Checks each open proposal against the current text (scripts/edits.py) and counts
+   the votes of the members in governance/members.json. Members can also vote by
+   commenting /approve or /reject on the proposal's GitHub issue.
+5. Applies each approved proposal and publishes it as the next version
+   (scripts/release.py), one version per proposal, each with its own commit and tag.
+6. Records every proposal, vote, and outcome in governance/proposals.json, opens a
+   GitHub issue for each new proposal (so people watching the repository get an
+   email), and closes it with the outcome.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import difflib
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import edits  # noqa: E402
+import release  # noqa: E402
+from commands import PROBLEMS, parse_command, vote_of  # noqa: E402
+from fingerprint import fingerprint, stamp_line, verify_published  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+DRAFT = ROOT / "draft" / "AGENTS.md"
+LATEST = ROOT / "latest" / "AGENTS.md"
+MANIFEST = ROOT / "versions.json"
+MEMBERS = ROOT / "governance" / "members.json"
+LEDGER = ROOT / "governance" / "proposals.json"
+WRITTEN = ["draft/AGENTS.md", "latest", "versions", "versions.json", "CHANGELOG.md", "governance/proposals.json"]
+
+HYPOTHESIS_SEARCH = "https://api.hypothes.is/api/search"
+BOT_NAME = "github-actions[bot]"
+BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
+FINAL = ("adopted", "declined", "withdrawn", "cannot-apply")
+NEW_ISSUES_PER_RUN = 10
+LEDGER_ABOUT = ("Every proposal made in the Drafter, its votes, and its outcome. Written by scripts/proposals.py; "
+                "don't edit it by hand.")
+
+
+class PushRejected(Exception):
+    pass
+
+
+# ---------- Small helpers ----------
+
+def parse_time(value: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def now_utc() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def short(text: str, limit: int = 60) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def md(text: str) -> str:
+    """User text made safe to show in GitHub Markdown: no formatting, no HTML, no @mentions."""
+    text = " ".join((text or "").split()).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    text = re.sub(r"([\\`*_\[\]|~#])", r"\\\1", text)
+    return text.replace("@", "@⁠")
+
+
+def md_keep_spaces(text: str) -> str:
+    """Like md(), but keeps the spaces at either end, for showing a piece of a line."""
+    core = text.strip()
+    if not core:
+        return text
+    start, end = text.index(core[0]), len(text.rstrip())
+    return text[:start] + md(core) + text[end:]
+
+
+# Words, spaces, and punctuation marks, so a change to "control (git)," shows only " (git)" struck out.
+TOKENS = re.compile(r"\s+|[\w'’-]+|[^\s\w]")
+
+
+def username(user: str) -> str:
+    match = re.fullmatch(r"acct:(.+)@hypothes\.is", user or "")
+    return match.group(1) if match else (user or "")
+
+
+def get_json(url: str, headers: dict | None = None):
+    request = urllib.request.Request(url, headers={"User-Agent": "els-agent-practices-proposals", **(headers or {})})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.load(response)
+
+
+def git(*args: str, env: dict | None = None) -> str:
+    result = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True,
+                            env={**os.environ, **(env or {})})
+    if result.returncode:
+        raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip() or result.stdout.strip()}")
+    return result.stdout.strip()
+
+
+def commit(message: str, author: str | None = None) -> None:
+    git("add", "-A", "--", *[path for path in WRITTEN if (ROOT / path).exists()])
+    bot = {"GIT_COMMITTER_NAME": BOT_NAME, "GIT_COMMITTER_EMAIL": BOT_EMAIL,
+           "GIT_AUTHOR_NAME": BOT_NAME, "GIT_AUTHOR_EMAIL": BOT_EMAIL}
+    git("commit", "--quiet", "-m", message, *(["--author", author] if author else []), env=bot)
+
+
+# ---------- Members and rules ----------
+
+@dataclass(frozen=True)
+class Member:
+    name: str
+    role: str
+    hypothesis: str
+    github: str
+
+
+class Governance:
+    def __init__(self, data: dict):
+        try:
+            rules = data["rules"]
+            self.approvals_needed = int(rules["approvals_needed"])
+            self.self_approval = bool(rules["members_may_approve_their_own_proposals"])
+            self.hours_open = float(rules.get("hours_open_before_adoption", 0))
+            self.count_from = parse_time(rules["proposals_count_from"])
+            self.members = [Member(m["name"], m.get("role", "member"), m.get("hypothesis") or "", m.get("github") or "")
+                            for m in data["members"]]
+            ignored = data.get("ignored_accounts", {})
+            self.ignored_hypothesis = {u.lower() for u in ignored.get("hypothesis", [])}
+            self.ignored_github = {u.lower() for u in ignored.get("github", [])}
+        except (KeyError, TypeError, ValueError) as error:
+            raise SystemExit(f"governance/members.json isn't in the expected form ({error!r}); see GOVERNANCE.md")
+        if self.approvals_needed < 1 or not self.members:
+            raise SystemExit("governance/members.json needs at least one member and approvals_needed of at least 1")
+        if any(not (m.hypothesis or m.github) for m in self.members):
+            raise SystemExit("every member in governance/members.json needs a Hypothesis or GitHub username")
+
+    def by_hypothesis(self, user: str) -> Member | None:
+        name = username(user).lower()
+        return next((m for m in self.members if m.hypothesis and m.hypothesis.lower() == name), None)
+
+    def by_github(self, login: str) -> Member | None:
+        return next((m for m in self.members if m.github and m.github.lower() == (login or "").lower()), None)
+
+    def rule_sentence(self) -> str:
+        n = self.approvals_needed
+        text = ("One member's approval adopts a proposal, unless at least as many members reject it." if n == 1 else
+                f"A proposal is adopted once {n} members approve it, as long as more members approve than reject it.")
+        if self.hours_open:
+            text += f" It stays open for at least {self.hours_open:g} hours first."
+        return text
+
+
+# ---------- Votes ----------
+
+@dataclass
+class Vote:
+    member: Member
+    vote: str
+    when: dt.datetime
+    via: str
+    link: str
+
+    def record(self) -> dict:
+        return {"name": self.member.name, "vote": self.vote, "when": self.when.isoformat(), "via": self.via,
+                "link": self.link}
+
+
+def count_votes(record: dict, replies: list[dict], comments: list[dict], gov: Governance) -> tuple[list[Vote], int, int]:
+    """Each member's latest vote cast since the proposal was last edited; readers in favor; votes made stale by an edit."""
+    since = parse_time(record["updated"])
+    proposer = record["proposer"]["hypothesis"].lower()
+    latest: dict[str, Vote] = {}
+    stale: set[str] = set()
+    support: set[str] = set()
+
+    def consider(member: Member | None, vote: str, when: dt.datetime, via: str, link: str, voter: str) -> None:
+        if member is None:
+            if vote == "approve":
+                support.add(voter)
+            return
+        if when < since:
+            stale.add(member.name)
+            return
+        if vote == "approve" and not gov.self_approval and member.hypothesis.lower() == proposer:
+            return
+        if member.name not in latest or when > latest[member.name].when:
+            latest[member.name] = Vote(member, vote, when, via, link)
+
+    for reply in replies:
+        vote = vote_of(reply.get("text", ""))
+        user = reply.get("user", "")
+        if vote and username(user).lower() not in gov.ignored_hypothesis:
+            consider(gov.by_hypothesis(user), vote, parse_time(reply["updated"]), "Hypothesis",
+                     reply.get("links", {}).get("incontext", ""), user)
+    for comment in comments:
+        login = (comment.get("user") or {}).get("login", "")
+        if (comment.get("user") or {}).get("type") == "Bot" or login.lower() in gov.ignored_github:
+            continue
+        vote = vote_of(comment.get("body", ""))
+        if vote:
+            consider(gov.by_github(login), vote, parse_time(comment.get("updated_at") or comment["created_at"]),
+                     "GitHub", comment.get("html_url", ""), f"github:{login}")
+    votes = sorted(latest.values(), key=lambda v: v.when)
+    return votes, len(support), len(stale - set(latest))
+
+
+def decide(record: dict, votes: list[Vote], gov: Governance, now: dt.datetime) -> str:
+    approvals = sum(v.vote == "approve" for v in votes)
+    rejections = sum(v.vote == "reject" for v in votes)
+    if approvals >= gov.approvals_needed and approvals > rejections:
+        waited = (now - parse_time(record["updated"])).total_seconds() / 3600
+        return "adopt" if waited >= gov.hours_open else "wait"
+    if rejections >= gov.approvals_needed and rejections > approvals:
+        return "decline"
+    return "wait"
+
+
+# ---------- Hypothesis ----------
+
+def fetch_annotations(uri: str) -> list[dict]:
+    rows: dict[str, dict] = {}
+    after = None
+    while True:
+        params = {"uri": uri, "limit": 200, "sort": "created", "order": "asc"}
+        if after:
+            params["search_after"] = after
+        batch = get_json(f"{HYPOTHESIS_SEARCH}?{urllib.parse.urlencode(params)}").get("rows", [])
+        rows.update((row["id"], row) for row in batch)
+        if len(batch) < 200 or len(rows) >= 20000:
+            return list(rows.values())
+        after = batch[-1]["created"]
+
+
+def annotation_exists(annotation_id: str) -> bool | None:
+    """Whether a comment still exists on Hypothesis (None if Hypothesis couldn't be reached)."""
+    try:
+        get_json(f"https://api.hypothes.is/api/annotations/{urllib.parse.quote(annotation_id)}")
+        return True
+    except urllib.error.HTTPError as error:
+        return False if error.code in (403, 404) else None
+    except (urllib.error.URLError, TimeoutError):
+        return None
+
+
+def quote_of(annotation: dict) -> tuple[str, str, str] | None:
+    for target in annotation.get("target") or []:
+        for selector in target.get("selector") or []:
+            if selector.get("type") == "TextQuoteSelector" and selector.get("exact"):
+                return selector["exact"], selector.get("prefix", ""), selector.get("suffix", "")
+    return None
+
+
+# ---------- GitHub ----------
+
+class GitHub:
+    """The few GitHub calls the robot makes. Without `write`, it reads but only reports what it would change."""
+
+    def __init__(self, repo: str, token: str, write: bool, log):
+        self.repo, self.token, self.write, self.log = repo, token, write, log
+
+    def call(self, method: str, path: str, body: dict | None = None):
+        if method != "GET" and not self.write:
+            self.log(f"(would {method} {path})")
+            return None
+        url = f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{self.repo}{path}"
+        request = urllib.request.Request(url, method=method, data=json.dumps(body).encode() if body else None, headers={
+            "Accept": "application/vnd.github+json", "Authorization": f"Bearer {self.token}",
+            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "els-agent-practices-proposals"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = response.read()
+        return json.loads(data) if data else None
+
+    def pages(self, path: str) -> list:
+        items, page = [], 1
+        while True:
+            batch = self.call("GET", f"{path}{'&' if '?' in path else '?'}per_page=100&page={page}") or []
+            items.extend(batch)
+            if len(batch) < 100:
+                return items
+            page += 1
+
+    def proposal_issues(self) -> dict[str, dict]:
+        found = {}
+        for issue in self.pages("/issues?labels=proposal&state=all"):
+            match = re.search(r"<!-- proposal:([\w-]+) -->", issue.get("body") or "")
+            if match and "pull_request" not in issue:
+                found.setdefault(match.group(1), issue)
+        return found
+
+    def ensure_label(self) -> None:
+        try:
+            self.call("GET", "/labels/proposal")
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+            self.call("POST", "/labels", {"name": "proposal", "color": "8a2432",
+                                          "description": "A change proposed in the Drafter, waiting for members' votes"})
+
+
+# ---------- Showing a proposal ----------
+
+PHRASES = {
+    "delete": ("Delete “{old}”", "Deleted “{old}”"),
+    "replace": ("Replace “{old}” with “{new}”", "Replaced “{old}” with “{new}”"),
+    "insert": ("Add “{new}” after “{old}”", "Added “{new}” after “{old}”"),
+    "rule": ("Add a rule: “{new}”", "Added a rule: “{new}”"),
+}
+
+
+def phrase(record: dict, past: bool = False, limit: int = 60) -> str:
+    template = PHRASES[record["kind"]][past]
+    return template.format(old=short(record["old"], limit), new=short(record["new"], limit))
+
+
+def summary_of(record: dict) -> str:
+    section = record.get("section")
+    return f"{phrase(record, past=True, limit=80)}{f' ({section})' if section else ''}."
+
+
+def change_segments(before: str, after: str) -> list[tuple[str | None, str, str]]:
+    """A line's changes as (unchanged text, None, None) or (None, old words, new words). Changes separated
+    only by a space are joined, so "null, weak, and" -> "null and" is one change. assets/app.js does the same."""
+    old, new = TOKENS.findall(before), TOKENS.findall(after)
+    segments: list[list] = []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if op == "equal":
+            segments.append(["".join(old[i1:i2]), None, None])
+        elif segments and segments[-1][0] is None:
+            segments[-1][1] += "".join(old[i1:i2])
+            segments[-1][2] += "".join(new[j1:j2])
+        else:
+            segments.append([None, "".join(old[i1:i2]), "".join(new[j1:j2])])
+    i = len(segments) - 2
+    while i > 0:
+        a, gap, b = segments[i - 1], segments[i], segments[i + 1]
+        if gap[0] is not None and not gap[0].strip() and a[0] is None and b[0] is None:
+            segments[i - 1:i + 2] = [[None, a[1] + gap[0] + b[1], a[2] + gap[0] + b[2]]]
+        i -= 1
+    return [tuple(segment) for segment in segments]
+
+
+def track_changes(preview: dict) -> list[str]:
+    """The affected lines in GitHub Markdown, with deletions struck through and additions underlined."""
+    before, after = preview.get("before", []), preview.get("after", [])
+    if len(before) == 1 and len(after) == 1:
+        parts = []
+        for same, old, new in change_segments(before[0], after[0]):
+            if same is not None:
+                parts.append(md_keep_spaces(same))
+                continue
+            old_core, new_core = old.strip(), new.strip()
+            if not old_core and not new_core:
+                parts.append(new)
+                continue
+            lead = re.match(r"\s*", old if old_core else new).group()
+            trail = re.search(r"\s*$", new if new_core else old).group()
+            parts.append(lead + (f"<del>{md(old_core)}</del>" if old_core else "") + (" " if old_core and new_core else "")
+                         + (f"<ins>{md(new_core)}</ins>" if new_core else "") + trail)
+        return ["".join(parts)]
+    lines = [md(preview["context"])] if not before and preview.get("context") else []
+    return lines + [f"<del>{md(line)}</del>" for line in before] + [f"<ins>{md(line)}</ins>" for line in after]
+
+
+def status_sentence(record: dict, gov: Governance) -> str:
+    status = record["status"]
+    if status == "open":
+        approvals = sum(v["vote"] == "approve" for v in record.get("votes", []))
+        rejections = sum(v["vote"] == "reject" for v in record.get("votes", []))
+        need = gov.approvals_needed
+        text = f"open for votes: {approvals} of {need} approval{'s' if need != 1 else ''} needed"
+        return text + (f", {rejections} rejection{'s' if rejections != 1 else ''}." if rejections else ".")
+    if status == "needs-fix":
+        return f"needs a fix before members can adopt it. {record.get('note', '')}"
+    if status == "adopted":
+        return f"adopted in version {record['version']}."
+    return {"declined": "declined.", "withdrawn": "withdrawn.", "cannot-apply": "closed: it can't be applied."}[status]
+
+
+def issue_title(record: dict) -> str:
+    return f"Proposal: {phrase(record, limit=48)}"
+
+
+def issue_body(record: dict, gov: Governance, site: str) -> str:
+    who = record["proposer"]
+    preview = record.get("preview") or {}
+    lines = [
+        f"**{md(who['name'])}** (Hypothesis: {md(who['hypothesis'])}) proposes a change"
+        f"{' to **' + md(record['section']) + '**' if record.get('section') else ''} in the "
+        f"[Drafter]({site}draft/#proposals):",
+        "",
+        f"**{md(phrase(record, limit=200))}**",
+        "",
+    ]
+    if preview.get("before") or preview.get("after"):
+        lines += ["How it would read:", ""] + [f"> {line}" for line in track_changes(preview)] + [""]
+    lines += [
+        f"**Why:** {md(record['reason']) if record.get('reason') else '(no reason given)'}",
+        "",
+        f"**Status:** {md(status_sentence(record, gov))}",
+        "",
+        "---",
+        "",
+        f"**Members:** reply `/approve` or `/reject` here (replying to the notification email works too), or reply "
+        f"**Approve** or **Reject** to [the proposal in the Drafter]({record['link']}). {gov.rule_sentence()} "
+        "Only a member's latest vote counts, and votes cast before the proposal was last edited don't count.",
+        "",
+        f"<!-- proposal:{record['id']} -->",
+    ]
+    return "\n".join(lines)
+
+
+def outcome_comment(record: dict, site: str) -> tuple[str, str]:
+    """The comment that closes a proposal's issue, and GitHub's reason for closing it."""
+    status = record["status"]
+    marker = f"<!-- outcome:{status} -->"
+    names = ", ".join(v["name"] for v in record.get("votes", []) if v["vote"] == ("reject" if status == "declined" else "approve"))
+    if status == "adopted":
+        text = (f"**Adopted.** It's in [version {record['version']}]({site}versions/v{record['version']}/), "
+                f"published with SHA-256 fingerprint `{record['fingerprint']}`. Approved by {md(names)}.")
+        return f"{text}\n\n{marker}", "completed"
+    if status == "declined":
+        return f"**Declined.** Rejected by {md(names)}.\n\n{marker}", "not_planned"
+    if status == "withdrawn":
+        return f"**Withdrawn.** {md(record.get('note', ''))}\n\n{marker}", "not_planned"
+    return f"**Closed: this proposal can't be applied.** {md(record.get('note', ''))}\n\n{marker}", "not_planned"
+
+
+# ---------- The run ----------
+
+@dataclass
+class Options:
+    dry_run: bool = False
+    push: bool = False
+    annotations: Path | None = None
+    offline: bool = False
+    now: dt.datetime | None = None
+
+
+class Robot:
+    def __init__(self, options: Options):
+        self.o = options
+        self.events: list[str] = []
+        self.tags: list[str] = []
+        self.gov = Governance(json.loads(MEMBERS.read_text()))
+        self.manifest = json.loads(MANIFEST.read_text())
+        self.site = self.manifest["site"]
+        self.drafter = f"{self.site}draft/"
+        self.now = options.now or now_utc()
+        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        repo = os.environ.get("REPO") or os.environ.get("GITHUB_REPOSITORY") or self.manifest["repo"]
+        use_github = token and not options.offline
+        self.github = GitHub(repo, token, options.push and not options.dry_run, self.say) if use_github else None
+        self.repo = repo
+
+    def say(self, message: str) -> None:
+        self.events.append(message)
+        print(message)
+
+    # --- versions ---
+
+    def next_version(self) -> str:
+        return release.next_version(self.manifest["latest"])
+
+    def publish(self, summary: str, details: list[str], message: str, author: str | None = None) -> dict:
+        version = self.next_version()
+        entry = release.publish(version, summary, details, today=self.now.date().isoformat())
+        commit(message.replace("{version}", version).replace("{sha256}", entry["sha256"]), author)
+        git("tag", "-a", f"v{version}", "-m", f"Version {version}", "-m", f"SHA-256 fingerprint: {entry['sha256']}",
+            "-m", summary)
+        self.tags.append(f"v{version}")
+        self.manifest = json.loads(MANIFEST.read_text())
+        return entry
+
+    def publish_direct_edit(self) -> None:
+        """A maintainer changed draft/AGENTS.md directly: publish it as the next version."""
+        latest = self.manifest["latest"]
+        log = git("log", "--format=%an\t%s", f"v{latest}..HEAD", "--", "draft/AGENTS.md").splitlines()
+        authors = sorted({line.split("\t")[0] for line in log if line} - {BOT_NAME}) or ["a maintainer"]
+        subjects = [line.split("\t", 1)[1] for line in log if "\t" in line]
+        summary = f"Edited directly by {', '.join(authors)}" + (f": {subjects[0]}" if len(subjects) == 1 else ".")
+        if self.o.dry_run:
+            self.say(f"Would publish a direct edit to the draft as version {self.next_version()}: {summary}")
+            return
+        details = ["Changes to the text:", ""] + [f"- {s}" for s in reversed(subjects)] if subjects else []
+        entry = self.publish(summary, details, "Version {version}: " + summary + "\n\nFingerprint: sha256:{sha256}")
+        self.say(f"Published a direct edit to the draft as version {entry['version']}.")
+
+    # --- proposals ---
+
+    def load_ledger(self) -> dict[str, dict]:
+        if not LEDGER.exists():
+            return {}
+        return {r["id"]: r for r in json.loads(LEDGER.read_text()).get("proposals", [])}
+
+    def ledger_text(self, records: dict[str, dict]) -> str:
+        data = {"about": LEDGER_ABOUT, "proposals": sorted(records.values(), key=lambda r: (r["created"], r["id"]))}
+        return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+    def annotations(self) -> list[dict] | None:
+        if self.o.annotations:
+            data = json.loads(self.o.annotations.read_text())
+            return data["rows"] if isinstance(data, dict) else data
+        try:
+            return fetch_annotations(self.drafter)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            self.say(f"Couldn't read the Drafter's comments from Hypothesis ({error}); proposals weren't checked.")
+            return None
+
+    def gather(self, rows: list[dict], records: dict[str, dict]) -> dict[str, list[dict]]:
+        """Bring the ledger up to date with the comments; returns the replies to each comment."""
+        replies: dict[str, list[dict]] = {}
+        for row in rows:
+            if row.get("references"):
+                replies.setdefault(row["references"][0], []).append(row)
+        seen = set()
+        for row in sorted(rows, key=lambda r: r["created"]):
+            if row.get("references") or row.get("hidden"):
+                continue
+            record = records.get(row["id"])
+            if username(row.get("user", "")).lower() in self.gov.ignored_hypothesis:
+                if record and record["status"] not in FINAL:
+                    record.update(status="withdrawn", note="The proposer's account is ignored.", decided=self.now.isoformat())
+                continue
+            quote = quote_of(row)
+            command = parse_command(row.get("text", ""), quote[0] if quote else "") if quote else None
+            if record is None and (command is None or parse_time(row["updated"]) < self.gov.count_from):
+                continue
+            seen.add(row["id"])
+            if record and record["status"] in FINAL:
+                continue
+            if command is None:  # the proposer turned it back into an ordinary comment
+                record.update(status="withdrawn", note="The proposer changed it into an ordinary comment.",
+                              decided=self.now.isoformat())
+                continue
+            if record is None:
+                record = records[row["id"]] = {"id": row["id"], "status": "new", "based_on": self.manifest["latest"],
+                                               "issue": None}
+                self.say(f"New proposal {row['id']} from {username(row['user'])}: {command['kind']}.")
+            exact, prefix, suffix = quote
+            record.update({
+                "kind": command["kind"], "old": exact, "new": command["new"], "before": prefix, "after": suffix,
+                "reason": command["reason"], "problems": command["problems"],
+                "proposer": {"name": (row.get("user_info") or {}).get("display_name") or username(row["user"]),
+                             "hypothesis": username(row["user"])},
+                "created": row["created"], "updated": row["updated"],
+                "link": (row.get("links") or {}).get("incontext") or f"https://hypothes.is/a/{row['id']}",
+            })
+        for record in records.values():
+            if record["status"] in FINAL or record["id"] in seen:
+                continue
+            # Missing from the search: make sure it was really deleted before calling it withdrawn.
+            if self.o.annotations or annotation_exists(record["id"]) is False:
+                record.update(status="withdrawn", note="The proposer deleted it.", decided=self.now.isoformat())
+                self.say(f"Proposal {record['id']} was withdrawn: its comment was deleted.")
+        return replies
+
+    def evaluate(self, record: dict, text: str) -> edits.Edit | None:
+        """Check a proposal against the current text, and set its status, note, and preview."""
+        problems = record.get("problems") or []
+        if problems:
+            record.update(status="needs-fix", note=" ".join(PROBLEMS[p] for p in problems), preview=None)
+            return None
+        try:
+            edit = edits.apply(text, record["kind"], record["old"], record["before"], record["after"], record["new"])
+        except edits.Refused as refused:
+            if refused.code == "no-change":  # the proposer can fix this by editing the comment
+                record.update(status="needs-fix", note=str(refused), preview=None)
+            else:
+                if record.get("status") != "cannot-apply":
+                    self.say(f"Proposal {record['id']} can't be applied ({refused.code}).")
+                record.update(status="cannot-apply", note=str(refused), preview=None, decided=self.now.isoformat())
+            return None
+        record.update(status="open", note="", section=edit.section,
+                      preview={"before": edit.before, "after": edit.after, "context": edit.context})
+        return edit
+
+    def adopt(self, record: dict, edit: edits.Edit, votes: list[Vote]) -> None:
+        approvals = [v for v in votes if v.vote == "approve"]
+        if self.o.dry_run:
+            self.say(f"Would adopt proposal {record['id']} as version {self.next_version()}: {summary_of(record)}")
+            self.manifest = {**self.manifest, "latest": self.next_version()}
+            record.update(status="adopted")
+            return
+        DRAFT.write_text(edit.source)
+        who = record["proposer"]
+        issue = f" · Discussion: <https://github.com/{self.repo}/issues/{record['issue']}>" if record.get("issue") else ""
+        details = [
+            f"- Proposed by {md(who['name'])} (Hypothesis: {md(who['hypothesis'])}) on {record['created'][:10]}"
+            + (f": “{md(short(record['reason'], 300))}”" if record.get("reason") else ""),
+            "- Approved by " + ", ".join(f"{md(v.member.name)} ({v.via}, {v.when.date().isoformat()})" for v in approvals),
+            f"- Proposal: <{record['link']}>{issue}",
+        ]
+        author_name = re.sub(r"[<>\n]", "", who["name"]).strip() or who["hypothesis"]
+        author_mail = re.sub(r"[^\w.+-]", "", who["hypothesis"]) or "proposer"
+        message = "\n".join([
+            f"Version {{version}}: {summary_of(record)}", "",
+            f"Proposal: {record['link']}",
+            f"Suggested-by: {author_name} (Hypothesis: {who['hypothesis']})",
+            *[f"Approved-by: {v.member.name} ({v.via})" for v in approvals],
+            "Fingerprint: sha256:{sha256}",
+        ])
+        entry = self.publish(summary_of(record), details, message, f"{author_name} <{author_mail}@hypothes.is.invalid>")
+        record.update(status="adopted", decided=self.now.isoformat(), version=entry["version"],
+                      fingerprint=entry["sha256"], diff=edit.diff)
+        self.say(f"Adopted proposal {record['id']} as version {entry['version']}: {summary_of(record)}")
+
+    def run(self) -> None:
+        problems = verify_published()
+        if problems:
+            raise SystemExit("A published version no longer matches its fingerprint, so nothing was done:\n  "
+                             + "\n  ".join(problems))
+        draft, latest = DRAFT.read_text(), LATEST.read_text()
+        if fingerprint(draft) != fingerprint(latest):
+            self.publish_direct_edit()
+        elif stamp_line(draft) != stamp_line(latest) and not self.o.dry_run:
+            release.sync_draft()
+            commit(f"Give the draft the version line of version {self.manifest['latest']}")
+            self.say("Gave the draft the newest version's version line.")
+
+        records = self.load_ledger()
+        before = LEDGER.read_text() if LEDGER.exists() else ""
+        rows = self.annotations()
+        if rows is None:
+            return self.finish(records, before)
+        replies = self.gather(rows, records)
+
+        issues = self.github.proposal_issues() if self.github else {}
+        for record in records.values():
+            if not record.get("issue") and record["id"] in issues:
+                record["issue"] = issues[record["id"]]["number"]
+
+        text = DRAFT.read_text() if not self.o.dry_run else draft
+        pending = sorted((r for r in records.values() if r["status"] not in FINAL), key=lambda r: (r["created"], r["id"]))
+        adopted = False
+        for record in pending:  # oldest first, each against the text as the earlier ones left it
+            edit = self.evaluate(record, text)
+            comments = self.github.pages(f"/issues/{record['issue']}/comments") if self.github and record.get("issue") else []
+            votes, support, stale = count_votes(record, replies.get(record["id"], []), comments, self.gov)
+            record.update(votes=[v.record() for v in votes], support=support, stale_votes=stale)
+            if edit is None:
+                continue
+            decision = decide(record, votes, self.gov, self.now)
+            if decision == "adopt":
+                self.adopt(record, edit, votes)
+                text = DRAFT.read_text() if not self.o.dry_run else edit.source
+                adopted = True
+            elif decision == "decline":
+                record.update(status="declined", decided=self.now.isoformat())
+                self.say(f"Declined proposal {record['id']}: {phrase(record)}")
+        if adopted:  # the text changed: bring the other proposals' status and preview up to date with it
+            for record in pending:
+                if record["status"] in ("open", "needs-fix"):
+                    self.evaluate(record, text)
+
+        self.open_issues(records, issues)
+        self.finish(records, before, issues)
+
+    def open_issues(self, records: dict[str, dict], issues: dict[str, dict]) -> None:
+        if not self.github:
+            return
+        waiting = [r for r in records.values() if not r.get("issue") and r["status"] == "open"]
+        if waiting and self.github.write:
+            self.github.ensure_label()
+        for record in sorted(waiting, key=lambda r: r["created"])[:NEW_ISSUES_PER_RUN]:
+            body = issue_body(record, self.gov, self.site)
+            made = self.github.call("POST", "/issues", {"title": issue_title(record), "body": body, "labels": ["proposal"]})
+            if made:
+                record["issue"] = made["number"]
+                issues[record["id"]] = made
+                self.say(f"Opened issue #{made['number']} for proposal {record['id']}.")
+
+    def finish(self, records: dict[str, dict], before: str, issues: dict[str, dict] | None = None) -> None:
+        after = self.ledger_text(records)
+        if after != before and not self.o.dry_run:
+            LEDGER.parent.mkdir(exist_ok=True)
+            LEDGER.write_text(after)
+            commit("Proposals: record new proposals, votes, and outcomes" if before else "Proposals: start the record")
+            self.say("Recorded the proposals and votes in governance/proposals.json.")
+        if self.o.push and not self.o.dry_run:
+            self.push()
+        if self.github and issues is not None:
+            self.update_issues(records, issues)
+
+    def push(self) -> None:
+        if git("rev-list", "--count", "origin/main..HEAD") == "0" and not self.tags:
+            return
+        result = subprocess.run(["git", "push", "--atomic", "origin", "HEAD:main", *self.tags], cwd=ROOT,
+                                capture_output=True, text=True)
+        if result.returncode:
+            raise PushRejected(result.stderr.strip())
+        self.say(f"Pushed to GitHub{' with ' + ', '.join(self.tags) if self.tags else ''}.")
+
+    def update_issues(self, records: dict[str, dict], issues: dict[str, dict]) -> None:
+        for record in records.values():
+            issue = issues.get(record["id"])
+            if not issue or issue.get("state") == "closed":
+                continue
+            number = issue["number"]
+            if record["status"] in FINAL:
+                text, reason = outcome_comment(record, self.site)
+                marker = text.rsplit("\n", 1)[-1]
+                posted = any(marker in (c.get("body") or "") for c in self.github.pages(f"/issues/{number}/comments"))
+                if not posted:
+                    self.github.call("POST", f"/issues/{number}/comments", {"body": text})
+                self.github.call("PATCH", f"/issues/{number}", {"state": "closed", "state_reason": reason,
+                                                               "body": issue_body(record, self.gov, self.site)})
+                self.say(f"Closed issue #{number}: {record['status']}.")
+            else:
+                body = issue_body(record, self.gov, self.site)
+                if body != (issue.get("body") or ""):
+                    self.github.call("PATCH", f"/issues/{number}", {"body": body})
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--dry-run", action="store_true", help="say what would happen, and change nothing")
+    parser.add_argument("--push", action="store_true", help="push the results and update GitHub issues")
+    parser.add_argument("--annotations", type=Path, help="read comments from this file instead of Hypothesis")
+    parser.add_argument("--offline", action="store_true", help="don't use GitHub at all")
+    parser.add_argument("--now", help="the current time, for tests (ISO 8601)")
+    args = parser.parse_args()
+    options = Options(args.dry_run, args.push, args.annotations, args.offline, parse_time(args.now) if args.now else None)
+    for attempt in range(3):
+        robot = Robot(options)
+        try:
+            robot.run()
+            break
+        except PushRejected as rejected:
+            print(f"GitHub rejected the push ({rejected}); starting again from GitHub's copy.", file=sys.stderr)
+            for tag in robot.tags:
+                git("tag", "-d", tag)
+            git("fetch", "--quiet", "origin", "main", "--tags")
+            git("reset", "--quiet", "--hard", "origin/main")
+    else:
+        raise SystemExit("GitHub rejected the push three times; the next run will try again.")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as out:
+            out.write("### Proposals\n\n" + ("\n".join(f"- {e}" for e in robot.events) or "- Nothing to do.") + "\n")
+    if not robot.events:
+        print("Nothing to do.")
+
+
+if __name__ == "__main__":
+    main()

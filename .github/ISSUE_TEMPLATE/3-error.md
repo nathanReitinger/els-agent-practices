@@ -1,12 +1,12 @@
 ---
 name: Report an error
-about: A wrong claim, a broken link, or a reference that doesn't check out
+about: A wrong claim, a broken link, or a problem with the site or the voting robot
 title: "[Error] "
 labels: error
 ---
 
-**Where** (version, and practice ID or section):
+**Where** (the version, and the section or page):
 
 **What's wrong:**
 
-**Source for the correction:**
+**Source for the correction** (if it's about the text):

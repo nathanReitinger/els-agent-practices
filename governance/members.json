@@ -1,0 +1,22 @@
+{
+  "about": "Who can vote on proposed changes to AGENTS.md, and how many votes a change needs. Maintainers edit this file, and every change to it is kept in the git history. GOVERNANCE.md explains the rules in plain English.",
+  "rules": {
+    "approvals_needed": 1,
+    "members_may_approve_their_own_proposals": true,
+    "hours_open_before_adoption": 0,
+    "proposals_count_from": "2026-10-02T21:53:00Z"
+  },
+  "members": [
+    {
+      "name": "Nathan Reitinger",
+      "role": "maintainer",
+      "hypothesis": "nathanReitinger",
+      "github": "nathanReitinger",
+      "since": "2026-10-02"
+    }
+  ],
+  "ignored_accounts": {
+    "hypothesis": [],
+    "github": []
+  }
+}

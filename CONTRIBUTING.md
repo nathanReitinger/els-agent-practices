@@ -1,26 +1,26 @@
 # Contributing
 
-This project is one file: **AGENTS.md**, standing instructions for AI agents working with empirical legal scholars. It's a comment draft, and anyone can help shape it in the [Drafter](https://nathanreitinger.github.io/els-agent-practices/draft/).
+This project is one file, **AGENTS.md**: standing instructions for AI agents working with empirical legal scholars. It's a comment draft, and it changes through proposals that members vote on. [GOVERNANCE.md](GOVERNANCE.md) has the rules.
 
-## Comment
+## Comment or propose a change (no GitHub needed)
 
-In the Drafter, select any passage and choose **Annotate**. Comments appear right away for everyone. They use [Hypothesis](https://web.hypothes.is/start), which asks for a free account.
+1. Open the [Drafter](https://nathanreitinger.github.io/els-agent-practices/draft/).
+2. Select the words you want to comment on or change, and choose **Annotate**. Comments use [Hypothesis](https://web.hypothes.is/start), which asks for a free account.
+3. For a comment, write anything. For a proposal, start your note with `Delete`, `Replace with:`, `Add after:`, or `Add rule:` (the Drafter shows examples), and add a line that starts with `Why:` to explain.
 
-## Make a new version
+When a member approves your proposal, it's published as a new version automatically. You can follow it in the Drafter's list of proposals.
 
-Anyone with a free GitHub account can edit the draft, and every edit is saved as a new version, so nothing is ever lost.
+## Vote (members)
 
-1. In the Drafter, click **Make a new version**.
-2. Sign in to GitHub if asked. GitHub will say you're proposing a change to a project you don't have write access to. That's expected.
-3. Make your edit.
-4. Click **Commit changes…**, write one line saying what you changed, then click **Propose changes** and **Create pull request**.
-5. That's it. An edit that changes only the draft is merged automatically within a minute or two and appears in the Drafter right away. Changes to anything else wait for a maintainer.
+Reply **Approve** or **Reject** to a proposal in the Drafter, or comment `/approve` or `/reject` on its GitHub issue. Replying to GitHub's notification email works too.
 
-## Go back to any version
+## Check a copy
 
-The Drafter lists every edit to the draft. Open one to read the draft as it was. To restore it, copy its text, open the editor, replace everything, and propose the change; the restore is saved like any other version.
+Every version has a SHA-256 fingerprint. [Check a copy](https://nathanreitinger.github.io/els-agent-practices/check/) tells you whether a file is exactly a published version and, if it isn't, what changed.
 
-Maintainers can also undo an edit with `git revert`. History is never rewritten: force-pushes to `main` are blocked.
+## For GitHub users
+
+A pull request that changes `draft/AGENTS.md` waits for a maintainer. When one is merged, it's published as a new version, like any direct change. Most changes are simpler as a proposal in the Drafter, where members vote on them.
 
 ## Style
 
@@ -29,21 +29,20 @@ Maintainers can also undo an edit with `git revert`. History is never rewritten:
 - Keep it short: agents follow a page of specific rules better than ten pages of general ones.
 - Add no facts from memory. Check anything you add against its source.
 - Plain Markdown, one rule or paragraph per line, no raw HTML.
-- Don't edit the "*Version ...*" line at the top; the release script manages it.
+- Line 3, the version line, is written automatically.
 
 ## Versions
 
-Each published version is a frozen snapshot with a permanent link. The draft carries the next version number with a "-draft" suffix (for example, 0.0.3-draft).
+Each published version is a frozen snapshot with a permanent link and a fingerprint. The Drafter always shows the newest version.
 
-- **0.0.x: comment drafts.** Nothing is final. Each new comment draft adds one to the last number.
-- **1.0.0** will be the first version the contributors are ready to recommend as a standard.
-- **After 1.0**, numbers are MAJOR.MINOR.PATCH: a patch (1.0.1) fixes wording; a minor version (1.1.0) adds rules without contradicting earlier ones; a major version (2.0.0) removes or reverses a rule.
+- **0.0.x: comment drafts.** Nothing is final. Each adopted proposal adds one to the last number.
+- **1.0.0** will be the first version the contributors are ready to recommend as a standard. A maintainer publishes it.
+- **After 1.0**, each adopted proposal adds one to the middle number (1.1.0, 1.2.0, ...), and a maintainer decides when a change is big enough for a new first number (2.0.0).
 
-Because anyone can edit the draft, a maintainer reads every edit since the last release before publishing a new version.
+## Maintainers
 
-## Releasing (maintainers)
-
-1. Pull the latest edits: `git pull`.
-2. Review what changed since the last release: `git log vX.Y.Z..HEAD -- draft/AGENTS.md`.
-3. Run `python3 scripts/release.py X.Y.Z "One-line summary"`.
-4. Check the result, then commit, tag, and push using the commands the script prints.
+- **Members and rules** are in `governance/members.json`. To add a member, add their name, role, and the Hypothesis and GitHub usernames they'll vote with. Changes take effect at the robot's next run.
+- **The robot** runs every 15 minutes (on GitHub: Actions, then Proposals). To run it now, choose **Run workflow** there; tick "Only say what would happen" for a dry run. On your own computer: `python3 scripts/proposals.py --dry-run`.
+- **Tests:** `python3 -m unittest discover -s scripts/tests -t scripts/tests`. They also run before every robot run.
+- **A version that doesn't come from a proposal**, such as 1.0.0: `python3 scripts/release.py 1.0.0 "One-line summary"`, then the commit, tag, and push commands it prints.
+- **If GitHub switches the schedule off** (it can after 60 days without activity), turn it back on under Actions, then Proposals.

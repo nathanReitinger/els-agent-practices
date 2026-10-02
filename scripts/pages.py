@@ -4,8 +4,9 @@
     python3 scripts/pages.py
 
 The site shows one file, AGENTS.md: the latest published version at the root,
-the working draft in the Drafter (draft/), and each frozen version under
-versions/vX.Y.Z/. Addresses from earlier layouts redirect to these pages.
+the Drafter (draft/), where anyone can propose a change and members vote on it,
+each frozen version under versions/vX.Y.Z/, and a page that checks a copy's
+fingerprint (check/). Addresses from earlier layouts redirect to these pages.
 The frozen Markdown files are never touched. scripts/release.py also uses
 archive_pages() for each new version.
 """
@@ -69,6 +70,7 @@ SHELL = """<!doctype html>
     <nav class="site-nav" aria-label="Site">
       <a href="{root}/" data-nav="file">AGENTS.md</a>
       <a href="{root}/draft/" data-nav="drafter">Drafter</a>
+      <a href="{root}/check/" data-nav="check">Check a copy</a>
       <a href="https://github.com/" data-repo-link>GitHub</a>
     </nav>
     <div class="reader-controls" role="group" aria-label="Reading settings">
@@ -95,6 +97,7 @@ SHELL = """<!doctype html>
   <footer id="footer" class="site-footer"></footer>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="{root}/assets/commands.js?v={asset}"></script>
   <script src="{root}/assets/app.js?v={asset}"></script>
 </body>
 </html>
@@ -117,7 +120,7 @@ REDIRECT = """<!doctype html>
 def asset_version() -> str:
     """A short hash of the site's CSS and JS, so browsers fetch new copies whenever they change."""
     digest = hashlib.sha1()
-    for name in ("style.css", "app.js"):
+    for name in ("style.css", "commands.js", "app.js"):
         digest.update((ROOT / "assets" / name).read_bytes())
     return digest.hexdigest()[:8]
 
@@ -127,7 +130,7 @@ def render(mode: str, root: str, title: str, description: str, version: str | No
         title=escape(title),
         description=escape(description),
         site_name=escape(SITE_NAME),
-        icon=ICON.format(color="8a5300" if mode == "drafter" else "8a2432"),
+        icon=ICON.format(color={"drafter": "8a5300", "check": "1f6f43"}.get(mode, "8a2432")),
         prefs=PREFS,
         fonts=FONTS,
         root=root,
@@ -156,9 +159,11 @@ def archive_pages(version: str) -> dict[str, str]:
 
 FIXED = {
     "index.html": render("published", ".", SITE_NAME,
-                         "AGENTS.md: standing instructions for AI agents working with empirical legal scholars. Download it, or comment on the draft."),
+                         "AGENTS.md: standing instructions for AI agents working with empirical legal scholars. Download it, or propose a change."),
     "draft/index.html": render("drafter", "..", f"Drafter · {SITE_NAME}",
-                               "The working draft of AGENTS.md. Anyone can comment on it or make a new version, and every version is kept."),
+                               "Propose a change to AGENTS.md. Members vote, and every approved change is published as a new version."),
+    "check/index.html": render("check", "..", f"Check a copy · {SITE_NAME}",
+                               "Check whether a copy of AGENTS.md is exactly a published version, using its SHA-256 fingerprint."),
     # Addresses from earlier layouts.
     "agents/index.html": redirect("../"),
     "draft/agents.html": redirect("./"),

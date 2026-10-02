@@ -4,12 +4,13 @@
   "branch": "main",
   "site": "https://nathanreitinger.github.io/els-agent-practices/",
   "latest": "0.0.2",
-  "draft": "0.0.3-draft",
   "versions": [
     {
       "version": "0.0.2",
       "date": "2026-10-02",
       "summary": "Comment draft 0.0.2: AGENTS.md is now one general workflow file. It assumes no folder layout or file names, needs no filling in, and no longer points to a separate guide.",
+      "sha256": "7eef02c61599930082692f31107f50a8d97879ccb22fac333a47a9ea68c6e1b8",
+      "sha256_note": "Computed on 2026-10-02 from the frozen file, after this version was published.",
       "files": [
         "AGENTS.md"
       ]
@@ -18,6 +19,8 @@
       "version": "0.0.1",
       "date": "2026-10-02",
       "summary": "Comment draft 0.0.1: AGENTS.md is retitled AGENTS.md for Empirical Legal Scholars, to match the site. No other changes to the text.",
+      "sha256": "17e56d7dcf266ba09e3b26fc6dcb3ffe63b20d5572f0a9a6b7262e96200ac9d2",
+      "sha256_note": "Computed on 2026-10-02 from the frozen file, after this version was published.",
       "files": [
         "agent-best-practices.md",
         "AGENTS.md"
@@ -27,6 +30,8 @@
       "version": "0.0.0",
       "date": "2026-10-01",
       "summary": "First comment draft. AGENTS.md: standing instructions for agents in empirical legal research projects, with every rule linked to the guide practice behind it. The guide: eight principles, 55 practices, a pre-submission checklist, and a verified reading list. Nothing is final; comments welcome.",
+      "sha256": "6850e93ff5f95aae663eff1494a0a193ac23a02a5fbaae9d270673d44ee58657",
+      "sha256_note": "Computed on 2026-10-02 from the frozen file, after this version was published.",
       "files": [
         "agent-best-practices.md",
         "AGENTS.md"

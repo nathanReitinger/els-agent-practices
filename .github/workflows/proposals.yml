@@ -1,0 +1,66 @@
+name: Proposals
+# Counts members' votes on the changes proposed in the Drafter, and publishes each approved change
+# as a new version. The robot is scripts/proposals.py; the rules are in GOVERNANCE.md.
+
+on:
+  schedule:
+    - cron: "7-59/15 * * * *"  # every 15 minutes (GitHub sometimes runs these late)
+  issue_comment:  # a member voted on a proposal's issue
+    types: [created, edited]
+  push:  # a maintainer changed the text or the members
+    branches: [main]
+    paths: ["draft/AGENTS.md", "governance/members.json"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only say what would happen; change nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # commit and tag new versions
+  issues: write  # open and close an issue for each proposal
+  actions: write  # keep this schedule switched on (see the last step)
+
+concurrency:
+  group: proposals
+  cancel-in-progress: false
+
+jobs:
+  proposals:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (contains(github.event.issue.labels.*.name, 'proposal') && github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # every version's tag, for the change log
+
+      - name: Test the robot
+        run: python3 -m unittest discover -s scripts/tests -t scripts/tests
+
+      - name: Count votes and publish approved changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python3 scripts/proposals.py --dry-run
+          else
+            python3 scripts/proposals.py --push
+          fi
+
+      # GitHub switches off scheduled workflows in a repository with no activity for 60 days.
+      # Re-enabling this one once a day resets that clock.
+      - name: Keep the schedule switched on
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(date -u +%H)" = "00" ] && [ "$(date -u +%M)" -lt 15 ]; then
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/proposals.yml/enable"
+          fi

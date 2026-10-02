@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
-"""Publish the current draft as a numbered, frozen version.
+"""Publish the text in draft/AGENTS.md as a numbered, frozen version.
 
-    python3 scripts/release.py 0.0.2 "One-line summary of this release"
+Approved proposals are published automatically by scripts/proposals.py, which
+calls publish() below. Run this by hand only for a version that doesn't come
+from a proposal, such as 1.0.0:
 
-Copies draft/AGENTS.md to versions/vX.Y.Z/, stamping
-each with its version, date, and permanent link; writes that version's pages;
-makes latest/ an exact copy of the new version; records the release in
-versions.json and CHANGELOG.md; and moves the draft on to the next version.
+    python3 scripts/release.py 1.0.0 "One-line summary of this version"
 
-Before 1.0, every version is a comment draft (0.0.1, 0.0.2, ...), and the draft
-moves to the next patch number. From 1.0 on, the draft moves to the next minor
-version. The rules are in CONTRIBUTING.md.
+Publishing a version:
+- stamps line 3 of the file with the version, the date, the fingerprint, and
+  the version's permanent link (the fingerprint is the SHA-256 hash of the file
+  without line 3; see scripts/fingerprint.py);
+- writes versions/vX.Y.Z/ (the frozen copy and its page) and makes latest/ an
+  exact copy of it;
+- records the version and its fingerprint in versions.json and CHANGELOG.md;
+- gives draft/AGENTS.md the same version line, so the draft is always the
+  newest version, word for word.
 
-It never commits, tags, or pushes. It prints those commands so you can review
-the result first.
+Before 1.0 every version is a comment draft and the next one adds one to the
+last number (0.0.3, 0.0.4, ...). From 1.0 on, the next one adds one to the
+middle number. The rules are in CONTRIBUTING.md.
+
+Run by hand, it doesn't commit, tag, or push; it prints those commands so you
+can review the result first.
 """
 
 from __future__ import annotations
@@ -28,17 +37,21 @@ from pathlib import Path
 from typing import NoReturn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from fingerprint import STAMP_LINE, fingerprint  # noqa: E402
 from pages import archive_pages  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 AGENTS = "AGENTS.md"
-FILES = (AGENTS,)  # the one file the project publishes
 MANIFEST = ROOT / "versions.json"
 CHANGELOG = ROOT / "CHANGELOG.md"
 CHANGELOG_MARKER = "<!-- releases -->"
 
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-VERSION_LINE = re.compile(r"^\*Version [^\n]*\*$", re.MULTILINE)
+STAMP = re.compile(r"^\*Version [^\n]*\*$")
+
+
+class ReleaseError(Exception):
+    pass
 
 
 def die(message: str) -> NoReturn:
@@ -48,33 +61,35 @@ def die(message: str) -> NoReturn:
 def parse_version(text: str) -> tuple[int, int, int]:
     match = SEMVER.match(text)
     if not match:
-        die(f"'{text}' isn't a version number like 0.0.2")
+        raise ReleaseError(f"'{text}' isn't a version number like 0.0.2")
     major, minor, patch = (int(part) for part in match.groups())
     return major, minor, patch
 
 
-def next_draft(number: tuple[int, int, int]) -> str:
-    major, minor, patch = number
+def next_version(latest: str) -> str:
+    """The number for the next version: 0.0.2 -> 0.0.3 before 1.0, then 1.0.0 -> 1.1.0."""
+    major, minor, patch = parse_version(latest)
     if major == 0 and minor == 0:
-        return f"0.0.{patch + 1}-draft"
-    return f"{major}.{minor + 1}.0-draft"
+        return f"0.0.{patch + 1}"
+    return f"{major}.{minor + 1}.0"
 
 
 def comment_label(version: str) -> str:
     return " (comment draft; not final)" if version.startswith("0.") else ""
 
 
-def published_line(name: str, version: str, today: str, site: str) -> str:
-    base = f"{site}versions/v{version}/"
-    if name == AGENTS:
-        return f"*Version {version}{comment_label(version)} · Published {today} · Permanent link: <{base}{AGENTS}>*"
-    return f"*Version {version}{comment_label(version)} · Published {today} · Permanent link: <{base}>*"
+def stamp(version: str, today: str, site: str, sha256: str) -> str:
+    return (f"*Version {version}{comment_label(version)} · Published {today} · "
+            f"SHA-256 fingerprint of this file without this line: {sha256} · "
+            f"Permanent link: <{site}versions/v{version}/{AGENTS}>*")
 
 
-def draft_line(name: str, version: str, site: str) -> str:
-    latest = f"{site}latest/{AGENTS}" if name == AGENTS else site
-    return (f"*Version {version} · Working draft: anyone can edit it, and every edit is logged · "
-            f"Latest published version: <{latest}>*")
+def with_stamp(text: str, line: str) -> str:
+    lines = text.split("\n")
+    if len(lines) <= STAMP_LINE or not STAMP.match(lines[STAMP_LINE]):
+        raise ReleaseError(f"line {STAMP_LINE + 1} of draft/{AGENTS} must be its '*Version ...*' line")
+    lines[STAMP_LINE] = line
+    return "\n".join(lines)
 
 
 def git(*args: str) -> str | None:
@@ -86,79 +101,95 @@ def git(*args: str) -> str | None:
     return result.stdout.strip()
 
 
+def sync_draft() -> bool:
+    """Give the draft the newest version's line 3, if its text is that version's. True if it changed."""
+    draft_path, latest_path = ROOT / "draft" / AGENTS, ROOT / "latest" / AGENTS
+    draft, latest = draft_path.read_text(), latest_path.read_text()
+    if draft == latest or fingerprint(draft) != fingerprint(latest):
+        return False
+    draft_path.write_text(latest)
+    return True
+
+
+def publish(version: str, summary: str, details: list[str] | tuple[str, ...] = (), today: str | None = None) -> dict:
+    """Publish draft/AGENTS.md as `version`. Returns the new entry in versions.json."""
+    manifest = json.loads(MANIFEST.read_text())
+    previous = manifest.get("latest")
+    if previous and parse_version(version) <= parse_version(previous):
+        raise ReleaseError(f"{version} must be greater than the latest version, {previous}")
+    out_dir = ROOT / "versions" / f"v{version}"
+    if out_dir.exists():
+        raise ReleaseError(f"versions/v{version}/ already exists; published versions are never overwritten")
+
+    draft_path = ROOT / "draft" / AGENTS
+    draft = draft_path.read_text()
+    sha256 = fingerprint(draft)
+    newest = next((r for r in manifest["versions"] if r["version"] == previous), {})
+    if newest.get("sha256") == sha256:
+        raise ReleaseError(f"the text hasn't changed since version {previous}; there's nothing new to publish")
+
+    today = today or dt.date.today().isoformat()
+    site = manifest["site"]
+    text = with_stamp(draft, stamp(version, today, site, sha256))
+    assert fingerprint(text) == sha256
+
+    out_dir.mkdir(parents=True)
+    (out_dir / AGENTS).write_text(text)
+    for page, html in archive_pages(version).items():
+        (out_dir / page).write_text(html)
+    latest = ROOT / "latest"
+    shutil.rmtree(latest, ignore_errors=True)
+    latest.mkdir()
+    shutil.copyfile(out_dir / AGENTS, latest / AGENTS)
+    draft_path.write_text(text)
+
+    entry = {"version": version, "date": today, "summary": summary, "sha256": sha256, "files": [AGENTS]}
+    manifest["latest"] = version
+    manifest.pop("draft", None)
+    manifest["versions"].insert(0, entry)
+    MANIFEST.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+    block = f"## [{version}] - {today}\n\n{summary}\n"
+    if details:
+        block += "\n" + "\n".join(details) + "\n"
+    block += f"\nSHA-256 fingerprint: `{sha256}`\n"
+    changelog = CHANGELOG.read_text()
+    if CHANGELOG_MARKER not in changelog:
+        raise ReleaseError(f"CHANGELOG.md is missing the '{CHANGELOG_MARKER}' line")
+    CHANGELOG.write_text(changelog.replace(CHANGELOG_MARKER, f"{CHANGELOG_MARKER}\n\n{block}", 1))
+    return entry
+
+
 def check_repo_is_current() -> None:
-    """Refuse to release if merged edits are missing from this copy."""
+    """Refuse to release if changes are missing from this copy."""
     if git("rev-parse", "--is-inside-work-tree") != "true":
         return
     if git("status", "--porcelain", "--", "draft/"):
-        die("draft/ has uncommitted changes; commit them first so they're in the edit log")
+        die("draft/ has uncommitted changes; commit them first so they're in the history")
     if git("rev-parse", "--abbrev-ref", "@{upstream}") is None:
         return
     git("fetch", "--quiet")
     behind = git("rev-list", "--count", "HEAD..@{upstream}")
     if behind and behind != "0":
-        die(f"this copy is {behind} commit(s) behind GitHub; run 'git pull' first so the release includes every edit")
+        die(f"this copy is {behind} commit(s) behind GitHub; run 'git pull' first")
 
 
 def main() -> None:
     if len(sys.argv) != 3 or not sys.argv[2].strip():
         die('usage: python3 scripts/release.py X.Y.Z "One-line summary"')
     version, summary = sys.argv[1], sys.argv[2].strip()
-    number = parse_version(version)
-
-    manifest = json.loads(MANIFEST.read_text())
-    previous = manifest.get("latest")
-    if previous and number <= parse_version(previous):
-        die(f"{version} must be greater than the latest release, {previous}")
-    out_dir = ROOT / "versions" / f"v{version}"
-    if out_dir.exists():
-        die(f"versions/v{version}/ already exists; published versions are never overwritten")
     check_repo_is_current()
-
-    drafts = {name: (ROOT / "draft" / name).read_text() for name in FILES if (ROOT / "draft" / name).exists()}
-    if AGENTS not in drafts:
-        die(f"draft/{AGENTS} is missing")
-    for name, text in drafts.items():
-        if not VERSION_LINE.search(text):
-            die(f"draft/{name} is missing its '*Version ...*' line near the top")
-
-    today = dt.date.today().isoformat()
-    site = manifest["site"]
-    following = next_draft(number)
-
-    out_dir.mkdir(parents=True)
-    for name, text in drafts.items():
-        (out_dir / name).write_text(VERSION_LINE.sub(published_line(name, version, today, site), text, count=1))
-        (ROOT / "draft" / name).write_text(VERSION_LINE.sub(draft_line(name, following, site), text, count=1))
-    for page, html in archive_pages(version).items():
-        (out_dir / page).write_text(html)
-
-    # latest/ is an exact copy of the newest version's files.
-    latest = ROOT / "latest"
-    shutil.rmtree(latest, ignore_errors=True)
-    latest.mkdir()
-    for name in drafts:
-        shutil.copyfile(out_dir / name, latest / name)
-
-    manifest.update(latest=version, draft=following)
-    manifest["versions"].insert(0, {"version": version, "date": today, "summary": summary, "files": list(drafts)})
-    MANIFEST.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
-
-    # The changelog gets the summary plus a line for every edit to the draft since the last release.
+    previous = json.loads(MANIFEST.read_text()).get("latest")
     since = [f"v{previous}..HEAD"] if previous and git("rev-parse", "--verify", "--quiet", f"v{previous}") else []
-    edits = git("log", "--reverse", "--format=- %s (%an, %as)", *since, "--", *(f"draft/{name}" for name in FILES)) or ""
-    entry = f"## [{version}] - {today}\n\n{summary}\n"
-    if edits:
-        entry += f"\nEdits to the draft in this release:\n\n{edits}\n"
-    changelog = CHANGELOG.read_text()
-    if CHANGELOG_MARKER not in changelog:
-        die(f"CHANGELOG.md is missing the '{CHANGELOG_MARKER}' line")
-    CHANGELOG.write_text(changelog.replace(CHANGELOG_MARKER, f"{CHANGELOG_MARKER}\n\n{entry}", 1))
-
-    print(f"Published version {version} ({', '.join(drafts)}) to versions/v{version}/ and latest/. "
-          f"The draft is now {following}.")
+    edits = git("log", "--reverse", "--format=- %s (%an, %as)", *since, "--", f"draft/{AGENTS}") or ""
+    try:
+        entry = publish(version, summary, ["Changes to the text:", "", *edits.splitlines()] if edits else ())
+    except ReleaseError as error:
+        die(str(error))
+    print(f"Published version {version} to versions/v{version}/ and latest/ (fingerprint {entry['sha256']}).")
     print("Review the changes, then run:")
-    print(f'  git add -A && git commit -m "Release v{version}" && git tag -a v{version} -m "Version {version}" '
+    print(f'  git add -A && git commit -m "Version {version}" && '
+          f'git tag -a v{version} -m "Version {version}" -m "SHA-256 fingerprint: {entry["sha256"]}" '
           f"&& git push --follow-tags")
 
 
