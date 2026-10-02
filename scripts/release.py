@@ -148,7 +148,7 @@ def main() -> None:
 
     # The changelog gets the summary plus a line for every edit to the draft since the last release.
     since = [f"v{previous}..HEAD"] if previous and git("rev-parse", "--verify", "--quiet", f"v{previous}") else []
-    edits = git("log", "--reverse", "--format=- %s (%an, %as)", *since, "--", "draft/") or ""
+    edits = git("log", "--reverse", "--format=- %s (%an, %as)", *since, "--", *(f"draft/{name}" for name in FILES)) or ""
     entry = f"## [{version}] - {today}\n\n{summary}\n"
     if edits:
         entry += f"\nEdits to the draft in this release:\n\n{edits}\n"
