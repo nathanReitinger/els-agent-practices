@@ -42,6 +42,11 @@ SHELL = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
   <meta name="description" content="{description}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{site_name}">
+  <meta property="og:title" content="{title}">
+  <meta property="og:description" content="{description}">
+  <meta name="twitter:card" content="summary">
   <link rel="icon" href="{icon}">
   {prefs}
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -99,6 +104,7 @@ def render(mode: str, file: str, root: str, title: str, description: str, versio
     return SHELL.format(
         title=escape(title),
         description=escape(description),
+        site_name=escape(SITE_NAME),
         icon=ICON.format(color=color),
         prefs=PREFS,
         fonts=FONTS,
