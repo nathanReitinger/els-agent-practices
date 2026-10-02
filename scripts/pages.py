@@ -3,28 +3,37 @@
 
     python3 scripts/pages.py
 
-scripts/release.py also uses render() for each version's pages.
+Rewrites the fixed pages and the page shells of every published version (the
+frozen Markdown files are never touched). scripts/release.py also uses
+archive_pages() for each new version.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 from html import escape
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-
-def asset_version() -> str:
-    """A short hash of the site's CSS and JS, so browsers fetch new copies whenever they change."""
-    digest = hashlib.sha1()
-    for name in ("style.css", "app.js"):
-        digest.update((ROOT / "assets" / name).read_bytes())
-    return digest.hexdigest()[:8]
+FONTS = ("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500"
+         "&family=Playfair:ital,opsz,wght@0,5..1200,300..900;1,5..1200,300..900&display=swap")
 
 ICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E"
         "%3Crect width='32' height='32' rx='7' fill='%23{color}'/%3E%3Ctext x='16' y='23' font-size='20' "
         "text-anchor='middle' fill='white' font-family='Georgia,serif'%3E%C2%A7%3C/text%3E%3C/svg%3E")
+
+MOON = ('<svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" '
+        'd="M20.6 14.6A8.6 8.6 0 0 1 9.4 3.4a.6.6 0 0 0-.8-.7A9.6 9.6 0 1 0 21.3 15.4a.6.6 0 0 0-.7-.8z"/></svg>')
+SUN = ('<svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/>'
+       '<g stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2'
+       'M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g></svg>')
+
+# Applies the reader's saved theme and text size before the page paints.
+PREFS = ('<script>try{var d=document.documentElement,t=localStorage.getItem("els-theme"),'
+         's=localStorage.getItem("els-size");if(t==="light"||t==="dark")d.dataset.theme=t;'
+         'if(s&&!isNaN(+s))d.style.setProperty("--reading-scale",s)}catch(e){}</script>')
 
 SHELL = """<!doctype html>
 <html lang="en">
@@ -34,9 +43,14 @@ SHELL = """<!doctype html>
   <title>{title}</title>
   <meta name="description" content="{description}">
   <link rel="icon" href="{icon}">
+  {prefs}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="{fonts}">
   <link rel="stylesheet" href="{root}/assets/style.css?v={asset}">
 </head>
 <body data-mode="{mode}" data-file="{file}" data-root="{root}"{version_attr}>
+  <div class="progress" aria-hidden="true"><span></span></div>
   <header class="site-header">
     <a class="brand" href="{root}/">ELS Agent Practices</a>
     <nav class="site-nav" aria-label="Site">
@@ -46,6 +60,11 @@ SHELL = """<!doctype html>
       <a href="{root}/versions/" data-nav="versions">Versions</a>
       <a href="https://github.com/" data-repo-link>GitHub</a>
     </nav>
+    <div class="reader-controls" role="group" aria-label="Reading settings">
+      <button type="button" class="control" data-size="down" aria-label="Smaller text" title="Smaller text"><span class="a-small" aria-hidden="true">A&minus;</span></button>
+      <button type="button" class="control" data-size="up" aria-label="Larger text" title="Larger text"><span class="a-large" aria-hidden="true">A+</span></button>
+      <button type="button" class="control theme-toggle" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">{moon}{sun}</button>
+    </div>
   </header>
   <div class="layout">
     <div id="banner" class="banner" hidden></div>
@@ -64,19 +83,32 @@ RENDERERS = """  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.
 GUIDE_TITLE = "Best Practices for Working with AI Agents in Empirical Legal Research"
 
 
+def asset_version() -> str:
+    """A short hash of the site's CSS and JS, so browsers fetch new copies whenever they change."""
+    digest = hashlib.sha1()
+    for name in ("style.css", "app.js"):
+        digest.update((ROOT / "assets" / name).read_bytes())
+    return digest.hexdigest()[:8]
+
+
 def render(mode: str, file: str, root: str, title: str, description: str, version: str | None = None) -> str:
     needs_markdown = mode not in ("history", "versions")
-    color = "8a5300" if mode in ("draft", "history") else "1f4e79"
+    color = "8a5300" if mode in ("draft", "history") else "8a2432"
+    asset = asset_version()
     return SHELL.format(
         title=escape(title),
         description=escape(description),
         icon=ICON.format(color=color),
+        prefs=PREFS,
+        fonts=FONTS,
         root=root,
+        asset=asset,
         mode=mode,
         file=file,
         version_attr=f' data-version="{escape(version)}"' if version else "",
-        asset=asset_version(),
-        scripts=(RENDERERS if needs_markdown else "") + f'  <script src="{root}/assets/app.js?v={asset_version()}"></script>\n',
+        moon=MOON,
+        sun=SUN,
+        scripts=(RENDERERS if needs_markdown else "") + f'  <script src="{root}/assets/app.js?v={asset}"></script>\n',
     )
 
 
@@ -112,6 +144,13 @@ def main() -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render(mode, file, root, title, description))
         print(f"wrote {path}")
+    # Published versions: refresh their page shells so every version gets the current design.
+    manifest = json.loads((ROOT / "versions.json").read_text())
+    for release in manifest.get("versions", []):
+        folder = ROOT / "versions" / f"v{release['version']}"
+        for name, html in archive_pages(release["version"], "AGENTS.md" in release.get("files", [])).items():
+            (folder / name).write_text(html)
+            print(f"wrote versions/v{release['version']}/{name}")
 
 
 if __name__ == "__main__":
