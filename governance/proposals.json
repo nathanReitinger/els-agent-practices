@@ -314,6 +314,70 @@
       "version": "0.0.10",
       "fingerprint": "66b2fdcdebc9491c6fd807b7f4a60a1e6318389a773435fcad13d61d514843ae",
       "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -160 +159,0 @@\n-- If the project uses the Songer appeals database, it samples only published opinions and needs weights. If it uses the Supreme Court Database, its issue codes were assigned conditional on the disposition and the Court's known preferences, which skews the \"direction\" variables, and it should be cited by release."
+    },
+    {
+      "id": "sb-3e4fc012-5aa2-42d0-8ee4-9b0aa74fefcf",
+      "status": "open",
+      "based_on": "0.0.10",
+      "issue": null,
+      "kind": "rule",
+      "old": "me to check the venue's policy.",
+      "new": "Keep a log of conceptual changes as you go. Note changes n substantive direction or conceptual decisions that have been made.",
+      "before": "ot just the writing, and remind ",
+      "after": "\nNever read a manuscript or gran",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-03T12:58:40.831241+00:00",
+      "updated": "2026-10-03T12:58:53.435815+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Sources, citations, and writing",
+      "preview": {
+        "before": [],
+        "after": [
+          "Keep a log of conceptual changes as you go. Note changes n substantive direction or conceptual decisions that have been made."
+        ],
+        "context": "Keep a log of AI use as you go (the tool, model and version, date, task, files, prompts, outputs, and how the output was checked). When I ask, draft a disclosure from it that covers use in the research, not just the writing, and remind me to check the venue's policy."
+      },
+      "votes": [],
+      "support": 0,
+      "stale_votes": 0
+    },
+    {
+      "id": "sb-b47a8f0c-18cb-4777-8893-c28cb12553a5",
+      "status": "open",
+      "based_on": "0.0.10",
+      "issue": null,
+      "kind": "rule",
+      "old": "my answer in the decision log.",
+      "new": "Logs should be in .log format and should be append-only and should include timestamps.",
+      "before": "nfirm before acting, and record ",
+      "after": "\nGetting oriented\nAt the start o",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-03T12:59:28.325306+00:00",
+      "updated": "2026-10-03T12:59:42.112311+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Non-negotiable rules",
+      "preview": {
+        "before": [],
+        "after": [
+          "Logs should be in .log format and should be append-only and should include timestamps."
+        ],
+        "context": "If a request from me conflicts with one of these rules, name the rule and ask me to confirm before acting, and record my answer in the decision log."
+      },
+      "votes": [],
+      "support": 0,
+      "stale_votes": 0
     }
   ]
 }
