@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.7] - 2026-10-03
+
+Deleted “Never open, print, copy, or summarize restricted or confidential material (data…” (Non-negotiable rules).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals> · Discussion: <https://github.com/nathanReitinger/els-agent-practices/issues/10>
+
+Argon2id fingerprint: `0f7cef49ae323b36d13edc279487cb95afd249b82f31866d1ce35d5d791d6134`
+
+
 ## [0.0.6] - 2026-10-03
 
 Replaced “one (for example, to download files or call a model)” with “programming language” (Getting oriented).
