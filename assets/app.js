@@ -1486,6 +1486,15 @@
   // asks them to: the text itself is on the main page. They enter the address, then the 6-digit code it's sent,
   // and the page appears with the text ready to edit. They stay signed in on that computer.
 
+  // Supabase's messages, in plain words (with its own words kept, for whoever looks after the site).
+  function plainError(error) {
+    const text = String(error?.message || error);
+    if (/rate limit|security purposes|request this after/i.test(text)) return `Too many codes were asked for just now. Wait a minute, then try again. (${text})`;
+    if (/sending|smtp|email.*send/i.test(text)) return `The email couldn't be sent. Please try again in a few minutes. (${text})`;
+    if (/expired|invalid|otp/i.test(text)) return `That code is wrong or has expired. Check it, or send a new one. (${text})`;
+    return `That didn't work: ${text}`;
+  }
+
   function gateBox() {
     const { backend, signin: step } = suggest;
     const readInstead = h("p", { class: "gate-fine" }, "Just want to read it? The current version is on the ",
@@ -1508,12 +1517,12 @@
           await backend.verifyCode(step.email, value);
           Object.assign(step, { step: "email", note: "" });
         } catch (error) {
-          say(`That code didn't work (${error.message}). Check it, or send a new one.`);
+          say(plainError(error));
         }
       };
       const again = async () => {
         say("Sending…");
-        try { await backend.sendCode(step.email); say("We sent a new code. Use the newest one."); } catch (error) { say(`That didn't work: ${error.message}`); }
+        try { await backend.sendCode(step.email); say("We sent a new code. Use the newest one."); } catch (error) { say(plainError(error)); }
       };
       code.addEventListener("keydown", (event) => { if (event.key === "Enter") verify(); });
       setTimeout(() => code.focus(), 0);
@@ -1538,7 +1547,7 @@
         Object.assign(step, { step: "code", email: address, note: backend.kind === "local" ? "(Local test: any six digits work.)" : "" });
         updateGate(true);
       } catch (error) {
-        say(`That didn't work: ${error.message}`);
+        say(plainError(error));
       }
     };
     email.addEventListener("keydown", (event) => { if (event.key === "Enter") send(); });
