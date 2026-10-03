@@ -317,7 +317,7 @@
     },
     {
       "id": "sb-3e4fc012-5aa2-42d0-8ee4-9b0aa74fefcf",
-      "status": "open",
+      "status": "adopted",
       "based_on": "0.0.10",
       "issue": 11,
       "kind": "rule",
@@ -343,13 +343,25 @@
         ],
         "context": "Keep a log of AI use as you go (the tool, model and version, date, task, files, prompts, outputs, and how the output was checked). When I ask, draft a disclosure from it that covers use in the research, not just the writing, and remind me to check the venue's policy."
       },
-      "votes": [],
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-03T13:28:44.531673+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
       "support": 0,
-      "stale_votes": 0
+      "stale_votes": 0,
+      "decided": "2026-10-03T13:29:29.201692+00:00",
+      "version": "0.0.11",
+      "fingerprint": "5aa122b13f1c664fb291b68ce3377f4ea5b582959055cb96dac56ec1e5eb8035",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -138,0 +139 @@\n+- Keep a log of conceptual changes as you go. Note changes n substantive direction or conceptual decisions that have been made."
     },
     {
       "id": "sb-b47a8f0c-18cb-4777-8893-c28cb12553a5",
-      "status": "open",
+      "status": "adopted",
       "based_on": "0.0.10",
       "issue": 12,
       "kind": "rule",
@@ -375,9 +387,21 @@
         ],
         "context": "If a request from me conflicts with one of these rules, name the rule and ask me to confirm before acting, and record my answer in the decision log."
       },
-      "votes": [],
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-03T13:28:41.085052+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
       "support": 0,
-      "stale_votes": 0
+      "stale_votes": 0,
+      "decided": "2026-10-03T13:29:29.201692+00:00",
+      "version": "0.0.12",
+      "fingerprint": "504546fd221269121b54fdb6f152feee5f3b8663ed6e33530d489cb4db1be1ab",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -17,0 +18 @@\n+10. Logs should be in .log format and should be append-only and should include timestamps."
     }
   ]
 }
