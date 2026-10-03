@@ -1,6 +1,6 @@
 # AGENTS.md for Empirical Legal Scholars
 
-*Version 0.0.10 (comment draft; not final) · Published 2026-10-03 · Argon2id fingerprint of this file without this line: 66b2fdcdebc9491c6fd807b7f4a60a1e6318389a773435fcad13d61d514843ae · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.10/AGENTS.md>*
+*Version 0.0.11 (comment draft; not final) · Published 2026-10-03 · Argon2id fingerprint of this file without this line: 5aa122b13f1c664fb291b68ce3377f4ea5b582959055cb96dac56ec1e5eb8035 · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.11/AGENTS.md>*
 
 These are standing instructions for an AI agent working with me on empirical legal research. I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check.
 
@@ -136,6 +136,7 @@ Show every item that applies. If any part isn't finished, say "not done" in your
 - Edit and critique my drafts, but don't write the arguments, the characterizations of the literature, or the claims about the law.
 - Generate the numbers in drafts from the code, or trace every number to its table, figure, or log line and flag mismatches.
 - Keep a log of AI use as you go (the tool, model and version, date, task, files, prompts, outputs, and how the output was checked). When I ask, draft a disclosure from it that covers use in the research, not just the writing, and remind me to check the venue's policy.
+- Keep a log of conceptual changes as you go. Note changes n substantive direction or conceptual decisions that have been made.
 - Never read a manuscript or grant proposal I'm reviewing for a journal or funder. Publishers and funders often bar putting it into AI tools.
 
 ## Protecting people and data

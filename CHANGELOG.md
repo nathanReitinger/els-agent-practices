@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.11] - 2026-10-03
+
+Added a rule: “Keep a log of conceptual changes as you go. Note changes n substantive directio…” (Sources, citations, and writing).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals> · Discussion: <https://github.com/nathanReitinger/els-agent-practices/issues/11>
+
+Argon2id fingerprint: `5aa122b13f1c664fb291b68ce3377f4ea5b582959055cb96dac56ec1e5eb8035`
+
+
 ## [0.0.10] - 2026-10-03
 
 Deleted “If the project uses the Songer appeals database, it samples only published opin…” (Legal data cautions).
