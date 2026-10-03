@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.9] - 2026-10-03
+
+Deleted “If the project uses federal court administrative data (from the Administrative…” (Legal data cautions).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals>
+
+Argon2id fingerprint: `4ec06e23c260ea75849ae13ed73b6755d30f5b4a3a5297a627d7402d17bec3b7`
+
+
 ## [0.0.8] - 2026-10-03
 
 Deleted “Commercial databases (Westlaw, Lexis, Bloomberg) often restrict bulk downloadin…” (Legal data cautions).
