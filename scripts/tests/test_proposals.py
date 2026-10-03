@@ -21,9 +21,12 @@ from fingerprint import fingerprint  # noqa: E402
 from proposals import Governance, count_votes, decide, fetch_site, parse_time  # noqa: E402
 
 DRAFTER = "https://nathanreitinger.github.io/els-agent-practices/draft/"
-# Like GitHub's machines: no git settings from this computer, and no guessing a name or email from it.
-NO_GIT_SETTINGS = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
-                   "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.useConfigOnly", "GIT_CONFIG_VALUE_0": "true"}
+# Like GitHub's machines: no git settings from this computer, and no guessing a name or email from it. Nothing from
+# the GitHub run the tests may be part of, either (such as what started it).
+NO_GIT_SETTINGS = {**{k: v for k, v in os.environ.items() if not k.startswith(("GITHUB_", "GH_"))},
+                   "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                   "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.useConfigOnly", "GIT_CONFIG_VALUE_0": "true",
+                   "ROBOT_RETRY_SECONDS": "0,0"}
 MAINTAINERS = json.loads((ROOT / "governance" / "maintainers.json").read_text())
 
 
@@ -386,6 +389,17 @@ class RunTest(unittest.TestCase):
         self.robot([], site={"suggestions": site_suggestions("spam@example.org"), "votes": []})
         self.assertEqual(self.ledger(), {})
 
+    def test_an_empty_commit_after_a_month_without_any(self):
+        self.robot([], now="2026-12-20T12:00:00Z")
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "Robot: still running")
+        self.assertEqual(self.git("show", "--format=", "--name-only", "HEAD"), "")  # empty: no file changed
+        self.assertEqual(self.git("log", "-1", "--format=%an"), "github-actions[bot]")
+        head = self.git("rev-parse", "HEAD")
+        self.robot([], now="2026-12-21T12:00:00Z")  # a day later: nothing to do
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+        self.robot([], now="2026-12-20T12:00:00Z", *("--dry-run",))
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+
     def test_a_changed_frozen_version_stops_the_robot(self):
         frozen = self.repo / "versions" / "v0.0.1" / "AGENTS.md"
         frozen.write_text(frozen.read_text().replace("Never", "Always", 1))
@@ -451,7 +465,7 @@ class FakeGitHub:
     def __init__(self):
         import http.server
         import threading
-        self.issues, self.comments, self.labels = {}, {}, set()
+        self.issues, self.comments, self.labels, self.runs = {}, {}, set(), []
         fake = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -480,8 +494,11 @@ class FakeGitHub:
                 parts, query = self.route()
                 if parts == ["issues"]:
                     page = int(query.get("page", 1))
-                    items = list(fake.issues.values())
+                    state = query.get("state", "open")
+                    items = [i for i in fake.issues.values() if state == "all" or i["state"] == state]
                     return self.reply(200, items[(page - 1) * 100:page * 100])
+                if parts == ["actions", "workflows", "proposals.yml", "runs"]:
+                    return self.reply(200, {"total_count": len(fake.runs), "workflow_runs": fake.runs})
                 if len(parts) == 3 and parts[2] == "comments":
                     page = int(query.get("page", 1))
                     return self.reply(200, fake.comments.get(int(parts[1]), [])[(page - 1) * 100:page * 100])
@@ -542,12 +559,11 @@ class GitHubRunTest(RunTest):
         self.github.close()
         super().tearDown()
 
-    def robot_online(self, rows, now="2026-10-03T12:00:00Z"):
-        import os
+    def robot_online(self, rows, now="2026-10-03T12:00:00Z", *extra):
         self.fixture.write_text(json.dumps(rows))
         env = {**NO_GIT_SETTINGS, "GH_TOKEN": "test-token", "REPO": "owner/name", "GITHUB_API_URL": self.github.url}
         result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--push",
-                                 "--now", now], cwd=self.repo, capture_output=True, text=True, env=env)
+                                 "--now", now, *extra], cwd=self.repo, capture_output=True, text=True, env=env)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         return result.stdout
 
@@ -625,6 +641,76 @@ class GitHubRunTest(RunTest):
         body = self.github.issues[1]["body"]
         self.assertIn("**reader@\u2060example.org** (Suggest Edits) proposes a change", body)
         self.assertNotIn("the comment that proposes it", body)
+
+    def set_supabase(self, **settings):
+        manifest = json.loads((self.repo / "versions.json").read_text())
+        manifest["supabase"].update(settings)
+        (self.repo / "versions.json").write_text(json.dumps(manifest, indent=2))
+        self.git("commit", "--quiet", "-am", "Supabase settings")
+        self.git("push", "--quiet")
+
+    def alerts(self, state="open"):
+        return [i for i in self.github.issues.values() if "<!-- alert:" in i["body"] and i["state"] == state]
+
+    def test_an_issue_when_supabase_stops_starting_the_robot(self):
+        self.set_supabase(starts_robot=True)
+        self.robot_online([])
+        [issue] = self.alerts()
+        self.assertEqual(issue["title"], "Supabase isn't starting the robot")
+        self.assertIn("@nathanReitinger", issue["body"])
+        self.assertIn("The last start was never.", issue["body"])
+        self.assertIn("expires_in=none&actions=write", issue["body"])
+        self.assertIn("select robot.set_token(", issue["body"])
+        self.robot_online([], "2026-10-03T12:20:00Z")
+        self.assertEqual(len(self.github.issues), 1)  # not opened twice
+
+        self.github.runs = [{"created_at": "2026-10-03T12:30:00Z", "event": "workflow_dispatch"}]
+        self.robot_online([], "2026-10-03T12:35:00Z")
+        self.assertEqual(self.alerts(), [])
+        self.assertEqual(self.alerts("closed")[0]["state_reason"], "completed")
+        self.assertIn("Working again", self.github.comments[issue["number"]][-1]["body"])
+
+        # Six hours without a start: it opens again.
+        self.robot_online([], "2026-10-03T19:00:00Z")
+        self.assertIn("The last start was October 03, 2026, at 12:30 UTC.", self.alerts()[0]["body"])
+
+    def test_no_issue_until_supabase_starts_the_robot(self):
+        self.robot_online([])
+        self.assertEqual(self.alerts(), [])
+
+    def test_an_issue_when_the_database_doesnt_answer(self):
+        import http.server
+        import threading
+        answer = {"code": 503}
+
+        class Database(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                body = b"[]" if answer["code"] == 200 else b'{"message": "unavailable"}'
+                self.send_response(answer["code"])
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Database)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            self.set_supabase(url=f"http://127.0.0.1:{server.server_address[1]}", key="sb_publishable_test")
+            out = self.robot_online([], "2026-10-03T12:00:00Z", "--site-from-manifest")
+            self.assertIn("Couldn't read the suggestions from Suggest Edits", out)
+            [issue] = self.alerts()
+            self.assertEqual(issue["title"], "The Suggest Edits database isn't answering")
+            self.assertIn("HTTP Error 503", issue["body"])
+            self.assertIn("choose **Restore**", issue["body"])
+            answer["code"] = 200
+            self.robot_online([], "2026-10-03T12:10:00Z", "--site-from-manifest")
+            self.assertEqual(self.alerts(), [])
+        finally:
+            server.shutdown()
+            server.server_close()
 
     def test_a_rejected_push_starts_again(self):
         # Someone else pushes first; the robot's push is rejected, so it starts over from GitHub's copy.

@@ -37,7 +37,7 @@ Each suggestion and proposal is checked against the current text. If it can't be
 
 ## Deciding
 
-- A maintainer verifies their listed email address on Suggest Edits. Each waiting suggestion then has **Approve** and **Disapprove** buttons: click the suggestion in the text, or use the list below it. The robot acts on the vote at its next check, every five minutes (GitHub sometimes runs it late).
+- A maintainer verifies their listed email address on Suggest Edits. Each waiting suggestion then has **Approve** and **Disapprove** buttons: click the suggestion in the text, or use the list below it. A vote starts the robot, which acts on it within a minute or two.
 - Maintainers can also vote on a suggestion's GitHub issue: comment `/approve` or `/reject` (replying to GitHub's notification email works too). For a proposal made in a comment, they can also reply **Approve** or **Reject** to that comment.
 - Only a maintainer's latest vote counts. A vote cast before the suggestion was last changed doesn't count, so a suggestion can't be changed after it's approved.
 - Readers can approve too. Their support is shown, but it doesn't decide anything.
@@ -53,7 +53,7 @@ These rules are set in [governance/maintainers.json](governance/maintainers.json
 
 ## When a suggestion is approved
 
-The robot, `scripts/proposals.py`, which `.github/workflows/proposals.yml` runs every five minutes:
+The robot, `scripts/proposals.py`, which `.github/workflows/proposals.yml` runs (Supabase starts it after every vote and every ten minutes, and GitHub's own schedule is a backup):
 
 1. makes the change in the text;
 2. publishes it as the next version (0.0.3, 0.0.4, and so on), one version for each adopted proposal;

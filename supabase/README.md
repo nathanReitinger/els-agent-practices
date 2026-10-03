@@ -61,14 +61,39 @@ Put both in `versions.json`, under `"supabase"`:
 }
 ```
 
-Commit and push. Within a few minutes, Suggest Edits shows the sign-in box, and the robot starts reading suggestions and votes at its next run.
+Commit and push. Within a few minutes, Suggest Edits asks visitors to verify an email address, and the robot starts reading suggestions and votes at its next run.
 
 ## 6. Make yourself a maintainer
 
 A maintainer's votes count when they sign in with the email address listed for them in [governance/maintainers.json](../governance/maintainers.json) (`"email"`). Sign in once on Suggest Edits with that address: the bar says "maintainer" next to your name, and every suggestion gets **Approve** and **Disapprove** buttons.
 
+## 7. Let Supabase start the robot
+
+The robot publishes approved changes. GitHub runs it on a schedule, but GitHub runs scheduled jobs late, or skips them, when it's busy. So Supabase starts it too: within a minute of every vote, and every ten minutes, for as long as the project exists. For that, Supabase needs a GitHub token that can do one thing: start this repository's workflows.
+
+1. [Create the token](https://github.com/settings/personal-access-tokens/new?name=Start+the+ELS+robot&description=Lets+Supabase+start+the+proposals+robot+%28supabase%2Frobot.sql%29&target_name=nathanReitinger&expires_in=none&actions=write) on GitHub. The link fills in its name, "No expiration," and its one permission (Actions: read and write). Under **Repository access**, choose **Only select repositories** and pick **els-agent-practices**. Then choose **Generate token** and copy it. Don't put it anywhere else.
+2. In the project's **SQL Editor**, choose **New query**, paste the whole of [robot.sql](robot.sql), and choose **Run**.
+3. In another new query, run this, with your token between the quotes:
+
+   ```sql
+   select robot.set_token('github_pat_...');
+   ```
+
+   It answers "Saved." The token is kept encrypted in Supabase's Vault. To replace it later, run the same line with the new token.
+
+Within ten minutes, GitHub's list of the robot's runs (the repository's **Actions** tab, then **Proposals**) shows runs started by "workflow_dispatch." Then set `"starts_robot": true` under `"supabase"` in versions.json, so the robot reports it if these starts ever stop.
+
+## If something stops working
+
+The robot watches for two problems it can't fix itself. For each, it opens a GitHub issue that mentions the lead maintainer, so GitHub emails them, and it closes the issue by itself once things work again:
+
+- **"The Suggest Edits database isn't answering."** Usually Supabase paused the project. Restore it from the dashboard.
+- **"Supabase isn't starting the robot."** Usually the token was deleted. The issue says how to make a new one.
+
+The robot also keeps GitHub from switching off its schedule: GitHub does that after 60 days with no activity in a public repository, so after a month with no commits, the robot makes an empty one ("Robot: still running").
+
 ## Good to know
 
-- **Free projects pause after a week without use.** The robot reads the database every five minutes, which counts as use. If the project is ever paused, restore it from the Supabase dashboard; nothing is lost.
+- **Free projects pause after a week without use.** The robot reads the database every time it runs, which counts as use. If the project is ever paused, restore it from the Supabase dashboard; nothing is lost.
 - **Who can see what.** Suggestions and votes are public, with the email address of the person who made them, as the site says when someone signs in. Readers' sign-ins are in the project's Authentication page, which only you can see.
 - **Removing someone's suggestions.** Add their email address to `ignored_accounts.site` in governance/maintainers.json: the robot then ignores everything from it, and its open suggestions are withdrawn.

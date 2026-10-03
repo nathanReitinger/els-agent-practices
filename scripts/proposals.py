@@ -37,6 +37,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -69,6 +70,19 @@ NEW_ISSUES_PER_RUN = 10
 # this long. (Votes on it count right away.)
 SETTLE_MINUTES = 10
 SITE = "Suggest Edits"
+WORKFLOW = "proposals.yml"
+# GitHub switches off a public repository's scheduled workflows after 60 days without activity, so after this many
+# days without a commit the robot makes an empty one.
+HEARTBEAT_DAYS = 30
+# Supabase starts the robot every ten minutes (supabase/robot.sql); this long without a start means something's wrong.
+WAKE_STALE_HOURS = 6
+# Waits between tries when the database doesn't answer (a brief outage is common).
+RETRY_SECONDS = tuple(float(s) for s in os.environ.get("ROBOT_RETRY_SECONDS", "5,20").split(",") if s.strip())
+# Problems the robot reports as GitHub issues (which email the lead maintainer), and closes once they're fixed.
+ALERTS = {
+    "database": "The Suggest Edits database isn't answering",
+    "wake": "Supabase isn't starting the robot",
+}
 LEDGER_ABOUT = ("Every proposal made on the Suggest Edits page (suggestions and comments), its votes, and its outcome. "
                 "Written by scripts/proposals.py; don't edit it by hand.")
 
@@ -339,6 +353,47 @@ def proposer_line(who: dict) -> str:
     return f"{name} ({via})"
 
 
+def alert_body(kind: str, detail: str, repo: str, leads: list[str]) -> str:
+    """The issue that reports a problem the robot can't fix itself. It mentions the lead maintainers, so GitHub
+    emails them."""
+    hello = " ".join(f"@{name}" for name in leads)
+    owner = repo.split("/")[0]
+    if kind == "database":
+        lines = [
+            f"{hello} The robot couldn't read the suggestions and votes on Suggest Edits from the Supabase database, "
+            f"after trying three times. The error: `{md(detail)}`",
+            "",
+            "Until it can, new suggestions and votes wait. Nothing is lost.",
+            "",
+            "What to check:",
+            "",
+            "1. Open the project in the [Supabase dashboard](https://supabase.com/dashboard/projects). If it says the project "
+            "is paused, choose **Restore**. (Supabase pauses a free project after a week without use; the robot's reads "
+            "normally prevent that.)",
+            "2. If the project is running, check [Supabase's status page](https://status.supabase.com).",
+        ]
+    else:
+        token = (f"https://github.com/settings/personal-access-tokens/new?name=Start+the+ELS+robot"
+                 f"&description=Lets+Supabase+start+the+proposals+robot+%28supabase%2Frobot.sql%29"
+                 f"&target_name={owner}&expires_in=none&actions=write")
+        lines = [
+            f"{hello} Supabase hasn't started the robot for more than {WAKE_STALE_HOURS} hours. {md(detail)} "
+            "The robot still runs on GitHub's own schedule, but GitHub runs those late, or skips them when it's busy, "
+            "so approved changes can take hours to be published.",
+            "",
+            "Most likely the GitHub token stored in Supabase was deleted or expired. To replace it:",
+            "",
+            f"1. [Create a new token]({token}). Under **Repository access**, choose **Only select repositories** and pick "
+            f"**{repo.split('/')[1]}**. The one permission it needs (Actions: read and write) is already filled in, and it "
+            "doesn't expire. Choose **Generate token**, and copy it.",
+            "2. In your Supabase project's **SQL Editor**, run `select robot.set_token('the new token');` with the "
+            "token between the quotes.",
+        ]
+    lines += ["", "The robot closes this issue by itself once this works again. (supabase/README.md has more.)",
+              "", f"<!-- alert:{kind} -->"]
+    return "\n".join(lines)
+
+
 # ---------- GitHub ----------
 
 class GitHub:
@@ -535,6 +590,7 @@ class Options:
     offline: bool = False
     now: dt.datetime | None = None
     site_data: Path | None = None
+    site_from_manifest: bool = False
 
 
 class Robot:
@@ -542,6 +598,7 @@ class Robot:
         self.o = options
         self.events: list[str] = []
         self.tags: list[str] = []
+        self.health: dict[str, str | None] = {}  # alert -> what's wrong, or None if it's fine
         self.gov = Governance(json.loads(MAINTAINERS.read_text()))
         self.manifest = json.loads(MANIFEST.read_text())
         self.site = self.manifest["site"]
@@ -633,13 +690,22 @@ class Robot:
         if self.o.site_data:
             return json.loads(self.o.site_data.read_text())
         config = self.manifest.get("supabase") or {}
-        if self.o.annotations or not (config.get("url") and config.get("key")):  # tests, or not set up yet
+        if not (config.get("url") and config.get("key")):  # not set up yet
             return {"suggestions": [], "votes": []}
-        try:
-            return fetch_site(config["url"], config["key"])
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError) as error:
-            self.say(f"Couldn't read the suggestions from {SITE} ({error}); they weren't checked.")
-            return None
+        if self.o.annotations and not self.o.site_from_manifest:  # tests read comments from a file, and no database
+            return {"suggestions": [], "votes": []}
+        error: Exception | None = None
+        for wait in (0, *RETRY_SECONDS):
+            time.sleep(wait)
+            try:
+                data = fetch_site(config["url"], config["key"])
+                self.health["database"] = None
+                return data
+            except (urllib.error.URLError, TimeoutError, ValueError, KeyError) as caught:
+                error = caught
+        self.health["database"] = str(error)
+        self.say(f"Couldn't read the suggestions from {SITE} ({error}); they weren't checked.")
+        return None
 
     def gather_site(self, rows: list[dict], records: dict[str, dict]) -> None:
         """Bring the ledger up to date with the suggestions made on Suggest Edits."""
@@ -855,10 +921,66 @@ class Robot:
             LEDGER.write_text(after)
             commit("Proposals: record new proposals, votes, and outcomes" if before else "Proposals: start the record")
             self.say("Recorded the proposals and votes in governance/proposals.json.")
+        self.heartbeat()
         if self.o.push and not self.o.dry_run:
             self.push()
         if self.github and issues is not None:
             self.update_issues(records, issues)
+        if self.github:
+            self.check_starts()
+            self.update_alerts()
+
+    def heartbeat(self) -> None:
+        """GitHub switches off a public repository's scheduled workflows after 60 days without activity. If nothing
+        has been committed for a month, record that the robot is still running, in an empty commit."""
+        if self.o.dry_run:
+            return
+        last = dt.datetime.fromtimestamp(int(git("log", "-1", "--format=%ct")), dt.timezone.utc)
+        if (self.now - last).days < HEARTBEAT_DAYS:
+            return
+        when = self.now.isoformat()
+        git("commit", "--quiet", "--allow-empty", "-m", "Robot: still running", "-m",
+            f"Nothing else was committed in {HEARTBEAT_DAYS} days. GitHub switches off a public repository's scheduled "
+            "workflows after 60 days without activity; this empty commit keeps the robot's schedule on.",
+            env={**BOT_IDENTITY, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+        self.say("Recorded that the robot is still running (an empty commit, so GitHub keeps its schedule on).")
+
+    def check_starts(self) -> None:
+        """Once Supabase starts the robot (versions.json: supabase.starts_robot), check that it still does."""
+        if not (self.manifest.get("supabase") or {}).get("starts_robot"):
+            return
+        if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":  # this run was started that way
+            self.health["wake"] = None
+            return
+        runs = (self.github.call("GET", f"/actions/workflows/{WORKFLOW}/runs?event=workflow_dispatch&per_page=1")
+                or {}).get("workflow_runs") or []
+        last = parse_time(runs[0]["created_at"]) if runs else None
+        if last and (self.now - last).total_seconds() < WAKE_STALE_HOURS * 3600:
+            self.health["wake"] = None
+        else:
+            when = f"{last:%B %d, %Y, at %H:%M} UTC" if last else "never"
+            self.health["wake"] = f"The last start was {when}."
+
+    def update_alerts(self) -> None:
+        """Open an issue for each problem found in this run, and close the issue for each that's fixed."""
+        if not self.health:
+            return
+        open_issues = [i for i in self.github.pages("/issues?state=open") if "pull_request" not in i]
+        leads = [m.github for m in self.gov.maintainers if "lead" in m.role and m.github] or \
+            [m.github for m in self.gov.maintainers if m.github]
+        for kind, detail in self.health.items():
+            marker = f"<!-- alert:{kind} -->"
+            existing = next((i for i in open_issues if marker in (i.get("body") or "")), None)
+            if detail and not existing:
+                made = self.github.call("POST", "/issues", {"title": ALERTS[kind],
+                                                          "body": alert_body(kind, detail, self.repo, leads)})
+                if made:
+                    self.say(f"Opened issue #{made['number']}: {ALERTS[kind]}.")
+            elif detail is None and existing:
+                self.github.call("POST", f"/issues/{existing['number']}/comments",
+                                 {"body": f"Working again as of {self.now:%B %d, %Y, %H:%M} UTC. Closing this."})
+                self.github.call("PATCH", f"/issues/{existing['number']}", {"state": "closed", "state_reason": "completed"})
+                self.say(f"Closed issue #{existing['number']}: working again.")
 
     def push(self) -> None:
         if git("rev-list", "--count", "origin/main..HEAD") == "0" and not self.tags:
@@ -906,11 +1028,13 @@ def main() -> None:
     parser.add_argument("--annotations", type=Path, help="read comments from this file instead of Hypothesis")
     parser.add_argument("--site-data", type=Path,
                         help="read Suggest Edits' suggestions and votes from this file instead of its database")
+    parser.add_argument("--site-from-manifest", action="store_true",
+                        help="with --annotations, still read the database named in versions.json (for tests)")
     parser.add_argument("--offline", action="store_true", help="don't use GitHub at all")
     parser.add_argument("--now", help="the current time, for tests (ISO 8601)")
     args = parser.parse_args()
     options = Options(args.dry_run, args.push, args.annotations, args.offline, parse_time(args.now) if args.now else None,
-                      args.site_data)
+                      args.site_data, args.site_from_manifest)
     for attempt in range(3):
         robot = Robot(options)
         try:

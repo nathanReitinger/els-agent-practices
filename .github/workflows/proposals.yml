@@ -3,8 +3,10 @@ name: Proposals
 # as a new version. The robot is scripts/proposals.py; the rules are in GOVERNANCE.md.
 
 on:
+  # Supabase starts the robot every ten minutes and right after each vote, through workflow_dispatch (supabase/robot.sql).
+  # GitHub's own schedule is a backup: GitHub runs it late, or skips it, when it's busy.
   schedule:
-    - cron: "2-59/5 * * * *"  # every five minutes (GitHub sometimes runs these late, or skips one when it's busy)
+    - cron: "7-59/15 * * * *"
   issue_comment:  # a maintainer voted on a proposal's issue
     types: [created, edited]
   push:  # a maintainer changed the text or the list of maintainers
@@ -34,11 +36,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # every version's tag, for the change log
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -60,15 +62,15 @@ jobs:
             python3 scripts/proposals.py --push
           fi
 
-      # GitHub switches off scheduled workflows in a repository with no activity for 60 days.
-      # Re-enabling this one once a day resets that clock. (Reading the Suggest Edits database every
-      # run also keeps Supabase from pausing the free project for inactivity.)
+      # GitHub switches off scheduled workflows in a repository with no activity for 60 days. Re-enabling this
+      # one once a day resets that clock, and the robot also makes an empty commit after a month with no others.
+      # (Reading the Suggest Edits database every run keeps Supabase from pausing the free project, too.)
       - name: Keep the schedule switched on
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$(date -u +%H)" = "00" ] && [ "$(date -u +%M)" -lt 15 ]; then
+          if [ "$(date -u +%H)" = "00" ] && [ "$(date -u +%M)" -lt 30 ]; then
             gh api -X PUT "repos/${{ github.repository }}/actions/workflows/proposals.yml/enable"
           fi

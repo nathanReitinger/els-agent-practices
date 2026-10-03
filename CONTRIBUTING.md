@@ -49,7 +49,8 @@ Each published version is a frozen snapshot with a permanent link and a fingerpr
 
 - **Maintainers and rules** are in `governance/maintainers.json`. To add a maintainer, add their name, role, the email address they'll sign in with on Suggest Edits, and any GitHub and Hypothesis usernames they'll vote with. Changes take effect at the robot's next run.
 - **Sign-in and the database** are a free Supabase project; [supabase/README.md](supabase/README.md) sets it up.
-- **The robot** runs every five minutes (on GitHub: Actions, then Proposals). To run it now, choose **Run workflow** there; tick "Only say what would happen" for a dry run. On your own computer: `python3 scripts/proposals.py --dry-run`.
+- **The robot** runs after every vote and every ten minutes (Supabase starts it; GitHub's schedule is a backup). Its runs are on GitHub under Actions, then Proposals. To run it now, choose **Run workflow** there; tick "Only say what would happen" for a dry run. On your own computer: `python3 scripts/proposals.py --dry-run`.
+- **If it needs a person**, the robot opens an issue that mentions the lead maintainer: when the database stops answering, or when Supabase stops starting it. It closes the issue itself once that's fixed.
 - **Tests:** `python3 -m unittest discover -s scripts/tests -t scripts/tests`. They also run before every robot run.
 - **A version that doesn't come from a proposal**, such as 1.0.0: `python3 scripts/release.py 1.0.0 "One-line summary"`, then the commit, tag, and push commands it prints.
-- **If GitHub switches the schedule off** (it can after 60 days without activity), turn it back on under Actions, then Proposals.
+- **GitHub's 60-day rule:** GitHub switches off a public repository's schedules after 60 days without activity. The robot re-enables its own daily and makes an empty commit after a month with no others. If it's ever off anyway, turn it back on under Actions, then Proposals.
