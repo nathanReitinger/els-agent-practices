@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": true
   },
-  "latest": "0.0.12",
+  "latest": "0.0.13",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.13",
+      "date": "2026-10-03",
+      "summary": "Replaced “the” with “a neutral answer; do not give an” (Pushing back).",
+      "fingerprint": "62751b86358cdacc6c93959727187a51b20193ecda1389d2574d0f2ebdad205c",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.12",
       "date": "2026-10-03",

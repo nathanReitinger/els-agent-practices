@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.13] - 2026-10-03
+
+Replaced “the” with “a neutral answer; do not give an” (Pushing back).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals>
+
+Argon2id fingerprint: `62751b86358cdacc6c93959727187a51b20193ecda1389d2574d0f2ebdad205c`
+
+
 ## [0.0.12] - 2026-10-03
 
 Added a rule: “Logs should be in .log format and should be append-only and should include time…” (Non-negotiable rules).
