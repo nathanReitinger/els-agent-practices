@@ -39,6 +39,7 @@ Each suggestion and proposal is checked against the current text. If it can't be
 
 - A maintainer verifies their listed email address on Suggest Edits. Each waiting suggestion then has **Approve** and **Disapprove** buttons: click the suggestion in the text, or use the list below it. A vote starts the robot, which acts on it within a minute or two.
 - Maintainers can also vote on a suggestion's GitHub issue: comment `/approve` or `/reject` (replying to GitHub's notification email works too). For a proposal made in a comment, they can also reply **Approve** or **Reject** to that comment.
+- When approving, a maintainer chooses which number of the new version goes up: the last (the default), the middle, or the first.
 - Only a maintainer's latest vote counts. A vote cast before the suggestion was last changed doesn't count, so a suggestion can't be changed after it's approved.
 - Readers can approve too. Their support is shown, but it doesn't decide anything.
 
@@ -56,7 +57,7 @@ These rules are set in [governance/maintainers.json](governance/maintainers.json
 The robot, `scripts/proposals.py`, which `.github/workflows/proposals.yml` runs (Supabase starts it after every vote and every ten minutes, and GitHub's own schedule is a backup):
 
 1. makes the change in the text;
-2. publishes it as the next version (0.0.3, 0.0.4, and so on), one version for each adopted proposal;
+2. publishes it as the next version, one version for each adopted suggestion. The last number goes up (0.0.3 to 0.0.4), unless an approving maintainer chose the middle number (to 0.1.0) or the first (to 1.0.0);
 3. stamps line 3 of the file with the version number, the date, and the fingerprint;
 4. records who suggested it, who approved it, and why, in [CHANGELOG.md](CHANGELOG.md), in the version's git commit and tag, and in [governance/proposals.json](governance/proposals.json); a suggestion's commit is in the suggester's name;
 5. closes the suggestion's GitHub issue with the outcome. (Each suggestion gets an issue, so people watching the repository get an email, once it has been left unchanged for ten minutes.)
@@ -88,4 +89,4 @@ Each fingerprint is recorded in the file itself, in [versions.json](versions.jso
 
 ## Changes made directly
 
-The lead maintainer can change the text directly in the repository, for example to restructure it. A direct change is published as a new version like any other, and the change log says who made it. Version 1.0.0, the first version recommended as a standard, will be published by the lead maintainer.
+The lead maintainer can change the text directly in the repository, for example to restructure it. A direct change is published as a new version like any other, and the change log says who made it. A direct change can ask for a bigger version step with a line in its commit message: `Version-step: minor` or `Version-step: major`. Version 1.0.0, the first version recommended as a standard, comes when a maintainer chooses the first number for a change.

@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from commands import parse_command  # noqa: E402
 from fingerprint import fingerprint  # noqa: E402
 from proposals import Governance, count_votes, decide, fetch_site, parse_time  # noqa: E402
+from release import next_version  # noqa: E402
 
 DRAFTER = "https://nathanreitinger.github.io/els-agent-practices/draft/"
 # Like GitHub's machines: no git settings from this computer, and no guessing a name or email from it. Nothing from
@@ -51,9 +52,20 @@ def reply(id, user, text, to, when="2026-10-03T11:00:00+00:00"):
 LEAD_EMAIL = MAINTAINERS["maintainers"][0]["email"]
 
 
-def site_vote(suggestion, email, vote, at="2026-10-03T11:00:00.123456+00:00"):
+def site_vote(suggestion, email, vote, at="2026-10-03T11:00:00.123456+00:00", step="patch"):
     """A row of the Suggest Edits database's votes table, as its API returns it."""
-    return {"suggestion": suggestion, "voter_id": f"id-{email}", "voter_email": email, "vote": vote, "at": at}
+    return {"suggestion": suggestion, "voter_id": f"id-{email}", "voter_email": email, "vote": vote, "at": at,
+            "version_step": step}
+
+
+class VersionsTest(unittest.TestCase):
+    def test_the_last_number_goes_up_unless_a_bigger_step_is_chosen(self):
+        self.assertEqual(next_version("0.0.3"), "0.0.4")
+        self.assertEqual(next_version("0.0.9"), "0.0.10")
+        self.assertEqual(next_version("1.2.3"), "1.2.4")
+        self.assertEqual(next_version("1.2.3", "minor"), "1.3.0")
+        self.assertEqual(next_version("1.2.3", "major"), "2.0.0")
+        self.assertEqual(next_version("0.0.3", "major"), "1.0.0")
 
 
 def site_suggestions(email="reader@example.org", start=0):
@@ -300,6 +312,13 @@ class RunTest(unittest.TestCase):
         self.assertIn("Never make up values", (self.repo / "latest" / "AGENTS.md").read_text())
         self.assertTrue((self.repo / "governance" / "proposals.json").exists())
 
+    def test_a_direct_edit_can_choose_a_bigger_version_step(self):
+        path = self.repo / "draft" / "AGENTS.md"
+        path.write_text(path.read_text().replace("Never invent values", "Never make up values"))
+        self.git("commit", "--quiet", "-am", "Reword rule 3", "-m", "Version-step: minor")
+        self.robot([])
+        self.assertEqual(self.manifest()["latest"], "0.1.0")
+
     def test_direct_edits_list_only_text_changes_and_take_a_summary(self):
         path = self.repo / "draft" / "AGENTS.md"
         lines = path.read_text().split("\n")
@@ -379,6 +398,20 @@ class RunTest(unittest.TestCase):
         self.robot([], site={"suggestions": [rows[3]], "votes": votes}, now="2026-10-03T13:00:00Z")
         self.assertEqual(self.ledger()[ids[3]]["status"], "adopted")
         self.assertIn("- Name the model and its exact version in every log.\n", (self.repo / "draft" / "AGENTS.md").read_text())
+
+    def test_a_maintainer_can_choose_a_bigger_version_step(self):
+        rows = site_suggestions()
+        ids = [f"sb-{row['id']}" for row in rows]
+        votes = [site_vote(ids[0], LEAD_EMAIL, "approve", step="minor"), site_vote(ids[1], LEAD_EMAIL, "approve"),
+                 site_vote(ids[2], LEAD_EMAIL, "approve", step="major")]
+        self.robot([], site={"suggestions": rows, "votes": votes})
+        ledger = self.ledger()
+        self.assertEqual([ledger[i].get("version") for i in ids], ["0.1.0", "0.1.1", "1.0.0", None])
+        self.assertEqual(ledger[ids[0]]["votes"][0]["step"], "minor")
+        self.assertNotIn("step", ledger[ids[1]]["votes"][0])
+        self.assertEqual(self.manifest()["latest"], "1.0.0")
+        self.assertEqual(self.git("tag", "--list", "v*").split(), ["v0.0.2", "v0.1.0", "v0.1.1", "v1.0.0"])
+        self.assertIn("*Version 1.0.0 · Published", (self.repo / "draft" / "AGENTS.md").read_text())
 
     def test_suggest_edits_accounts_can_be_ignored(self):
         governance = self.repo / "governance" / "maintainers.json"

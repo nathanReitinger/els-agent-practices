@@ -89,6 +89,11 @@ create table if not exists public.votes (
   primary key (suggestion, voter_id)
 );
 
+-- For an approval, which number of the version goes up if it adopts the suggestion: the last (patch, the default),
+-- the middle (minor), or the first (major). Added after the first release of this file, so it's added separately.
+alter table public.votes add column if not exists version_step text not null default 'patch'
+  check (version_step in ('patch', 'minor', 'major'));
+
 create or replace function public.stamp_vote() returns trigger
 language plpgsql set search_path = '' as $$
 begin

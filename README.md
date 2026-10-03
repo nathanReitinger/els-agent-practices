@@ -2,7 +2,7 @@
 
 One file: **AGENTS.md**, standing instructions for AI agents (Claude Code, Codex, Cursor, and similar tools) working with empirical legal scholars. It's a general workflow file: it assumes no folder layout and needs no filling in. Save it in your project folder as `AGENTS.md`, or rename it `CLAUDE.md` for Claude Code.
 
-It's a comment draft (version 0.0.x): nothing is final, and it grows out of suggestions from the people who use it.
+It's a comment draft (versions before 1.0): nothing is final, and it grows out of suggestions from the people who use it.
 
 - **Read or download it:** https://nathanreitinger.github.io/els-agent-practices/
 - **Raw file:** https://nathanreitinger.github.io/els-agent-practices/latest/AGENTS.md

@@ -498,6 +498,8 @@
       declined: ["Disapproved", p.decided ? formatDate(p.decided) : ""],
       withdrawn: ["Withdrawn", p.note],
       "cannot-apply": ["Can't be applied", p.note],
+      approved: ["Approved", `Being published as version ${p.version}`],
+      disapproved: ["Disapproved", "Moving to the Declined page"],
     }[p.status] || [p.status, ""];
   }
 
@@ -565,7 +567,7 @@
       ].filter(Boolean))),
       votesView(p),
       h("p", { class: "proposal-links" }, ...joined([
-        p.id.startsWith("sb-") ? (open && mode === "drafter" ? h("a", { href: "#doc", text: "Show it in the text",
+        p.id.startsWith("sb-") ? (open && mode === "drafter" && !["approved", "disapproved"].includes(p.status) ? h("a", { href: "#doc", text: "Show it in the text",
           onclick: (event) => { event.preventDefault(); showInText(p.id); } }) : null)
           : external(open ? (count ? `Comment on it (${plural(count, "reply", "replies")})` : "Comment on it") :
             (count ? `Read the discussion (${plural(count, "reply", "replies")})` : "Read the proposal"), p.link),
@@ -1145,7 +1147,14 @@
         return row.id;
       },
       remove: async (docId) => must(await client.from("suggestions").delete().eq("id", docId)),
-      vote: async (proposalId, vote) => must(await client.from("votes").upsert({ suggestion: proposalId, vote }, { onConflict: "suggestion,voter_id" })),
+      async vote(proposalId, vote, step = "patch") {
+        const upsert = (row) => client.from("votes").upsert(row, { onConflict: "suggestion,voter_id" });
+        let result = await upsert({ suggestion: proposalId, vote, version_step: step });
+        if (result.error && /version_step/.test(result.error.message) && step === "patch") {
+          result = await upsert({ suggestion: proposalId, vote });  // a database set up before version steps
+        }
+        must(result);
+      },
     };
   }
 
@@ -1186,10 +1195,10 @@
         return docId;
       },
       async remove(docId) { write(SUGGESTIONS, read(SUGGESTIONS, []).filter((s) => s.docId !== docId)); emit(); },
-      async vote(proposalId, vote) {
+      async vote(proposalId, vote, step = "patch") {
         const user = me();
         const votes = read(VOTES, []).filter((v) => !(v.suggestion === proposalId && v.voter_id === user.id));
-        votes.push({ suggestion: proposalId, voter_id: user.id, voter_email: user.email, vote, at: new Date().toISOString() });
+        votes.push({ suggestion: proposalId, voter_id: user.id, voter_email: user.email, vote, version_step: step, at: new Date().toISOString() });
         write(VOTES, votes);
         emit();
       },
@@ -1218,7 +1227,7 @@
   const isIgnored = (s) => (suggest.governance?.ignored_accounts?.site || []).some((email) => sameEmail(email, s.author?.email));
   const isMaintainer = () => !!suggest.me && (suggest.governance?.maintainers || []).some((m) => sameEmail(m.email, suggest.me.email));
   const myName = () => suggest.me?.email || "you";
-  const mineOpen = () => (suggest.remote || []).filter((s) => isMine(s) && isOpen(s));
+  const mineOpen = (decided = pendingDecisions()) => (suggest.remote || []).filter((s) => isMine(s) && isOpen(s) && !decided.has(s.id));
   const pickChange = (s) => ({ kind: s.kind, exact: s.exact, prefix: s.prefix, suffix: s.suffix, new: s.new });
   const sameChange = (a, b) => ["kind", "exact", "prefix", "suffix", "new"].every((key) => (a?.[key] || "") === (b?.[key] || ""));
 
@@ -1318,11 +1327,13 @@
   // Everyone else's open suggestions: from the database, and from comments (the robot's record, and any
   // made since it last looked).
   function othersOpen() {
+    const decided = pendingDecisions();
     const fromSite = (suggest.remote || []).filter((s) => !isMine(s) && isOpen(s) && !isIgnored(s));
     const { records, fresh } = suggest.proposals;
     const fromComments = [...fresh, ...records.filter((r) => !FINAL_STATUS.has(r.status))]
       .filter((p) => !p.id.startsWith("sb-") || !suggest.remote);
-    return [...fromSite, ...fromComments].sort((x, y) => (x.created || "").localeCompare(y.created || ""));
+    return [...fromSite, ...fromComments].filter((x) => !decided.has(x.id))
+      .sort((x, y) => (x.created || "").localeCompare(y.created || ""));
   }
 
   function drawOthers() {
@@ -1361,15 +1372,19 @@
     select(restored);
   }
 
-  // Draw the whole text: your suggestions, and everyone else's.
+  // Draw the whole text: approved changes the robot is still publishing, your suggestions, and everyone else's.
   function drawEverything() {
     const doc = $("#doc");
     fillDoc(doc, suggest.markdown);
     freezeStamp();
+    const decided = pendingDecisions();
+    for (const { kind, p } of decided.values()) if (kind === "adopt") applyInDoc(p);
+    suggest.decidedKey = decisionsKey(decided);
+    suggest.redraw = false;
     suggest.saved = new Map();
     suggest.undrawable = new Set();
     const taken = [];
-    for (const s of mineOpen()) {
+    for (const s of mineOpen(decided)) {
       if (drawSuggestion(s, true, taken)) suggest.saved.set(s.docId, pickChange(s));
       else suggest.undrawable.add(s.docId);  // it no longer fits the text; it's kept, and the robot reports it
     }
@@ -1400,10 +1415,12 @@
       refresh.timer = setTimeout(refresh, 1500);
       return;
     }
-    if (suggest.me && !suggest.dirty && !suggest.busy && mineChangedElsewhere()) drawEverything();
+    const changed = suggest.redraw || decisionsKey(pendingDecisions()) !== suggest.decidedKey || mineChangedElsewhere();
+    if (suggest.me && !suggest.dirty && !suggest.busy && changed) drawEverything();
     else keepingCaret(drawOthers);
     renderProposals();
     updateBar();
+    if (pendingDecisions().size) watchForPublication();
   }
 
   // Only a reader who has verified their email address can edit the text; everyone else reads it (and can comment).
@@ -1635,33 +1652,166 @@
   }
 
   // ---- Approving and disapproving ----
+  // A maintainer's vote takes effect on the page at once: the box closes, an approved change becomes part of the
+  // text, and a disapproved one leaves it. The robot publishes the decision within a minute or two, as a new
+  // version whose last number goes up, unless the maintainer chose the middle or first number instead.
+
+  const STEPS = ["patch", "minor", "major"];
+  function nextVersion(version, step = "patch") {
+    const [major, minor, patch] = String(version || "0.0.0").split(".").map(Number);
+    if (step === "major") return `${major + 1}.0.0`;
+    if (step === "minor") return `${major}.${minor + 1}.0`;
+    return `${major}.${minor}.${patch + 1}`;
+  }
+
+  // What the robot will decide, from the maintainers' votes on Suggest Edits: the same rule as scripts/proposals.py
+  // (decide). An approval decides with the biggest version step any approving maintainer chose.
+  function decisionFor(p) {
+    const rules = suggest.governance?.rules || {};
+    const maintainers = (suggest.governance?.maintainers || []).filter((m) => m.email);
+    const proposer = p.proposer?.email || p.author?.email;
+    const since = Date.parse(p.updated || p.created || 0);
+    const latest = new Map();
+    for (const v of suggest.votes) {
+      if (v.suggestion !== p.id || !(Date.parse(v.at) >= since)) continue;
+      const m = maintainers.find((x) => sameEmail(x.email, v.voter_email));
+      if (!m || (v.vote === "approve" && rules.maintainers_may_approve_their_own_proposals === false && sameEmail(m.email, proposer))) continue;
+      const known = latest.get(m.email.toLowerCase());
+      if (!known || Date.parse(v.at) > Date.parse(known.at)) latest.set(m.email.toLowerCase(), v);
+    }
+    const votes = [...latest.values()];
+    const approvals = votes.filter((v) => v.vote === "approve"), rejections = votes.filter((v) => v.vote === "reject");
+    const need = rules.approvals_needed ?? 1;
+    if (approvals.length >= need && approvals.length > rejections.length) {
+      if (rules.hours_open_before_adoption && Date.now() - since < rules.hours_open_before_adoption * 3600e3) return null;
+      const step = approvals.map((v) => v.version_step || "patch").reduce((a, b) => (STEPS.indexOf(b) > STEPS.indexOf(a) ? b : a), "patch");
+      return { kind: "adopt", step };
+    }
+    if (rejections.length >= need && rejections.length > approvals.length) return { kind: "decline" };
+    return null;
+  }
+
+  // Decided suggestions the robot hasn't published or set aside yet, oldest first (the robot's order), each
+  // approved one with the version it will become.
+  function pendingDecisions() {
+    const pending = new Map();
+    let version = suggest.version;
+    const waiting = currentProposals().filter((p) => !FINAL_STATUS.has(p.status))
+      .sort((a, b) => (a.created || "").localeCompare(b.created || "") || a.id.localeCompare(b.id));
+    for (const p of waiting) {
+      const decision = decisionFor(p);
+      if (!decision) continue;
+      if (decision.kind === "adopt") version = nextVersion(version, decision.step);
+      pending.set(p.id, { ...decision, p, version: decision.kind === "adopt" ? version : null });
+    }
+    return pending;
+  }
+  const decisionsKey = (decided) => [...decided].map(([id, d]) => `${id}:${d.kind}:${d.version}`).join(" ");
+
+  // An approved change, shown as part of the text until the robot publishes it.
+  function applyInDoc(p) {
+    const index = sourceIndex();
+    const found = locateQuote(index, p.exact ?? p.old ?? "", p.prefix ?? p.before ?? "", p.suffix ?? p.after ?? "");
+    if (!found) return false;
+    const [a, b] = found;
+    const first = blockOf(index.chars[a].node), block = blockOf(index.chars[b - 1].node);
+    const range = document.createRange();
+    range.setStart(index.chars[a].node, index.chars[a].offset);
+    range.setEnd(index.chars[b - 1].node, index.chars[b - 1].offset + 1);
+    const added = (text) => h("span", { class: "accepted", title: "Approved; being published" }, text);
+    if (p.kind === "rule") {
+      if (!block) return false;
+      block.after(h(block.tagName === "LI" ? "li" : "p", {}, added(p.new)));
+    } else if (p.kind === "insert") {
+      range.collapse(false);
+      range.insertNode(added(` ${p.new}`));
+    } else {
+      range.deleteContents();
+      if (p.kind === "replace") range.insertNode(added(p.new));
+      for (const emptied of new Set([first, block])) if (emptied?.isConnected && !emptied.textContent.trim()) emptied.remove();
+    }
+    return true;
+  }
+
+  // After a decision, look for the robot's new version every 30 seconds, for ten minutes, and show it. (GitHub
+  // answers 60 such questions an hour from one computer, so it doesn't look for longer.)
+  function watchForPublication(decidedNow = false) {
+    if (decidedNow) watchForPublication.until = Date.now() + 10 * 60 * 1000;
+    if (isLocal || watchForPublication.timer || !(Date.now() < (watchForPublication.until || 0))) return;
+    const check = async () => {
+      watchForPublication.timer = null;
+      try {
+        const head = await fetchJSON(`https://api.github.com/repos/${suggest.cfg.repo}/commits/${suggest.cfg.branch}`);
+        if (head.sha && head.sha !== suggest.seenSha) {
+          suggest.seenSha = head.sha;
+          const raw = (path) => `https://raw.githubusercontent.com/${suggest.cfg.repo}/${head.sha}/${path}`;
+          const [markdown, ledger] = await Promise.all([fetchText(raw(DRAFT_PATH)), fetchJSON(raw(LEDGER_PATH)).catch(() => null)]);
+          if (ledger) suggest.proposals.records = ledger.proposals || [];
+          if (markdown !== suggest.markdown) {
+            const before = suggest.version;
+            suggest.markdown = markdown;
+            suggest.version = stampedVersion(markdown) || before;
+            suggest.redraw = true;
+            const badge = $(".file-meta .badge");
+            if (badge) badge.textContent = versionLabel(suggest.version);
+            if (suggest.version !== before) hint(`Published: version ${suggest.version}.`);
+          }
+          refresh();
+        }
+      } catch { /* try again next time */ }
+      if (Date.now() < watchForPublication.until && pendingDecisions().size) watchForPublication.timer = setTimeout(check, 30000);
+    };
+    watchForPublication.timer = setTimeout(check, 30000);
+  }
 
   function voteControls(p) {
     if (!isMaintainer() || !suggest.backend?.vote || FINAL_STATUS.has(p.status)) return null;
     const status = h("p", { class: "vote-status", "aria-live": "polite" });
     const say = (text, kind = "") => { status.className = `vote-status ${kind}`; status.textContent = text; };
-    const outcome = (vote) => vote === "approve"
-      ? `Approved. It's published as a new version at the robot's next check, usually within ${CHECK_EVERY}.`
-      : `Disapproved. It moves to the Declined page at the robot's next check, usually within ${CHECK_EVERY}.`;
+    const mine = suggest.votes.filter((v) => v.suggestion === p.id && v.voter_id === suggest.me.id).pop();
+    const labels = { patch: "", minor: " (middle number)", major: " (first number)" };
+    // The numbers follow any approved changes still being published.
+    const base = [...pendingDecisions().values()].filter((d) => d.kind === "adopt" && d.p.id !== p.id).map((d) => d.version).pop()
+      || suggest.version;
+    const step = h("select", { class: "step-select", "aria-label": "The new version's number" },
+      ...STEPS.map((value) => h("option", { value, selected: (mine?.version_step || "patch") === value,
+        text: `as version ${nextVersion(base, value)}${labels[value]}` })));
     const cast = async (vote) => {
       approve.disabled = disapprove.disabled = true;
       say(vote === "approve" ? "Approving…" : "Disapproving…", "pending");
+      const chosen = vote === "approve" ? step.value : "patch";
       try {
-        await suggest.backend.vote(p.id, vote);
-        say(outcome(vote), "done");
-        suggest.watcher?.refresh();
+        await suggest.backend.vote(p.id, vote, chosen);
       } catch (error) {
-        say(`That didn't work: ${error.message}`, "failed");
+        say(/version_step/.test(error.message)
+          ? "The database needs one more step first: run supabase/schema.sql again in Supabase's SQL Editor."
+          : `That didn't work: ${error.message}`, "failed");
+        approve.disabled = p.status === "needs-fix";
+        disapprove.disabled = false;
+        return;
       }
-      approve.disabled = p.status === "needs-fix";
-      disapprove.disabled = false;
+      // Count the vote here at once, rather than waiting for the database to send it back.
+      const me = suggest.me, at = new Date(Math.max(Date.now(), Date.parse(p.updated || 0))).toISOString();
+      suggest.votes = [...suggest.votes.filter((v) => !(v.suggestion === p.id && v.voter_id === me.id)),
+        { suggestion: p.id, voter_id: me.id, voter_email: me.email, vote, version_step: chosen, at }];
+      $(".suggestion-pop")?.remove();
+      await sync();
+      drawEverything();
+      renderProposals();
+      const decided = pendingDecisions().get(p.id);
+      hint(decided?.kind === "adopt" ? `Approved. The text shows the change now; it's being published as version ${decided.version}.`
+        : decided?.kind === "decline" ? "Disapproved. It's gone from the text, and it's moving to the Declined page."
+          : `${vote === "approve" ? "Approved" : "Disapproved"}. It needs more maintainers' votes to be decided.`);
+      watchForPublication(true);
+      suggest.watcher?.refresh();
     };
     const approve = action("Approve", () => cast("approve"), "button small");
     const disapprove = action("Disapprove", () => cast("reject"), "button secondary small");
     if (p.status === "needs-fix") { approve.disabled = true; approve.title = "It needs a fix before it can be approved"; }
-    const mine = suggest.votes.filter((v) => v.suggestion === p.id && v.voter_id === suggest.me.id).pop();
-    if (mine && Date.parse(mine.at) >= Date.parse(p.updated || 0)) say(outcome(mine.vote), "done");
-    return h("div", { class: "vote" }, h("p", { class: "vote-buttons" }, approve, " ", disapprove), status);
+    if (mine && Date.parse(mine.at) >= Date.parse(p.updated || 0)) {
+      say(mine.vote === "approve" ? "You approved it." : "You disapproved it.", "done");
+    }
+    return h("div", { class: "vote" }, h("p", { class: "vote-buttons" }, approve, " ", step, " ", disapprove), status);
   }
 
   // A reason for one of your suggestions, shown to the maintainers and kept in the record.
@@ -1723,7 +1873,9 @@
   }
 
   function currentProposals() {
-    const { records, fresh } = suggest.proposals;
+    const { records } = suggest.proposals;
+    const recorded = new Set(records.map((r) => r.id));
+    const fresh = suggest.proposals.fresh.filter((p) => !recorded.has(p.id));
     if (!suggest.remote) return [...fresh, ...records];
     const live = new Map(suggest.remote.filter((s) => !isIgnored(s)).map((s) => [s.id, s]));
     const list = [...fresh];
@@ -1750,7 +1902,14 @@
     const { cfg, governance } = suggest;
     const rules = governance?.rules || {};
     const { replies } = suggest.proposals;
-    const { open, adopted, closed } = sortProposals(currentProposals());
+    const decided = pendingDecisions();
+    const { open: notFinal, adopted, closed } = sortProposals(currentProposals().map((p) => {
+      const d = decided.get(p.id);
+      return d ? { ...p, status: d.kind === "adopt" ? "approved" : "disapproved", version: d.version || p.version } : p;
+    }));
+    const open = notFinal.filter((p) => !decided.has(p.id));
+    const publishing = notFinal.filter((p) => p.status === "approved").reverse();
+    const settingAside = notFinal.filter((p) => p.status === "disapproved");
     const card = (p) => proposalCard(p, cfg, rules, replies, [reasonField(p), voteControls(p)]);
     section.replaceChildren(
       h("h2", { text: "Suggestions" }),
@@ -1758,6 +1917,12 @@
         `, who approve or disapprove it. ${ruleSentence(rules)} An approved change is published as a new version within ${CHECK_EVERY} or so.`));
     if (!open.length) section.append(h("p", { class: "empty", text: "No suggestions are waiting right now. Edit the text above to make one." }));
     else section.append(h("h3", { text: `Waiting for a maintainer (${open.length})` }), ...open.map(card));
+    if (publishing.length) {
+      section.append(h("h3", { text: `Approved, being published (${publishing.length})` }),
+        h("p", { class: "muted", text: "The text above already shows these changes. Each is published as a new version within a minute or two." }),
+        ...publishing.map(card));
+    }
+    if (settingAside.length) section.append(h("h3", { text: `Disapproved (${settingAside.length})` }), ...settingAside.map(card));
     if (adopted.length) {
       const shown = adopted.slice(0, 8), rest = adopted.slice(8);
       section.append(h("h3", { text: `Adopted (${adopted.length})` }), ...shown.map(card));
@@ -1819,6 +1984,7 @@
       suggest.ready = true;
       drawEverything();
       renderProposals();
+      if (pendingDecisions().size) watchForPublication(true);
       if (suggest.me) loadHypothesis();  // after the text is drawn, so comments' highlights stay put
     };
     const backend = suggest.backend;

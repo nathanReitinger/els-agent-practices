@@ -17,9 +17,9 @@ Publishing a version:
 - gives draft/AGENTS.md the same version line, so the draft is always the
   newest version, word for word.
 
-Before 1.0 every version is a comment draft and the next one adds one to the
-last number (0.0.3, 0.0.4, ...). From 1.0 on, the next one adds one to the
-middle number. The rules are in CONTRIBUTING.md.
+Versions before 1.0 are comment drafts. Each new version adds one to the last
+number (0.0.3, 0.0.4, ...), unless a maintainer chooses the middle number
+(0.1.0) or the first (1.0.0). The rules are in CONTRIBUTING.md.
 
 Run by hand, it doesn't commit, tag, or push; it prints those commands so you
 can review the result first.
@@ -66,12 +66,19 @@ def parse_version(text: str) -> tuple[int, int, int]:
     return major, minor, patch
 
 
-def next_version(latest: str) -> str:
-    """The number for the next version: 0.0.2 -> 0.0.3 before 1.0, then 1.0.0 -> 1.1.0."""
+# How big a step a new version takes: the last number (the default), the middle one, or the first.
+STEPS = ("patch", "minor", "major")
+
+
+def next_version(latest: str, step: str = "patch") -> str:
+    """The number for the next version. Each change adds one to the last number (0.0.3 -> 0.0.4). A maintainer can
+    choose a bigger step instead: the middle number (0.0.4 -> 0.1.0) or the first (0.1.0 -> 1.0.0)."""
     major, minor, patch = parse_version(latest)
-    if major == 0 and minor == 0:
-        return f"0.0.{patch + 1}"
-    return f"{major}.{minor + 1}.0"
+    if step == "major":
+        return f"{major + 1}.0.0"
+    if step == "minor":
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{patch + 1}"
 
 
 def comment_label(version: str) -> str:

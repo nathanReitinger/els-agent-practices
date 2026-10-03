@@ -518,7 +518,8 @@ ins { color: var(--ins); background: var(--ins-soft); text-decoration: underline
 .proposal { margin: 0 0 0.75rem; padding: 0.9rem 1.05rem; border: 1px solid var(--rule); border-left: 3px solid var(--border); border-radius: 12px; background: var(--bg); }
 .proposal.is-open, .proposal.is-new { border-left-color: var(--accent); }
 .proposal.is-needs-fix { border-left-color: var(--warn); }
-.proposal.is-adopted { border-left-color: var(--good); }
+.proposal.is-adopted, .proposal.is-approved { border-left-color: var(--good); }
+.proposal.is-disapproved { border-left-color: var(--faint); }
 .proposal.is-declined, .proposal.is-withdrawn, .proposal.is-cannot-apply { border-left-color: var(--faint); }
 .proposal p { margin: 0.35rem 0 0; }
 .proposal-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.65rem; font-size: 0.9rem; }
@@ -588,7 +589,8 @@ table.fingerprints td:first-child { font-weight: 600; white-space: nowrap; }
 .key-input { flex: 1 1 16rem; min-width: 0; padding: 0.45rem 0.7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: 0.85rem var(--mono); }
 .key-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .vote { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--rule); }
-.vote-buttons { margin: 0 !important; }
+.vote-buttons { margin: 0 !important; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.step-select { padding: 0.2rem 0.45rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: 0.82rem var(--sans); }
 .vote-status { margin: 0.45rem 0 0 !important; font-size: 0.9rem; }
 .vote-status:empty { display: none; }
 .vote-status.pending { color: var(--muted); }
@@ -693,6 +695,8 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .doc .track-rule.others::before { background: var(--others); color: var(--bg); }
 .doc [data-proposal]:focus-visible { outline: 2px solid var(--others); outline-offset: 2px; }
 .doc .flash { outline: 2px solid var(--others); outline-offset: 3px; border-radius: 3px; }
+/* An approved change, shown as part of the text while the robot publishes it. */
+.doc .accepted { background: var(--good-soft); border-bottom: 1px solid var(--good); border-radius: 2px; }
 .doc .flash.mine, .doc [data-sid].flash { outline-color: var(--mine); }
 .suggestion-pop {
   position: absolute;

@@ -14,7 +14,7 @@ Nothing secret goes into this repository. The two values the site needs, the pro
 1. Open the project's **SQL Editor**, and choose **New query**.
 2. Paste the whole of [schema.sql](schema.sql), and choose **Run**. It should say "Success. No rows returned."
 
-Running it again later is safe.
+Running it again later is safe, and needed whenever this file changes: it adds what's new and leaves the rest as it is.
 
 ## 3. Send the codes from your own email account
 

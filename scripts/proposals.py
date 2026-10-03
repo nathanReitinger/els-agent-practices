@@ -210,10 +210,18 @@ class Vote:
     when: dt.datetime
     via: str
     link: str
+    step: str = "patch"  # for an approval: which number of the version goes up (release.STEPS)
 
     def record(self) -> dict:
         return {"name": self.maintainer.name, "vote": self.vote, "when": self.when.isoformat(), "via": self.via,
-                "link": self.link}
+                "link": self.link, **({"step": self.step} if self.step != "patch" else {})}
+
+
+def step_of(votes: list[Vote]) -> str:
+    """The version step for an adopted proposal: the biggest any approving maintainer chose (the last number, unless
+    one chose the middle or first)."""
+    steps = [v.step for v in votes if v.vote == "approve"] or ["patch"]
+    return max(steps, key=release.STEPS.index)
 
 
 def is_proposer(maintainer: Maintainer, proposer: dict) -> bool:
@@ -232,7 +240,8 @@ def count_votes(record: dict, replies: list[dict], comments: list[dict], gov: Go
     stale: set[str] = set()
     support: set[str] = set()
 
-    def consider(maintainer: Maintainer | None, vote: str, when: dt.datetime, via: str, link: str, voter: str) -> None:
+    def consider(maintainer: Maintainer | None, vote: str, when: dt.datetime, via: str, link: str, voter: str,
+                 step: str = "patch") -> None:
         if maintainer is None:
             if vote == "approve":
                 support.add(voter)
@@ -243,7 +252,7 @@ def count_votes(record: dict, replies: list[dict], comments: list[dict], gov: Go
         if vote == "approve" and not gov.self_approval and is_proposer(maintainer, record["proposer"]):
             return
         if maintainer.name not in latest or when > latest[maintainer.name].when:
-            latest[maintainer.name] = Vote(maintainer, vote, when, via, link)
+            latest[maintainer.name] = Vote(maintainer, vote, when, via, link, step)
 
     for reply in replies:
         vote = vote_of(reply.get("text", ""))
@@ -262,7 +271,8 @@ def count_votes(record: dict, replies: list[dict], comments: list[dict], gov: Go
     for row in site_votes:
         email = row.get("voter_email") or ""
         if row.get("vote") in ("approve", "reject") and email.lower() not in gov.ignored_site:
-            consider(gov.by_email(email), row["vote"], parse_time(row["at"]), SITE, "", f"site:{email.lower()}")
+            step = row.get("version_step") if row.get("version_step") in release.STEPS else "patch"
+            consider(gov.by_email(email), row["vote"], parse_time(row["at"]), SITE, "", f"site:{email.lower()}", step)
     votes = sorted(latest.values(), key=lambda v: v.when)
     return votes, len(support), len(stale - set(latest))
 
@@ -616,11 +626,12 @@ class Robot:
 
     # --- versions ---
 
-    def next_version(self) -> str:
-        return release.next_version(self.manifest["latest"])
+    def next_version(self, step: str = "patch") -> str:
+        return release.next_version(self.manifest["latest"], step)
 
-    def publish(self, summary: str, details: list[str], message: str, author: str | None = None) -> dict:
-        version = self.next_version()
+    def publish(self, summary: str, details: list[str], message: str, author: str | None = None,
+                step: str = "patch") -> dict:
+        version = self.next_version(step)
         entry = release.publish(version, summary, details, today=self.now.date().isoformat())
         commit(message.replace("{version}", version).replace("{fingerprint}", entry["fingerprint"]), author)
         git("tag", "-a", f"v{version}", "-m", f"Version {version}", "-m", f"Argon2id fingerprint: {entry['fingerprint']}",
@@ -648,20 +659,25 @@ class Robot:
     def publish_direct_edit(self) -> None:
         """A maintainer changed draft/AGENTS.md directly: publish it as the next version.
 
-        A commit message can give the version's summary with a line "Version-summary: ..."; otherwise it
-        says who edited the text."""
+        A commit message can give the version's summary with a line "Version-summary: ...", and a bigger version
+        step with "Version-step: minor" (the middle number) or "Version-step: major" (the first); otherwise the
+        summary says who edited the text, and the last number goes up."""
         changes = self.text_changes()
         authors = sorted({author for author, _, _ in changes} - {BOT_NAME}) or ["a maintainer"]
         subjects = [subject for _, subject, _ in changes]
         given = [m.group(1).strip() for _, _, message in changes
                  for m in [re.search(r"^Version-summary:[ \t]*(.+)$", message, re.M)] if m]
+        steps = [m.group(1).lower() for _, _, message in changes
+                 for m in [re.search(r"^Version-step:[ \t]*(patch|minor|major)\b", message, re.M | re.I)] if m]
+        step = max(steps, key=release.STEPS.index) if steps else "patch"
         summary = given[-1] if given else (
             f"Edited directly by {', '.join(authors)}" + (f": {subjects[0]}" if len(subjects) == 1 else "."))
         if self.o.dry_run:
-            self.say(f"Would publish a direct edit to the draft as version {self.next_version()}: {summary}")
+            self.say(f"Would publish a direct edit to the draft as version {self.next_version(step)}: {summary}")
             return
         details = (["Changes to the text, by " + ", ".join(authors) + ":", ""] + [f"- {s}" for s in subjects]) if subjects else []
-        entry = self.publish(summary, details, "Version {version}: " + summary + "\n\nFingerprint (Argon2id): {fingerprint}")
+        entry = self.publish(summary, details, "Version {version}: " + summary + "\n\nFingerprint (Argon2id): {fingerprint}",
+                             step=step)
         self.say(f"Published a direct edit to the draft as version {entry['version']}.")
 
     # --- proposals ---
@@ -807,9 +823,10 @@ class Robot:
 
     def adopt(self, record: dict, edit: edits.Edit, votes: list[Vote]) -> None:
         approvals = [v for v in votes if v.vote == "approve"]
+        step = step_of(votes)
         if self.o.dry_run:
-            self.say(f"Would adopt proposal {record['id']} as version {self.next_version()}: {summary_of(record)}")
-            self.manifest = {**self.manifest, "latest": self.next_version()}
+            self.say(f"Would adopt proposal {record['id']} as version {self.next_version(step)}: {summary_of(record)}")
+            self.manifest = {**self.manifest, "latest": self.next_version(step)}
             record.update(status="adopted")
             return
         DRAFT.write_text(edit.source)
@@ -836,7 +853,7 @@ class Robot:
             *[f"Approved-by: {v.maintainer.name} ({v.via})" for v in approvals],
             "Fingerprint (Argon2id): {fingerprint}",
         ])
-        entry = self.publish(summary_of(record), details, message, author)
+        entry = self.publish(summary_of(record), details, message, author, step)
         record.update(status="adopted", decided=self.now.isoformat(), version=entry["version"],
                       fingerprint=entry["fingerprint"], diff=edit.diff)
         self.say(f"Adopted proposal {record['id']} as version {entry['version']}: {summary_of(record)}")

@@ -41,9 +41,9 @@ A pull request that changes `draft/AGENTS.md` waits for a maintainer. When one i
 
 Each published version is a frozen snapshot with a permanent link and a fingerprint. Suggest Edits always shows the newest version.
 
-- **0.0.x: comment drafts.** Nothing is final. Each adopted suggestion adds one to the last number.
-- **1.0.0** will be the first version the contributors are ready to recommend as a standard. A maintainer publishes it.
-- **After 1.0**, each adopted suggestion adds one to the middle number (1.1.0, 1.2.0, ...), and a maintainer decides when a change is big enough for a new first number (2.0.0).
+- **Each adopted change adds one to the last number**: 0.0.3, then 0.0.4, then 0.0.5.
+- **A maintainer can choose a bigger step** when approving (the choice is next to **Approve**): the middle number for a bigger change (0.0.5 to 0.1.0), or the first number for a milestone (0.1.0 to 1.0.0). If several maintainers approve one change, the biggest step chosen counts.
+- **0.x versions are comment drafts.** Nothing is final. **1.0.0** will be the first version the contributors are ready to recommend as a standard.
 
 ## Maintainers
 
