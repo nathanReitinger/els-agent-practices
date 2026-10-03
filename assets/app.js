@@ -1113,8 +1113,7 @@
     if (!count) return;
     const n = collectChanges().length;
     count.textContent = n ? `${plural(n, "change")} so far` : "No changes yet";
-    $("#suggest-submit").disabled = !n;
-    $("#suggest-discard").disabled = !n;
+    for (const id of ["#suggest-submit", "#suggest-discard"]) { const control = $(id); if (control) control.disabled = !n; }
   }
 
   function suggestBar() {
@@ -1132,9 +1131,9 @@
         who),
       h("p", { class: "suggest-actions" },
         h("span", { class: "suggest-count", id: "suggest-count" }),
-        action("Submit for review", openSubmit, "button"),
+        Object.assign(action("Submit for review", openSubmit, "button"), { id: "suggest-submit" }),
         action("Undo", () => undo(), "button secondary"),
-        action("Discard all", discardAll, "button secondary"),
+        Object.assign(action("Discard all", discardAll, "button secondary"), { id: "suggest-discard" }),
         action("Stop suggesting", () => setMode(false), "button secondary")),
       h("p", { class: "suggest-hint", id: "suggest-hint", "aria-live": "polite" }),
       h("div", { class: "suggest-panel", id: "suggest-panel" }));
