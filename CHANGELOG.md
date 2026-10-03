@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.15] - 2026-10-03
+
+Deleted “the opposite result” (Pushing back).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals>
+
+Argon2id fingerprint: `c99c7c9b5be5d44f0c72e8074892d20f6f7f5ca765cd0258ad48067f81d52239`
+
+
 ## [0.0.14] - 2026-10-03
 
 Replaced “would give if” with “think” (Pushing back).
