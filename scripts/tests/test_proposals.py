@@ -3,9 +3,8 @@
     python3 -m unittest discover -s scripts/tests -t scripts/tests
 """
 
-import datetime as dt
-import os
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -16,12 +15,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from commands import parse_command  # noqa: E402
 from fingerprint import fingerprint  # noqa: E402
-from proposals import Governance, count_votes, decide, fetch_site, parse_time  # noqa: E402
+from proposals import Governance, count_votes, decide, fetch_site, parse_time, vote_of  # noqa: E402
 from release import next_version  # noqa: E402
 
-DRAFTER = "https://nathanreitinger.github.io/els-agent-practices/draft/"
 # Like GitHub's machines: no git settings from this computer, and no guessing a name or email from it. Nothing from
 # the GitHub run the tests may be part of, either (such as what started it).
 NO_GIT_SETTINGS = {**{k: v for k, v in os.environ.items() if not k.startswith(("GITHUB_", "GH_"))},
@@ -29,33 +26,30 @@ NO_GIT_SETTINGS = {**{k: v for k, v in os.environ.items() if not k.startswith(("
                    "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.useConfigOnly", "GIT_CONFIG_VALUE_0": "true",
                    "ROBOT_RETRY_SECONDS": "0,0"}
 MAINTAINERS = json.loads((ROOT / "governance" / "maintainers.json").read_text())
-
-
-def note(id, user, text, exact=None, prefix="", suffix="", created="2026-10-03T10:00:00+00:00", updated=None,
-         refs=None, name=None):
-    """An annotation as the Hypothesis search API returns it."""
-    row = {"id": id, "user": f"acct:{user}@hypothes.is", "user_info": {"display_name": name or user},
-           "created": created, "updated": updated or created, "text": text,
-           "links": {"incontext": f"https://hyp.is/{id}/nathanreitinger.github.io/els-agent-practices/draft/"},
-           "target": [{"source": DRAFTER}]}
-    if exact:
-        row["target"][0]["selector"] = [{"type": "TextQuoteSelector", "exact": exact, "prefix": prefix, "suffix": suffix}]
-    if refs:
-        row["references"] = refs
-    return row
-
-
-def reply(id, user, text, to, when="2026-10-03T11:00:00+00:00"):
-    return note(id, user, text, created=when, refs=[to])
-
-
 LEAD_EMAIL = MAINTAINERS["maintainers"][0]["email"]
+NO_SITE = {"suggestions": [], "votes": []}
+
+
+def suggestion(id, kind, exact, prefix="", suffix="", new="", email="jane@example.org", reason="",
+               created="2026-10-03T10:00:00+00:00", updated=None):
+    """A row of the Suggest Edits database's suggestions table, as its API returns it."""
+    return {"id": id, "author_id": f"id-{email}", "author_email": email, "kind": kind, "exact": exact, "prefix": prefix,
+            "suffix": suffix, "new_text": new, "reason": reason, "base": "0.0.2", "created": created,
+            "updated": updated or created}
 
 
 def site_vote(suggestion, email, vote, at="2026-10-03T11:00:00.123456+00:00", step="patch"):
     """A row of the Suggest Edits database's votes table, as its API returns it."""
     return {"suggestion": suggestion, "voter_id": f"id-{email}", "voter_email": email, "vote": vote, "at": at,
             "version_step": step}
+
+
+def site_suggestions(email="reader@example.org", start=0):
+    """Four suggestions made with the Suggest Edits editor (scripts/tests/suggestions.json), as database rows."""
+    rows = json.loads((ROOT / "scripts" / "tests" / "suggestions.json").read_text())["rows"]
+    return [{**row, "id": f"0000000{i}-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "author_id": f"id-{email}", "author_email": email,
+             "reason": "", "base": "0.0.2", "created": f"2026-10-03T10:0{start + i}:00.000001+00:00",
+             "updated": f"2026-10-03T10:0{start + i}:00.000001+00:00"} for i, row in enumerate(rows)]
 
 
 class VersionsTest(unittest.TestCase):
@@ -68,72 +62,51 @@ class VersionsTest(unittest.TestCase):
         self.assertEqual(next_version("0.0.3", "major"), "1.0.0")
 
 
-def site_suggestions(email="reader@example.org", start=0):
-    """The editor's four captured suggestions as rows of the Suggest Edits database's suggestions table."""
-    posted = json.loads((ROOT / "scripts" / "tests" / "suggestions.json").read_text())["posted"]
-    rows = []
-    for i, body in enumerate(posted):
-        selector = body["target"][0]["selector"][0]
-        command = parse_command(body["text"], selector["exact"])
-        when = f"2026-10-03T10:0{start + i}:00.000001+00:00"
-        rows.append({"id": f"0000000{i}-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "author_id": f"id-{email}", "author_email": email,
-                     "kind": command["kind"], "exact": selector["exact"], "prefix": selector["prefix"],
-                     "suffix": selector["suffix"], "new_text": command["new"], "reason": "", "base": "0.0.2",
-                     "created": when, "updated": when})
-    return rows
-
-
 class VotesTest(unittest.TestCase):
     def setUp(self):
         self.gov = Governance(MAINTAINERS)
         self.record = {"updated": "2026-10-03T10:00:00+00:00", "created": "2026-10-03T10:00:00+00:00",
-                       "proposer": {"name": "Jane", "hypothesis": "jdoe"}}
+                       "proposer": {"name": "jane@example.org", "email": "jane@example.org"}}
 
-    def test_maintainer_votes_count_and_readers_show_support(self):
-        votes, support, stale = count_votes(self.record, [
-            reply("r1", "nathanReitinger", "Approve", "p"),
-            reply("r2", "jdoe", "Approve", "p"),
-            reply("r3", "reader", "approved!", "p"),
-            reply("r4", "reader2", "Nice idea", "p"),
-        ], [], self.gov)
-        self.assertEqual([(v.maintainer.name, v.vote) for v in votes], [("Nathan Reitinger", "approve")])
+    def test_maintainer_votes_count_and_others_show_support(self):
+        votes, support, stale = count_votes(self.record, [], self.gov, [
+            site_vote("p", LEAD_EMAIL.upper(), "approve"),
+            site_vote("p", "jane@example.org", "approve"),
+            site_vote("p", "reader@example.org", "approve"),
+            site_vote("p", "reader2@example.org", "reject"),
+            site_vote("p", LEAD_EMAIL, "reject", at="2026-10-03T09:00:00+00:00"),  # older, and before the last edit
+        ])
+        self.assertEqual([(v.maintainer.name, v.vote, v.via) for v in votes], [("Nathan Reitinger", "approve", "Suggest Edits")])
         self.assertEqual((support, stale), (2, 0))
 
     def test_votes_before_the_last_edit_are_stale(self):
-        votes, _, stale = count_votes(self.record, [reply("r1", "NATHANREITINGER", "Approve", "p", "2026-10-03T09:00:00+00:00")],
-                                      [], self.gov)
+        votes, _, stale = count_votes(self.record, [], self.gov, [site_vote("p", LEAD_EMAIL, "approve", at="2026-10-03T09:00:00Z")])
         self.assertEqual((votes, stale), ([], 1))
 
-    def test_latest_vote_wins_across_hypothesis_and_github(self):
+    def test_latest_vote_wins_across_suggest_edits_and_github(self):
         comments = [
             {"user": {"login": "nathanreitinger", "type": "User"}, "body": "/reject not yet",
              "created_at": "2026-10-03T12:00:00Z", "updated_at": "2026-10-03T12:00:00Z", "html_url": "u"},
             {"user": {"login": "github-actions[bot]", "type": "Bot"}, "body": "/approve",
              "created_at": "2026-10-03T13:00:00Z", "updated_at": "2026-10-03T13:00:00Z", "html_url": "u"},
         ]
-        votes, _, _ = count_votes(self.record, [reply("r1", "nathanReitinger", "Approve", "p")], comments, self.gov)
+        votes, _, _ = count_votes(self.record, comments, self.gov, [site_vote("p", LEAD_EMAIL, "approve")])
         self.assertEqual([(v.vote, v.via) for v in votes], [("reject", "GitHub")])
 
-    def test_votes_on_suggest_edits_count_by_email(self):
-        votes, support, stale = count_votes(self.record, [], [], self.gov, [
-            site_vote("p", LEAD_EMAIL.upper(), "approve"),
-            site_vote("p", "reader@example.org", "approve"),
-            site_vote("p", LEAD_EMAIL, "reject", at="2026-10-03T09:00:00+00:00"),  # older, and before the last edit
-        ])
-        self.assertEqual([(v.maintainer.name, v.vote, v.via) for v in votes], [("Nathan Reitinger", "approve", "Suggest Edits")])
-        self.assertEqual((support, stale), (1, 0))
-        votes, _, stale = count_votes(self.record, [], [], self.gov, [site_vote("p", LEAD_EMAIL, "approve", at="2026-10-03T09:00:00Z")])
-        self.assertEqual((votes, stale), ([], 1))
+    def test_votes_in_github_comments(self):
+        cases = {"Approve": "approve", "approved!": "approve", "/approve": "approve", "**Approve.** Good catch.": "approve",
+                 "Reject — this conflicts with rule 2": "reject", "/reject": "reject", "rejects": "reject",
+                 "I approve": None, "Approval pending": None, "+1": None, "": None}
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(vote_of(text), expected)
 
     def test_self_approval_can_be_turned_off(self):
         data = json.loads(json.dumps(MAINTAINERS))
         data["rules"]["maintainers_may_approve_their_own_proposals"] = False
         gov = Governance(data)
-        record = {**self.record, "proposer": {"name": "N", "hypothesis": "nathanReitinger"}}
-        votes, _, _ = count_votes(record, [reply("r1", "nathanReitinger", "Approve", "p")], [], gov)
-        self.assertEqual(votes, [])
-        on_site = {**self.record, "proposer": {"name": LEAD_EMAIL, "email": LEAD_EMAIL}}
-        votes, _, _ = count_votes(on_site, [], [], gov, [site_vote("p", LEAD_EMAIL, "approve")])
+        own = {**self.record, "proposer": {"name": LEAD_EMAIL, "email": LEAD_EMAIL}}
+        votes, _, _ = count_votes(own, [], gov, [site_vote("p", LEAD_EMAIL, "approve")])
         self.assertEqual(votes, [])
 
     def test_decisions(self):
@@ -141,9 +114,9 @@ class VotesTest(unittest.TestCase):
         now = parse_time("2026-10-03T12:00:00Z")
         member = gov.maintainers[0]
         from proposals import Maintainer, Vote
-        other = Maintainer("Other", "maintainer", "other", "")
-        approve = Vote(member, "approve", now, "Hypothesis", "")
-        reject = Vote(other, "reject", now, "Hypothesis", "")
+        other = Maintainer("Other", "maintainer", "other@example.org", "")
+        approve = Vote(member, "approve", now, "Suggest Edits", "")
+        reject = Vote(other, "reject", now, "Suggest Edits", "")
         self.assertEqual(decide(self.record, [approve], gov, now), "adopt")
         self.assertEqual(decide(self.record, [approve, reject], gov, now), "wait")
         self.assertEqual(decide(self.record, [reject], gov, now), "decline")
@@ -153,7 +126,7 @@ class VotesTest(unittest.TestCase):
 
 
 class RunTest(unittest.TestCase):
-    """Whole runs of the robot in a scratch copy of the repository, reading comments from a file."""
+    """Whole runs of the robot in a scratch copy of the repository, reading Suggest Edits' data from a file."""
 
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp(prefix="els-robot-"))
@@ -164,7 +137,7 @@ class RunTest(unittest.TestCase):
         self.git("add", "-A")
         self.git("commit", "--quiet", "-m", "Start")
         self.git("tag", "-a", "v0.0.2", "-m", "Version 0.0.2")
-        self.fixture = self.dir / "annotations.json"
+        self.site_file = self.dir / "site.json"
 
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
@@ -192,12 +165,10 @@ class RunTest(unittest.TestCase):
         return subprocess.run(["git", "-c", "user.name=Maintainer", "-c", "user.email=maintainer@example.org", *args],
                               cwd=self.repo, capture_output=True, text=True, check=True, env=NO_GIT_SETTINGS).stdout.strip()
 
-    def robot(self, rows, *extra, now="2026-10-03T12:00:00Z", site=None):
-        self.fixture.write_text(json.dumps(rows))
-        if site is not None:
-            (self.dir / "site.json").write_text(json.dumps(site))
-            extra = (*extra, "--site-data", str(self.dir / "site.json"))
-        result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--offline",
+    def robot(self, site=None, *extra, now="2026-10-03T12:00:00Z"):
+        """A run of the robot, offline, with Suggest Edits' suggestions and votes from a file."""
+        self.site_file.write_text(json.dumps(site or NO_SITE))
+        result = subprocess.run([sys.executable, "scripts/proposals.py", "--site-data", str(self.site_file), "--offline",
                                  "--now", now, *extra], cwd=self.repo, capture_output=True, text=True, env=NO_GIT_SETTINGS)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         return result.stdout
@@ -208,43 +179,40 @@ class RunTest(unittest.TestCase):
     def manifest(self):
         return json.loads((self.repo / "versions.json").read_text())
 
-    def rows(self):
-        return [
-            note("p1", "jdoe", "Replace with: estimated cost and how it's billed\nWhy: subscriptions differ",
-                 "estimated cost", "would cost money. Give me the ", " first.", name="Jane Doe"),
-            reply("r1", "nathanReitinger", "Approve", "p1"),
-            note("p2", "nathanReitinger", "Delete", "(git)", "isn't under version control ", ", offer to set",
-                 created="2026-10-03T10:05:00+00:00"),
-            reply("r2", "jdoe", "Approve", "p2"),
-            note("p3", "reader", "Replace with:", "random seed", "Set and record a ", " in every script",
-                 created="2026-10-03T10:10:00+00:00"),
-            note("p4", "reader", "Delete", "words that aren't anywhere in the file", created="2026-10-03T10:15:00+00:00"),
-            note("p5", "reader", "Add rule: Always work in a cloud notebook.",
-                 "Set and record a random seed in every script that samples or simulates.",
-                 created="2026-10-03T10:20:00+00:00"),
-            reply("r5", "nathanReitinger", "Reject. That isn't general.", "p5"),
-            note("p6", "reader", "Delete this rule", "Change only what the task requires, and report other problems "
-                 "instead of fixing them.", created="2026-10-03T10:25:00+00:00", updated="2026-10-03T11:30:00+00:00"),
-            reply("r6", "nathanReitinger", "Approve", "p6", "2026-10-03T11:00:00+00:00"),
-            note("p7", "reader", "Replace with: Report every result",
-                 "Report null, weak, and surprising results", "", " as plainly as strong ones",
-                 created="2026-10-03T10:30:00+00:00"),
-            note("p8", "reader", "Replace with: Report null and surprising findings",
-                 "Report null, weak, and surprising results", "", " as plainly as strong ones",
-                 created="2026-10-03T10:35:00+00:00"),
-            reply("r8", "nathanReitinger", "approve", "p8"),
-            note("c1", "reader", "what is a trigger?", "When a trigger fires"),
-            note("old", "nathanReitinger", "delete", "Anyone, including me, proposes changing the analysis plan",
-                 created="2026-10-02T20:59:00+00:00"),
-        ]
+    def site(self):
+        """Suggestions and votes covering every outcome."""
+        return {"suggestions": [
+            suggestion("p1", "replace", "estimated cost", "would cost money. Give me the ", " first.",
+                       "estimated cost and how it's billed", reason="subscriptions differ"),
+            suggestion("p2", "delete", "(git)", "isn't under version control ", ", offer to set", email=LEAD_EMAIL,
+                       created="2026-10-03T10:05:00+00:00"),
+            suggestion("p3", "replace", "random seed", "Set and record a ", " in every script", "", email="reader@example.org",
+                       created="2026-10-03T10:10:00+00:00"),
+            suggestion("p4", "delete", "words that aren't anywhere in the file", email="reader@example.org",
+                       created="2026-10-03T10:15:00+00:00"),
+            suggestion("p5", "rule", "Set and record a random seed in every script that samples or simulates.",
+                       new="Always work in a cloud notebook.", email="reader@example.org", created="2026-10-03T10:20:00+00:00"),
+            suggestion("p6", "delete", "Change only what the task requires, and report other problems instead of fixing them.",
+                       email="reader@example.org", created="2026-10-03T10:25:00+00:00", updated="2026-10-03T11:30:00+00:00"),
+            suggestion("p7", "replace", "Report null, weak, and surprising results", "", " as plainly as strong ones",
+                       "Report every result", email="reader@example.org", created="2026-10-03T10:30:00+00:00"),
+            suggestion("p8", "replace", "Report null, weak, and surprising results", "", " as plainly as strong ones",
+                       "Report null and surprising findings", email="reader@example.org", created="2026-10-03T10:35:00+00:00"),
+        ], "votes": [
+            site_vote("sb-p1", LEAD_EMAIL, "approve"),
+            site_vote("sb-p2", "jane@example.org", "approve"),
+            site_vote("sb-p5", LEAD_EMAIL, "reject"),
+            site_vote("sb-p6", LEAD_EMAIL, "approve", at="2026-10-03T11:00:00+00:00"),  # before p6 was last changed
+            site_vote("sb-p8", LEAD_EMAIL, "approve"),
+        ]}
 
     def test_a_full_cycle(self):
-        out = self.robot(self.rows())
+        out = self.robot(self.site())
         ledger, manifest = self.ledger(), self.manifest()
 
-        # Two approved proposals became two versions, in order, each with its own fingerprint and tag.
+        # Two approved suggestions became two versions, in order, each with its own fingerprint and tag.
         self.assertEqual(manifest["latest"], "0.0.4")
-        self.assertEqual([ledger["p1"]["version"], ledger["p8"]["version"]], ["0.0.3", "0.0.4"])
+        self.assertEqual([ledger["sb-p1"]["version"], ledger["sb-p8"]["version"]], ["0.0.3", "0.0.4"])
         self.assertEqual(self.git("tag", "--list", "v*").split(), ["v0.0.2", "v0.0.3", "v0.0.4"])
         for entry in manifest["versions"][:2]:
             frozen = (self.repo / "versions" / f"v{entry['version']}" / "AGENTS.md").read_text()
@@ -255,52 +223,51 @@ class RunTest(unittest.TestCase):
         self.assertIn("Give me the estimated cost and how it's billed first.", draft)
         self.assertIn("- Report null and surprising findings as plainly as strong ones", draft)
 
-        # The record says who proposed and approved each change.
+        # The record says who suggested and approved each change, and why.
         changelog = (self.repo / "CHANGELOG.md").read_text()
         self.assertIn("## [0.0.3] - 2026-10-03", changelog)
-        self.assertIn("Proposed by Jane Doe (Hypothesis: jdoe) on 2026-10-03: “subscriptions differ”", changelog)
-        self.assertIn("Approved by Nathan Reitinger (Hypothesis, 2026-10-03)", changelog)
+        self.assertIn("Proposed by jane@\u2060example.org (Suggest Edits) on 2026-10-03: “subscriptions differ”", changelog)
+        self.assertIn("Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)", changelog)
         log = self.git("log", "--format=%an|%s", "-3")
-        self.assertIn("Jane Doe|Version 0.0.3: Replaced “estimated cost” with “estimated cost and how it's billed” (Stop and ask).", log)
-        self.assertIn("Approved-by: Nathan Reitinger (Hypothesis)", self.git("log", "-1", "--format=%B", "v0.0.3"))
+        self.assertIn("jane@example.org|Version 0.0.3: Replaced “estimated cost” with “estimated cost and how it's billed” (Stop and ask).", log)
+        self.assertIn("Approved-by: Nathan Reitinger (Suggest Edits)", self.git("log", "-1", "--format=%B", "v0.0.3"))
 
         # Everything else is recorded with the right status.
-        self.assertEqual(ledger["p2"]["status"], "open")
-        self.assertEqual(ledger["p2"]["support"], 1)
-        self.assertEqual(ledger["p3"]["status"], "needs-fix")
-        self.assertEqual(ledger["p4"]["status"], "cannot-apply")
-        self.assertEqual(ledger["p5"]["status"], "declined")
-        self.assertEqual((ledger["p6"]["status"], ledger["p6"]["stale_votes"]), ("open", 1))
-        self.assertEqual(ledger["p7"]["status"], "cannot-apply")  # p8 changed its words first
-        self.assertNotIn("c1", ledger)
-        self.assertNotIn("old", ledger)
-        self.assertEqual(ledger["p2"]["preview"]["after"],
+        self.assertEqual(ledger["sb-p2"]["status"], "open")
+        self.assertEqual(ledger["sb-p2"]["support"], 1)
+        self.assertEqual(ledger["sb-p3"]["status"], "needs-fix")
+        self.assertEqual(ledger["sb-p4"]["status"], "cannot-apply")
+        self.assertEqual(ledger["sb-p5"]["status"], "declined")
+        self.assertEqual((ledger["sb-p6"]["status"], ledger["sb-p6"]["stale_votes"]), ("open", 1))
+        self.assertEqual(ledger["sb-p7"]["status"], "cannot-apply")  # p8 changed its words first
+        self.assertEqual(ledger["sb-p2"]["preview"]["after"],
                          ["If the project isn't under version control, offer to set it up and run it for me. Commit "
                           "before and after each task, with a plain-English message saying what changed and why."])
-        self.assertIn("Adopted proposal p1 as version 0.0.3", out)
+        self.assertIn("Adopted proposal sb-p1 as version 0.0.3", out)
 
-        # A second run with the same comments changes nothing.
+        # A second run with the same data changes nothing.
         head = self.git("rev-parse", "HEAD")
-        self.robot(self.rows())
+        self.robot(self.site())
         self.assertEqual(self.git("rev-parse", "HEAD"), head)
         self.assertEqual(self.git("status", "--porcelain"), "")
 
-        # Deleting a proposal withdraws it; a new approval adopts another.
-        rows = [r for r in self.rows() if r["id"] != "p6"]
-        rows.append(reply("r9", "nathanReitinger", "/approve", "p2", "2026-10-03T12:30:00+00:00"))
-        self.robot(rows, now="2026-10-03T13:00:00Z")
+        # Withdrawing a suggestion closes it; a new approval adopts another.
+        site = self.site()
+        site["suggestions"] = [s for s in site["suggestions"] if s["id"] != "p6"]
+        site["votes"].append(site_vote("sb-p2", LEAD_EMAIL, "approve", at="2026-10-03T12:30:00+00:00"))
+        self.robot(site, now="2026-10-03T13:00:00Z")
         ledger = self.ledger()
-        self.assertEqual(ledger["p6"]["status"], "withdrawn")
-        self.assertEqual((ledger["p2"]["status"], ledger["p2"]["version"]), ("adopted", "0.0.5"))
+        self.assertEqual((ledger["sb-p6"]["status"], ledger["sb-p6"]["note"]), ("withdrawn", "The proposer withdrew it."))
+        self.assertEqual((ledger["sb-p2"]["status"], ledger["sb-p2"]["version"]), ("adopted", "0.0.5"))
         self.assertIn("version control, offer to set it up", (self.repo / "draft" / "AGENTS.md").read_text())
         verify = subprocess.run([sys.executable, "scripts/fingerprint.py", "--verify"], cwd=self.repo,
                                 capture_output=True, text=True)
         self.assertEqual(verify.returncode, 0, verify.stderr)
 
     def test_dry_run_changes_nothing(self):
-        out = self.robot(self.rows(), "--dry-run")
-        self.assertIn("Would adopt proposal p1 as version 0.0.3", out)
-        self.assertIn("Would adopt proposal p8 as version 0.0.4", out)
+        out = self.robot(self.site(), "--dry-run")
+        self.assertIn("Would adopt proposal sb-p1 as version 0.0.3", out)
+        self.assertIn("Would adopt proposal sb-p8 as version 0.0.4", out)
         self.assertEqual(self.git("status", "--porcelain"), "")
         self.assertEqual(self.git("tag", "--list"), "v0.0.2")
 
@@ -308,7 +275,7 @@ class RunTest(unittest.TestCase):
         path = self.repo / "draft" / "AGENTS.md"
         path.write_text(path.read_text().replace("Never invent values", "Never make up values"))
         self.git("commit", "--quiet", "-am", "Reword rule 3")
-        self.robot([])
+        self.robot()
         manifest = self.manifest()
         self.assertEqual(manifest["latest"], "0.0.3")
         self.assertEqual(manifest["versions"][0]["summary"], "Edited directly by Maintainer: Reword rule 3")
@@ -319,7 +286,7 @@ class RunTest(unittest.TestCase):
         path = self.repo / "draft" / "AGENTS.md"
         path.write_text(path.read_text().replace("Never invent values", "Never make up values"))
         self.git("commit", "--quiet", "-am", "Reword rule 3", "-m", "Version-step: minor")
-        self.robot([])
+        self.robot()
         self.assertEqual(self.manifest()["latest"], "0.1.0")
 
     def test_direct_edits_list_only_text_changes_and_take_a_summary(self):
@@ -332,35 +299,27 @@ class RunTest(unittest.TestCase):
         self.git("commit", "--quiet", "-am", "Reword rule 3")
         path.write_text(path.read_text().replace("Set and record a random seed", "Always set and record a random seed"))
         self.git("commit", "--quiet", "-am", "Reword the seed rule", "-m", "Version-summary: Two rewordings from the comments.")
-        self.robot([])
+        self.robot()
         entry = self.manifest()["versions"][0]
         self.assertEqual((entry["version"], entry["summary"]), ("0.0.3", "Two rewordings from the comments."))
         changelog = (self.repo / "CHANGELOG.md").read_text()
         self.assertIn("Changes to the text, by Maintainer:\n\n- Reword rule 3\n- Reword the seed rule\n", changelog)
         self.assertNotIn("Touch only the version line", changelog)
 
-    def suggestion_rows(self, approved):
-        """The editor's four suggestions as Hypothesis returns them, with a maintainer's approval of some."""
-        posted = json.loads((ROOT / "scripts" / "tests" / "suggestions.json").read_text())["posted"]
-        rows = []
-        for i, body in enumerate(posted):
-            created = f"2026-10-03T10:0{i}:00+00:00"
-            rows.append({"id": f"s{i}", "user": "acct:testreader@hypothes.is", "user_info": {"display_name": "Test Reader"},
-                         "created": created, "updated": created, "text": body["text"], "target": body["target"],
-                         "links": {"incontext": f"https://hyp.is/s{i}/draft"}})
-            if i in approved:
-                rows.append(reply(f"a{i}", "nathanReitinger", "Approve", f"s{i}"))
-        return rows
+    def editor_site(self, approved):
+        """The editor's four suggestions, with a maintainer's approval of some."""
+        rows = site_suggestions("test.reader@example.org")
+        return {"suggestions": rows, "votes": [site_vote(f"sb-{rows[i]['id']}", LEAD_EMAIL, "approve") for i in approved]}
 
     def test_suggestions_from_the_editor_apply_in_any_order(self):
         for first in ([3], [2]):  # the new rule first, or the word change in the rule it follows first
             with self.subTest(first=first):
                 self.tearDown()
                 self.setUp()
-                self.robot(self.suggestion_rows(first))
-                self.robot(self.suggestion_rows([0, 1, 2, 3]), now="2026-10-03T13:00:00Z")
-                self.assertEqual({r["id"]: r["status"] for r in self.ledger().values()},
-                                 {"s0": "adopted", "s1": "adopted", "s2": "adopted", "s3": "adopted"})
+                self.robot(self.editor_site(first))
+                self.robot(self.editor_site([0, 1, 2, 3]), now="2026-10-03T13:00:00Z")
+                self.assertEqual({r["status"] for r in self.ledger().values()}, {"adopted"})
+                self.assertEqual(len(self.ledger()), 4)
                 draft = (self.repo / "draft" / "AGENTS.md").read_text()
                 self.assertIn("- If the project isn't under version control, offer to set it up", draft)
                 self.assertIn("- Keep plans and drafts, decisions, and the codebook in files", draft)
@@ -372,7 +331,7 @@ class RunTest(unittest.TestCase):
         ids = [f"sb-{row['id']}" for row in rows]
         votes = [site_vote(ids[0], LEAD_EMAIL, "approve"), site_vote(ids[1], "someone@example.org", "approve"),
                  site_vote(ids[2], LEAD_EMAIL, "reject")]
-        self.robot([], site={"suggestions": rows, "votes": votes})
+        self.robot({"suggestions": rows, "votes": votes})
         ledger = self.ledger()
         self.assertEqual([ledger[i]["status"] for i in ids], ["adopted", "open", "declined", "open"])
         self.assertEqual((ledger[ids[1]]["support"], ledger[ids[0]]["proposer"]), (1, {"name": "reader@example.org", "email": "reader@example.org"}))
@@ -393,12 +352,12 @@ class RunTest(unittest.TestCase):
         rows[3] = {**rows[3], "new_text": "Name the model and its exact version in every log.",
                    "updated": "2026-10-03T12:10:00.5+00:00"}
         votes.append(site_vote(ids[3], LEAD_EMAIL, "approve", at="2026-10-03T12:05:00+00:00"))
-        self.robot([], site={"suggestions": [rows[3]], "votes": votes}, now="2026-10-03T12:30:00Z")
+        self.robot({"suggestions": [rows[3]], "votes": votes}, now="2026-10-03T12:30:00Z")
         ledger = self.ledger()
         self.assertEqual((ledger[ids[1]]["status"], ledger[ids[1]]["note"]), ("withdrawn", "The proposer withdrew it."))
         self.assertEqual((ledger[ids[3]]["status"], ledger[ids[3]]["stale_votes"]), ("open", 1))
         votes.append(site_vote(ids[3], LEAD_EMAIL, "approve", at="2026-10-03T12:40:00+00:00"))
-        self.robot([], site={"suggestions": [rows[3]], "votes": votes}, now="2026-10-03T13:00:00Z")
+        self.robot({"suggestions": [rows[3]], "votes": votes}, now="2026-10-03T13:00:00Z")
         self.assertEqual(self.ledger()[ids[3]]["status"], "adopted")
         self.assertIn("- Name the model and its exact version in every log.\n", (self.repo / "draft" / "AGENTS.md").read_text())
 
@@ -407,7 +366,7 @@ class RunTest(unittest.TestCase):
         ids = [f"sb-{row['id']}" for row in rows]
         votes = [site_vote(ids[0], LEAD_EMAIL, "approve", step="minor"), site_vote(ids[1], LEAD_EMAIL, "approve"),
                  site_vote(ids[2], LEAD_EMAIL, "approve", step="major")]
-        self.robot([], site={"suggestions": rows, "votes": votes})
+        self.robot({"suggestions": rows, "votes": votes})
         ledger = self.ledger()
         self.assertEqual([ledger[i].get("version") for i in ids], ["0.1.0", "0.1.1", "1.0.0", None])
         self.assertEqual(ledger[ids[0]]["votes"][0]["step"], "minor")
@@ -416,31 +375,37 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.git("tag", "--list", "v*").split(), ["v0.0.2", "v0.1.0", "v0.1.1", "v1.0.0"])
         self.assertIn("*Version 1.0.0 · Published", (self.repo / "draft" / "AGENTS.md").read_text())
 
+    def test_a_suggestion_without_its_new_words_needs_a_fix(self):
+        self.robot({"suggestions": [suggestion("q", "insert", "plans", new="  ")], "votes": [site_vote("sb-q", LEAD_EMAIL, "approve")]})
+        record = self.ledger()["sb-q"]
+        self.assertEqual(record["status"], "needs-fix")
+        self.assertIn("Type the new words", record["note"])
+
     def test_suggest_edits_accounts_can_be_ignored(self):
         governance = self.repo / "governance" / "maintainers.json"
         data = json.loads(governance.read_text())
         data["ignored_accounts"]["site"] = ["Spam@Example.org"]
         governance.write_text(json.dumps(data))
         self.git("commit", "--quiet", "-am", "Ignore a spammer")
-        self.robot([], site={"suggestions": site_suggestions("spam@example.org"), "votes": []})
+        self.robot({"suggestions": site_suggestions("spam@example.org"), "votes": []})
         self.assertEqual(self.ledger(), {})
 
     def test_an_empty_commit_after_a_month_without_any(self):
-        self.robot([], now="2026-12-20T12:00:00Z")
+        self.robot(now="2026-12-20T12:00:00Z")
         self.assertEqual(self.git("log", "-1", "--format=%s"), "Robot: still running")
         self.assertEqual(self.git("show", "--format=", "--name-only", "HEAD"), "")  # empty: no file changed
         self.assertEqual(self.git("log", "-1", "--format=%an"), "github-actions[bot]")
         head = self.git("rev-parse", "HEAD")
-        self.robot([], now="2026-12-21T12:00:00Z")  # a day later: nothing to do
+        self.robot(now="2026-12-21T12:00:00Z")  # a day later: nothing to do
         self.assertEqual(self.git("rev-parse", "HEAD"), head)
-        self.robot([], now="2026-12-20T12:00:00Z", *("--dry-run",))
+        self.robot(None, "--dry-run", now="2026-12-20T12:00:00Z")
         self.assertEqual(self.git("rev-parse", "HEAD"), head)
 
     def test_a_changed_frozen_version_stops_the_robot(self):
         frozen = self.repo / "versions" / "v0.0.1" / "AGENTS.md"
         frozen.write_text(frozen.read_text().replace("Never", "Always", 1))
-        self.fixture.write_text("[]")
-        result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--offline"],
+        self.site_file.write_text(json.dumps(NO_SITE))
+        result = subprocess.run([sys.executable, "scripts/proposals.py", "--site-data", str(self.site_file), "--offline"],
                                 cwd=self.repo, capture_output=True, text=True, env=NO_GIT_SETTINGS)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no longer matches its recorded fingerprint", result.stderr)
@@ -595,11 +560,13 @@ class GitHubRunTest(RunTest):
         self.github.close()
         super().tearDown()
 
-    def robot_online(self, rows, now="2026-10-03T12:00:00Z", *extra):
-        self.fixture.write_text(json.dumps(rows))
+    def robot_online(self, site=None, now="2026-10-03T12:00:00Z", *extra, database=False):
+        """A run that pushes and uses GitHub; with database, it reads the database named in versions.json."""
+        self.site_file.write_text(json.dumps(site or NO_SITE))
+        data = [] if database else ["--site-data", str(self.site_file)]
         env = {**NO_GIT_SETTINGS, "GH_TOKEN": "test-token", "REPO": "owner/name", "GITHUB_API_URL": self.github.url}
-        result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--push",
-                                 "--now", now, *extra], cwd=self.repo, capture_output=True, text=True, env=env)
+        result = subprocess.run([sys.executable, "scripts/proposals.py", *data, "--push", "--now", now, *extra],
+                                cwd=self.repo, capture_output=True, text=True, env=env)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         return result.stdout
 
@@ -607,18 +574,24 @@ class GitHubRunTest(RunTest):
         return subprocess.run(["git", "--git-dir", str(self.origin), *args], capture_output=True, text=True,
                               check=True).stdout.strip()
 
+    def some(self, *ids):
+        """Some of the suggestions in site(), with their votes."""
+        site = self.site()
+        return {"suggestions": [s for s in site["suggestions"] if s["id"] in ids],
+                "votes": [v for v in site["votes"] if v["suggestion"].removeprefix("sb-") in ids]}
+
     def test_issues_votes_on_github_and_pushing(self):
-        rows = [r for r in self.rows() if r["id"] in ("p1", "r1", "p2", "r2", "p3")]
-        self.robot_online(rows)
-        # The approved proposal was published and pushed with its tag; the open one got an issue.
+        site = self.some("p1", "p2", "p3")
+        self.robot_online(site)
+        # The approved suggestion was published and pushed with its tag; the open one got an issue.
         self.assertEqual(self.origin_git("tag", "--list", "v*").split(), ["v0.0.2", "v0.0.3"])
         self.assertEqual(self.origin_git("rev-parse", "main"), self.git("rev-parse", "HEAD"))
         ledger = self.ledger()
-        self.assertIsNone(ledger["p1"]["issue"])  # approved before it ever got an issue
-        self.assertIsNone(ledger["p3"]["issue"])  # needs a fix: no issue until it can be voted on
-        number = ledger["p2"]["issue"]
+        self.assertIsNone(ledger["sb-p1"]["issue"])  # approved before it ever got an issue
+        self.assertIsNone(ledger["sb-p3"]["issue"])  # needs a fix: no issue until it can be voted on
+        number = ledger["sb-p2"]["issue"]
         issue = self.github.issues[number]
-        self.assertIn("<!-- proposal:p2 -->", issue["body"])
+        self.assertIn("<!-- proposal:sb-p2 -->", issue["body"])
         self.assertIn("control <del>(git)</del>, offer", issue["body"])
         self.assertTrue(issue["title"].startswith("Proposal: Delete “(git)”"))
         self.assertIn("proposal", self.github.labels)
@@ -626,10 +599,10 @@ class GitHubRunTest(RunTest):
         # A maintainer votes on the issue; the next run adopts it, pushes, and closes the issue.
         self.github.add_comment(number, "NathanReitinger", "/approve looks right")
         self.github.add_comment(number, "someone-else", "/reject")
-        self.robot_online(rows, now="2026-10-03T13:00:00Z")
+        self.robot_online(site, now="2026-10-03T13:00:00Z")
         ledger = self.ledger()
-        self.assertEqual((ledger["p2"]["status"], ledger["p2"]["version"]), ("adopted", "0.0.4"))
-        self.assertEqual(ledger["p2"]["votes"][0]["via"], "GitHub")
+        self.assertEqual((ledger["sb-p2"]["status"], ledger["sb-p2"]["version"]), ("adopted", "0.0.4"))
+        self.assertEqual(ledger["sb-p2"]["votes"][0]["via"], "GitHub")
         self.assertEqual(self.github.issues[number]["state"], "closed")
         self.assertEqual(self.github.issues[number]["state_reason"], "completed")
         outcome = [c["body"] for c in self.github.comments[number] if c["user"]["type"] == "Bot"]
@@ -640,43 +613,34 @@ class GitHubRunTest(RunTest):
 
         # Running again doesn't post twice or push anything new.
         head = self.origin_git("rev-parse", "main")
-        self.robot_online(rows, now="2026-10-03T13:15:00Z")
+        self.robot_online(site, now="2026-10-03T13:15:00Z")
         self.assertEqual(self.origin_git("rev-parse", "main"), head)
         self.assertEqual(len([c for c in self.github.comments[number] if c["user"]["type"] == "Bot"]), 1)
 
     def test_an_issue_opened_by_hand_counts(self):
-        rows = [r for r in self.rows() if r["id"] in ("p2",)]
         self.github.issues[1] = {"number": 1, "title": "Proposal", "state": "open", "labels": [],
-                                 "body": "Filed on the Maintainers page.\n\n<!-- proposal:p2 -->"}
-        self.github.add_comment(1, "nathanreitinger", "/approve\n\nApproved on the Maintainers page.")
-        self.robot_online(rows)
+                                 "body": "Opened by hand.\n\n<!-- proposal:sb-p2 -->"}
+        self.github.add_comment(1, "nathanreitinger", "/approve")
+        self.robot_online(self.some("p2"))
         ledger = self.ledger()
-        self.assertEqual((ledger["p2"]["issue"], ledger["p2"]["status"], ledger["p2"]["version"]), (1, "adopted", "0.0.3"))
-        self.assertEqual(len(self.github.issues), 1)  # no second issue for the same proposal
+        self.assertEqual((ledger["sb-p2"]["issue"], ledger["sb-p2"]["status"], ledger["sb-p2"]["version"]), (1, "adopted", "0.0.3"))
+        self.assertEqual(len(self.github.issues), 1)  # no second issue for the same suggestion
         self.assertEqual(self.github.issues[1]["state"], "closed")
 
     def test_the_robot_labels_issues_it_finds_unlabeled(self):
-        rows = [r for r in self.rows() if r["id"] in ("p2",)]
         self.github.issues[1] = {"number": 1, "title": "Proposal", "state": "open", "labels": [],
-                                 "body": "Filed on the Maintainers page.\n\n<!-- proposal:p2 -->"}
-        self.robot_online(rows)
+                                 "body": "Opened by hand.\n\n<!-- proposal:sb-p2 -->"}
+        self.robot_online(self.some("p2"))
         self.assertEqual(self.github.issues[1]["labels"], [{"name": "proposal"}])
         self.assertIn("**Maintainers:** approve or disapprove it on [Suggest Edits]", self.github.issues[1]["body"])
 
     def test_a_suggestion_gets_an_issue_once_it_has_settled(self):
         row = {**site_suggestions()[0], "created": "2026-10-03T11:55:00+00:00", "updated": "2026-10-03T11:55:00+00:00"}
-        (self.dir / "site.json").write_text(json.dumps({"suggestions": [row], "votes": []}))
-        env = {**NO_GIT_SETTINGS, "GH_TOKEN": "test-token", "REPO": "owner/name", "GITHUB_API_URL": self.github.url}
         for now, issues in (("2026-10-03T12:00:00Z", 0), ("2026-10-03T12:06:00Z", 1)):
-            self.fixture.write_text("[]")
-            result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--site-data",
-                                     str(self.dir / "site.json"), "--push", "--now", now], cwd=self.repo, capture_output=True,
-                                    text=True, env=env)
-            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.robot_online({"suggestions": [row], "votes": []}, now)
             self.assertEqual(len(self.github.issues), issues)
         body = self.github.issues[1]["body"]
         self.assertIn("**reader@\u2060example.org** (Suggest Edits) proposes a change", body)
-        self.assertNotIn("the comment that proposes it", body)
 
     def set_supabase(self, **settings):
         manifest = json.loads((self.repo / "versions.json").read_text())
@@ -690,28 +654,28 @@ class GitHubRunTest(RunTest):
 
     def test_an_issue_when_supabase_stops_starting_the_robot(self):
         self.set_supabase(starts_robot=True)
-        self.robot_online([])
+        self.robot_online()
         [issue] = self.alerts()
         self.assertEqual(issue["title"], "Supabase isn't starting the robot")
         self.assertIn("@nathanReitinger", issue["body"])
         self.assertIn("The last start was never.", issue["body"])
         self.assertIn("expires_in=none&actions=write", issue["body"])
         self.assertIn("select robot.set_token(", issue["body"])
-        self.robot_online([], "2026-10-03T12:20:00Z")
+        self.robot_online(None, "2026-10-03T12:20:00Z")
         self.assertEqual(len(self.github.issues), 1)  # not opened twice
 
         self.github.runs = [{"created_at": "2026-10-03T12:30:00Z", "event": "workflow_dispatch"}]
-        self.robot_online([], "2026-10-03T12:35:00Z")
+        self.robot_online(None, "2026-10-03T12:35:00Z")
         self.assertEqual(self.alerts(), [])
         self.assertEqual(self.alerts("closed")[0]["state_reason"], "completed")
         self.assertIn("Working again", self.github.comments[issue["number"]][-1]["body"])
 
         # Six hours without a start: it opens again.
-        self.robot_online([], "2026-10-03T19:00:00Z")
+        self.robot_online(None, "2026-10-03T19:00:00Z")
         self.assertIn("The last start was October 03, 2026, at 12:30 UTC.", self.alerts()[0]["body"])
 
     def test_no_issue_until_supabase_starts_the_robot(self):
-        self.robot_online([])
+        self.robot_online()
         self.assertEqual(self.alerts(), [])
 
     def test_an_issue_when_the_database_doesnt_answer(self):
@@ -735,14 +699,14 @@ class GitHubRunTest(RunTest):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
             self.set_supabase(url=f"http://127.0.0.1:{server.server_address[1]}", key="sb_publishable_test")
-            out = self.robot_online([], "2026-10-03T12:00:00Z", "--site-from-manifest")
+            out = self.robot_online(None, "2026-10-03T12:00:00Z", database=True)
             self.assertIn("Couldn't read the suggestions from Suggest Edits", out)
             [issue] = self.alerts()
             self.assertEqual(issue["title"], "The Suggest Edits database isn't answering")
             self.assertIn("HTTP Error 503", issue["body"])
             self.assertIn("choose **Restore**", issue["body"])
             answer["code"] = 200
-            self.robot_online([], "2026-10-03T12:10:00Z", "--site-from-manifest")
+            self.robot_online(None, "2026-10-03T12:10:00Z", database=True)
             self.assertEqual(self.alerts(), [])
         finally:
             server.shutdown()
@@ -757,8 +721,8 @@ class GitHubRunTest(RunTest):
         subprocess.run(["git", "-C", str(other), "-c", "user.name=X", "-c", "user.email=x@example.org", "commit",
                         "--quiet", "-am", "Elsewhere"], check=True)
         subprocess.run(["git", "-C", str(other), "push", "--quiet"], check=True)
-        out = self.robot_online([r for r in self.rows() if r["id"] in ("p1", "r1")])
-        self.assertIn("Adopted proposal p1 as version 0.0.3", out)
+        out = self.robot_online(self.some("p1"))
+        self.assertIn("Adopted proposal sb-p1 as version 0.0.3", out)
         log = self.origin_git("log", "--format=%s", "main")
         self.assertIn("Elsewhere", log)
         self.assertIn("Version 0.0.3: Replaced", log)

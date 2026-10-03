@@ -34,7 +34,7 @@ The rules are in [GOVERNANCE.md](GOVERNANCE.md); how to take part is in [CONTRIB
 | `governance/proposals.json` | Every suggestion and proposal, vote, and outcome (written by the robot) |
 | `supabase/` | The database behind Suggest Edits (`schema.sql`), how Supabase starts the robot (`robot.sql`), and how to set both up (`README.md`) |
 | `scripts/proposals.py` | The robot that counts votes and publishes approved changes |
-| `scripts/edits.py`, `scripts/commands.py` | How a proposal becomes an exact edit, and how comments are read |
+| `scripts/edits.py` | How a suggestion becomes an exact edit |
 | `scripts/release.py`, `scripts/fingerprint.py` | Publishing a version, and computing fingerprints |
 | `scripts/pages.py` | Writes the site's HTML pages |
 | `scripts/tests/` | Tests, run before every robot run |

@@ -1,69 +1,33 @@
 {
-  "about": "What the Drafter's suggesting mode posted to Hypothesis for four edits to version 0.0.2 (struck \"(git)\"; added \"and drafts\" after \"plans\"; replaced \"every\" with \"each\"; a new rule after the random-seed rule), captured in the browser on 2026-10-02. test_proposals.py checks that the robot applies them, in any order.",
-  "posted": [
+  "about": "Four suggestions made with the Suggest Edits editor on version 0.0.2: it struck \"(git)\", added \"and drafts\" after \"plans\", replaced \"every\" with \"each\", and added a rule after the random-seed rule. Each is a row of the database's suggestions table (without the columns the database fills in). Captured in the browser on 2026-10-02; test_proposals.py checks that the robot applies them, in any order.",
+  "rows": [
     {
-      "text": "Delete",
-      "target": [
-        {
-          "source": "https://nathanreitinger.github.io/els-agent-practices/draft/",
-          "selector": [
-            {
-              "type": "TextQuoteSelector",
-              "exact": "(git)",
-              "prefix": "ect isn't under version control ",
-              "suffix": ", offer to set it up and run it "
-            }
-          ]
-        }
-      ]
+      "kind": "delete",
+      "exact": "(git)",
+      "prefix": "ect isn't under version control ",
+      "suffix": ", offer to set it up and run it ",
+      "new_text": ""
     },
     {
-      "text": "Add after: and drafts",
-      "target": [
-        {
-          "source": "https://nathanreitinger.github.io/els-agent-practices/draft/",
-          "selector": [
-            {
-              "type": "TextQuoteSelector",
-              "exact": "plans",
-              "prefix": "ying what changed and why.\nKeep ",
-              "suffix": ", decisions, and the codebook in"
-            }
-          ]
-        }
-      ]
+      "kind": "insert",
+      "exact": "plans",
+      "prefix": "ying what changed and why.\nKeep ",
+      "suffix": ", decisions, and the codebook in",
+      "new_text": "and drafts"
     },
     {
-      "text": "Replace with: each",
-      "target": [
-        {
-          "source": "https://nathanreitinger.github.io/els-agent-practices/draft/",
-          "selector": [
-            {
-              "type": "TextQuoteSelector",
-              "exact": "every",
-              "prefix": "Set and record a random seed in ",
-              "suffix": " script that samples or simulate"
-            }
-          ]
-        }
-      ]
+      "kind": "replace",
+      "exact": "every",
+      "prefix": "Set and record a random seed in ",
+      "suffix": " script that samples or simulate",
+      "new_text": "each"
     },
     {
-      "text": "Add rule: Name the model and its version in every log.",
-      "target": [
-        {
-          "source": "https://nathanreitinger.github.io/els-agent-practices/draft/",
-          "selector": [
-            {
-              "type": "TextQuoteSelector",
-              "exact": "script that samples or simulates.",
-              "prefix": "d record a random seed in every ",
-              "suffix": "\nWhen I correct you about the da"
-            }
-          ]
-        }
-      ]
+      "kind": "rule",
+      "exact": "script that samples or simulates.",
+      "prefix": "d record a random seed in every ",
+      "suffix": "\nWhen I correct you about the da",
+      "new_text": "Name the model and its version in every log."
     }
   ]
 }

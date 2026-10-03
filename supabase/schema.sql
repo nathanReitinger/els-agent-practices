@@ -77,7 +77,7 @@ create policy "Authors withdraw their own suggestions" on public.suggestions
   using (author_id = (select auth.uid()));
 
 -- ---------- Votes ----------
--- `suggestion` is the id the robot gives a proposal: "sb-" and a suggestion's id, or a Hypothesis comment's id.
+-- `suggestion` is the id the robot gives a suggestion: "sb-" and the suggestion's id.
 -- Only maintainers' votes decide anything; the robot counts other readers' approvals as support.
 
 create table if not exists public.votes (

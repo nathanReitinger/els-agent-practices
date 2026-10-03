@@ -1,6 +1,6 @@
 /* AGENTS.md for Empirical Legal Scholars: shows one Markdown file, AGENTS.md, rendered for reading;
-   Suggest Edits, where anyone can comment, and readers who sign in with their email suggest changes by editing
-   the text with track changes on; the Maintainers page; the Declined page; a page for joining the community's
+   Suggest Edits, where readers who verify an email address suggest changes by editing the text with track
+   changes on; the Maintainers page; the Declined page; a page for joining the community's
    group; and a page that checks whether a copy is exactly a published version.
    Each page says what to show with attributes on <body>:
      data-mode     published (latest version) | drafter (Suggest Edits) | archive (one version) | check | join |
@@ -17,7 +17,6 @@
   const DRAFT_PATH = `draft/${FILE}`;
   const LEDGER_PATH = "governance/proposals.json";
   const MAINTAINERS_PATH = "governance/maintainers.json";
-  const HYPOTHESIS_SEARCH = "https://api.hypothes.is/api/search";
   const CHECK_EVERY = "five minutes";
   const FINAL = ["adopted", "declined", "withdrawn", "cannot-apply"];
   const KIND_LABELS = { delete: "Delete", replace: "Replace", insert: "Add words", rule: "Add a rule" };
@@ -289,20 +288,11 @@
       h("p", {}, "Try reloading the page, or start from ", h("a", { href: at(""), text: "the home page" }), "."));
   }
 
-  // Comments (Hypothesis) attach to the canonical URL.
+  // The page's own address, for search engines and shared links.
   function setCanonical(url) {
     const absolute = new URL(url, location.href).href;
     const link = $("link[rel=canonical]") || document.head.appendChild(h("link", { rel: "canonical" }));
     link.href = absolute;
-  }
-
-  function loadHypothesis() {
-    if ($("script[src^='https://hypothes.is/']")) return;
-    html.classList.add("has-annotations"); // the layout leaves room for its toolbar on the right edge
-    document.head.append(
-      h("script", { type: "application/json", class: "js-hypothesis-config",
-        text: JSON.stringify({ openSidebar: false, showHighlights: "always" }) }),
-      h("script", { src: "https://hypothes.is/embed.js", async: true }));
   }
 
   // ---------- Fingerprints ----------
@@ -443,42 +433,6 @@
     try { return await fetchJSON(at(path)); } catch { return null; }
   }
 
-  // Proposals made in comments since the robot last looked: read straight from Hypothesis, so a proposer sees
-  // theirs at once.
-  async function liveComments(cfg) {
-    const params = new URLSearchParams({ uri: `${cfg.site}draft/`, limit: "200", sort: "updated", order: "desc" });
-    try {
-      const res = await fetch(`${HYPOTHESIS_SEARCH}?${params}`);
-      return res.ok ? (await res.json()).rows || [] : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function newProposals(rows, known, governance) {
-    const since = Date.parse(governance?.rules?.proposals_count_from || 0);
-    const ignored = new Set((governance?.ignored_accounts?.hypothesis || []).map((name) => name.toLowerCase()));
-    const found = [];
-    for (const row of rows) {
-      if (row.references || row.hidden || known.has(row.id) || Date.parse(row.updated) < since) continue;
-      const user = (row.user || "").replace(/^acct:|@hypothes\.is$/g, "");
-      if (ignored.has(user.toLowerCase())) continue;
-      const selector = (row.target || []).flatMap((t) => t.selector || []).find((s) => s.type === "TextQuoteSelector");
-      if (!selector?.exact) continue;
-      const command = window.ELSCommands?.parseCommand(row.text, selector.exact);
-      if (!command) continue;
-      const problems = command.problems.map((p) => window.ELSCommands.PROBLEMS[p]);
-      found.push({
-        id: row.id, status: problems.length ? "needs-fix" : "new", note: problems.join(" "),
-        kind: command.kind, old: selector.exact, new: command.new, before: selector.prefix || "", after: selector.suffix || "",
-        reason: command.reason, created: row.created, updated: row.updated,
-        proposer: { name: row.user_info?.display_name || user, hypothesis: user },
-        link: row.links?.incontext || `https://hypothes.is/a/${row.id}`,
-      });
-    }
-    return found;
-  }
-
   function ruleSentence(rules = {}) {
     const n = rules.approvals_needed ?? 1;
     let text = n === 1
@@ -552,9 +506,8 @@
     return parts.length ? h("p", { class: "votes" }, ...joined(parts)) : null;
   }
 
-  function proposalCard(p, cfg, rules, replies, extra = null) {
+  function proposalCard(p, cfg, rules, extra = null) {
     const [label, detail] = proposalStatus(p, rules);
-    const count = replies.get(p.id) || 0;
     const open = !FINAL.includes(p.status);
     const note = ["needs-fix", "withdrawn", "cannot-apply"].includes(p.status) && detail; // a sentence: its own line
     return h("article", { class: `proposal is-${p.status}`, id: `proposal-${p.id}` },
@@ -571,22 +524,11 @@
       ].filter(Boolean))),
       votesView(p),
       h("p", { class: "proposal-links" }, ...joined([
-        p.id.startsWith("sb-") ? (open && mode === "drafter" && !["approved", "disapproved"].includes(p.status) ? h("a", { href: "#doc", text: "Show it in the text",
-          onclick: (event) => { event.preventDefault(); showInText(p.id); } }) : null)
-          : external(open ? (count ? `Comment on it (${plural(count, "reply", "replies")})` : "Comment on it") :
-            (count ? `Read the discussion (${plural(count, "reply", "replies")})` : "Read the proposal"), p.link),
+        open && mode === "drafter" && !["approved", "disapproved"].includes(p.status) ? h("a", { href: "#doc", text: "Show it in the text",
+          onclick: (event) => { event.preventDefault(); showInText(p.id); } }) : null,
         p.issue ? external(`GitHub issue #${p.issue}`, `https://github.com/${cfg.repo}/issues/${p.issue}`) : null,
       ].filter(Boolean))),
       extra);
-  }
-
-  // Every proposal in the robot's record, and the ones made in comments since it last looked.
-  async function loadProposals(cfg, governance, ledger) {
-    const records = ledger?.proposals || [];
-    const rows = await liveComments(cfg);
-    const replies = new Map();
-    for (const row of rows) if (row.references) replies.set(row.references[0], (replies.get(row.references[0]) || 0) + 1);
-    return { replies, records, fresh: newProposals(rows, new Set(records.map((r) => r.id)), governance) };
   }
 
   function sortProposals(list) {
@@ -600,8 +542,7 @@
   }
 
   function maintainerList(governance) {
-    const how = (m) => [m.email && `signs in as ${m.email}`, m.github && `${m.github} on GitHub`, m.hypothesis && `${m.hypothesis} on Hypothesis`]
-      .filter(Boolean).join(", ");
+    const how = (m) => [m.email && `signs in as ${m.email}`, m.github && `${m.github} on GitHub`].filter(Boolean).join(", ");
     return h("ul", { class: "member-list" }, ...(governance?.maintainers || []).map((m) => h("li", {},
       h("strong", { text: m.name }),
       m.role && m.role !== "maintainer" ? h("span", { class: "badge badge-soft", text: m.role }) : null,
@@ -613,7 +554,7 @@
     const names = (governance?.maintainers || []).map((m) => m.name);
     return h("aside", { class: "note" },
       h("p", {}, h("strong", { text: "Who decides? " }),
-        `The maintainers${names.length ? ` (${names.join(", ")})` : ""} approve or disapprove each suggestion. Anyone else can comment and suggest changes, but can't change the text.`),
+        `The maintainers${names.length ? ` (${names.join(", ")})` : ""} approve or disapprove each suggestion. Anyone else can suggest changes, but can't change the text.`),
       h("p", {}, secondary("The maintainers", at("maintainers/"))));
   }
 
@@ -1217,7 +1158,7 @@
     remote: null,  // everyone's suggestions, from the database (null until it answers)
     votes: [],  // everyone's votes, from the database
     pendingVotes: [],  // votes cast here that the database hasn't sent back yet
-    proposals: { replies: new Map(), records: [], fresh: [] },  // the robot's record, and new proposals in comments
+    proposals: { records: [] },  // the robot's record (governance/proposals.json)
     others: [], saved: new Map(), undrawable: new Set(), undo: [], redo: [], lastGood: "",
     dirty: false, edits: 0, lastEdit: 0, busy: false, syncing: Promise.resolve(), timer: null,
     status: { text: "All changes saved", problem: false },
@@ -1298,7 +1239,7 @@
     const first = blockOf(index.chars[a].node), block = blockOf(index.chars[b - 1].node);
     if (!first || !block || frozen(first) || frozen(block) || (mine && first !== block)) return false;
     taken.push([a, b]);
-    const who = s.author?.email || s.proposer?.hypothesis || s.proposer?.name || "someone";
+    const who = s.author?.email || s.proposer?.email || s.proposer?.name || "someone";
     const range = document.createRange();
     range.setStart(index.chars[a].node, index.chars[a].offset);
     range.setEnd(index.chars[b - 1].node, index.chars[b - 1].offset + 1);
@@ -1334,10 +1275,9 @@
   function othersOpen() {
     const decided = pendingDecisions();
     const fromSite = (suggest.remote || []).filter((s) => !isMine(s) && isOpen(s) && !isIgnored(s));
-    const { records, fresh } = suggest.proposals;
-    const fromComments = [...fresh, ...records.filter((r) => !FINAL_STATUS.has(r.status))]
-      .filter((p) => !p.id.startsWith("sb-") || !suggest.remote);
-    return [...fromSite, ...fromComments].filter((x) => !decided.has(x.id))
+    // Without the database (it didn't answer), the robot's record of open suggestions stands in.
+    const fromRecord = suggest.remote ? [] : suggest.proposals.records.filter((r) => !FINAL_STATUS.has(r.status));
+    return [...fromSite, ...fromRecord].filter((x) => !decided.has(x.id))
       .sort((x, y) => (x.created || "").localeCompare(y.created || ""));
   }
 
@@ -1434,7 +1374,7 @@
     if (pendingDecisions().size) watchForPublication();
   }
 
-  // Only a reader who has verified their email address can edit the text; everyone else reads it (and can comment).
+  // Only a reader who has verified their email address can edit the text.
   function setEditable(on) {
     const doc = $("#doc");
     const editable = on && suggest.ready && !!suggest.me;
@@ -1634,32 +1574,17 @@
     try { await suggest.backend.signOut(); } catch (error) { hint(`Signing out didn't work: ${error.message}`); }
   }
 
-  const HELP = {
-    edit: "Edit as in Word with track changes on: words you delete are struck out, and words you type are added in blue. Press Enter at the end of a rule to add a new one. Everything is saved as you go. Other people's suggestions are orange; click one to see it.",
-    comment: "Commenting: select words, then choose Annotate to comment on them. The text can't be edited until you go back to editing.",
-  };
+  const HELP = "Edit as in Word with track changes on: words you delete are struck out, and words you type are added in blue. Press Enter at the end of a rule to add a new one. Everything is saved as you go. Other people's suggestions are orange; click one to see it.";
 
   function suggestBar() {
     return h("div", { class: "suggest-bar", id: "suggest-bar", role: "region", "aria-label": "Editing" },
       h("div", { class: "suggest-line", id: "suggest-who" }),
       h("p", { class: "suggest-tools" },
-        h("span", { class: "suggest-help", id: "suggest-help", text: HELP.edit }),
+        h("span", { class: "suggest-help", id: "suggest-help", text: HELP }),
         h("span", { class: "suggest-buttons" },
           action("Undo", () => undo(), "button secondary small suggest-undo"),
-          action("Redo", () => redo(), "button secondary small suggest-undo"),
-          h("button", { type: "button", class: "linklike", id: "mode-toggle", text: "Comment instead", onclick: () => setMode(!suggest.editing) }))),
+          action("Redo", () => redo(), "button secondary small suggest-undo"))),
       h("p", { class: "suggest-hint", id: "suggest-hint", "aria-live": "polite" }));
-  }
-
-  // Editing, or commenting (selecting words to annotate them, without changing the text).
-  function setMode(editing) {
-    suggest.editing = editing;
-    $(".suggestion-pop")?.remove();
-    setEditable(editing);
-    $("#suggest-bar")?.classList.toggle("commenting", !editing);
-    const help = $("#suggest-help"), toggle = $("#mode-toggle");
-    if (help) help.textContent = editing ? HELP.edit : HELP.comment;
-    if (toggle) toggle.textContent = editing ? "Comment instead" : "Back to editing";
   }
 
   // ---- Approving and disapproving ----
@@ -1855,7 +1780,6 @@
         ` · suggested by ${record.proposer?.name || "someone"}, ${formatDate(s.created)}`),
       changeView(record),
       s.reason ? h("p", { class: "proposal-reason", text: `“${s.reason}”` }) : "",
-      s.link ? h("p", { class: "proposal-links" }, external("Comment on it", s.link)) : "",
       voteControls(p));
   }
 
@@ -1884,11 +1808,9 @@
 
   function currentProposals() {
     const { records } = suggest.proposals;
-    const recorded = new Set(records.map((r) => r.id));
-    const fresh = suggest.proposals.fresh.filter((p) => !recorded.has(p.id));
-    if (!suggest.remote) return [...fresh, ...records];
+    if (!suggest.remote) return [...records];
     const live = new Map(suggest.remote.filter((s) => !isIgnored(s)).map((s) => [s.id, s]));
-    const list = [...fresh];
+    const list = [];
     for (const r of records) {
       if (!r.id.startsWith("sb-")) list.push(r);
       else if (live.has(r.id)) { list.push(asProposal(live.get(r.id), r)); live.delete(r.id); }
@@ -1911,7 +1833,6 @@
     if (!section) return;
     const { cfg, governance } = suggest;
     const rules = governance?.rules || {};
-    const { replies } = suggest.proposals;
     const decided = pendingDecisions();
     const { open: notFinal, adopted, closed } = sortProposals(currentProposals().map((p) => {
       const d = decided.get(p.id);
@@ -1920,7 +1841,7 @@
     const open = notFinal.filter((p) => !decided.has(p.id));
     const publishing = notFinal.filter((p) => p.status === "approved").reverse();
     const settingAside = notFinal.filter((p) => p.status === "disapproved");
-    const card = (p) => proposalCard(p, cfg, rules, replies, [reasonField(p), voteControls(p)]);
+    const card = (p) => proposalCard(p, cfg, rules, [reasonField(p), voteControls(p)]);
     section.replaceChildren(
       h("h2", { text: "Suggestions" }),
       h("p", {}, "Each suggestion waits for the ", h("a", { href: at("maintainers/"), text: "maintainers" }),
@@ -1954,7 +1875,7 @@
 
   async function setupSuggesting(cfg, governance, ledger, markdown) {
     Object.assign(suggest, { cfg, governance, markdown, version: stampedVersion(markdown) || cfg.latest,
-      proposals: { replies: new Map(), records: ledger?.proposals || [], fresh: [] } });
+      proposals: { records: ledger?.proposals || [] } });
     const doc = $("#doc");
     doc.addEventListener("beforeinput", onBeforeInput);
     doc.addEventListener("compositionstart", onCompositionStart);
@@ -1978,7 +1899,6 @@
       if (suggest.me && suggest.dirty) { sync(); event.preventDefault(); }
     });
     drawEverything();
-    loadProposals(cfg, governance, ledger).then((data) => { suggest.proposals = data; refresh(); }).catch(() => {});
 
     const useLocal = isLocal && new URLSearchParams(location.search).get("backend") === "local";
     try {
@@ -1995,7 +1915,6 @@
       drawEverything();
       renderProposals();
       if (pendingDecisions().size) watchForPublication(true);
-      if (suggest.me) loadHypothesis();  // after the text is drawn, so comments' highlights stay put
     };
     const backend = suggest.backend;
     if (backend.kind === "none") { gotUser = gotData = true; return start(); }
@@ -2017,12 +1936,11 @@
       if (!gotUser) { gotUser = true; return start(); }
       if (!suggest.ready || (before?.id ?? null) === (user?.id ?? null)) return updateBar();
       setSaveStatus("All changes saved");
-      setMode(true);
+      $(".suggestion-pop")?.remove();
       drawEverything();
       renderProposals();
       if (user) {
         scrollTo({ top: 0, behavior: "instant" });
-        loadHypothesis();
         hint("You're verified. Click anywhere in the text to start editing.");
       }
     });
@@ -2074,25 +1992,6 @@
     setCanonical(at(`versions/v${cfg.latest}/`));
   }
 
-  function commandGuide() {
-    const card = (command, effect, ...example) => h("div", { class: "command" },
-      h("p", { class: "command-name" }, h("code", { text: command })),
-      h("p", { class: "command-effect", text: effect }),
-      h("p", { class: "command-example" }, ...example));
-    return h("details", { class: "how", id: "propose" },
-      h("summary", {}, h("h2", { id: "propose-title", text: "Or comment instead" })),
-      h("p", {}, "To comment without editing, select words in the text and choose ", h("em", { text: "Annotate" }),
-        " (while editing, choose ", h("em", { text: "Comment instead" }), " first). Comments use a free ",
-        external("Hypothesis", "https://web.hypothes.is/start"), " account. A comment that starts with one of these is also a proposed change:"),
-      h("div", { class: "command-grid" },
-        card("Delete", "Strikes out the words you selected. Select a whole rule to remove it.", h("del", { text: "quickly" })),
-        card("Replace with: new words", "Puts your words in place of the ones you selected.", h("del", { text: "look at" }), " ", h("ins", { text: "read" })),
-        card("Add after: new words", "Adds your words right after the ones you selected.", "the source ", h("ins", { text: "and its date" })),
-        card("Add rule: a new rule", "Adds a new rule below the one you selected in.", h("ins", { text: "Say when you're unsure." }))),
-      h("p", { class: "muted" }, "To give a reason, add a line that starts with ", h("code", { text: "Why:" }),
-        ". A note that doesn't start with one of these is an ordinary comment."));
-  }
-
   function drafterIntro(governance) {
     return h("section", { class: "intro" },
       h("h1", { text: "Suggest Edits" }),
@@ -2106,7 +2005,6 @@
             " approve or disapprove each suggestion. ", ruleSentence(governance?.rules)),
           h("li", {}, h("strong", { text: "It's published, or set aside. " }), `An approved change is published within ${CHECK_EVERY} or so as a new version, with its own number and fingerprint. A disapproved one moves to the `,
             h("a", { href: at("declined/"), text: "Declined page" }), ". Every suggestion, decision, and version is kept."))),
-      commandGuide(),
       h("p", { class: "proposal-count", id: "proposal-count" }));
   }
 
@@ -2153,7 +2051,7 @@
   async function showEveryVersion(cfg) {
     const published = h("section", { class: "versions", id: "versions" },
       h("h2", { text: "Published versions" }),
-      h("p", { class: "muted" }, "Each published version is a frozen snapshot with a permanent link and a fingerprint. Versions 0.0.x are comment drafts; 1.0 will be the first version the contributors recommend as a standard. ",
+      h("p", { class: "muted" }, "Each published version is a frozen snapshot with a permanent link and a fingerprint. Versions before 1.0 are comment drafts; 1.0 will be the first version the contributors recommend as a standard. ",
         h("a", { href: at("check/"), text: "Check a copy" }), "."),
       h("ul", { class: "version-list" }, ...cfg.versions.map((r) => h("li", {},
         h("a", { class: "version-name", href: at(`versions/v${r.version}/`), text: versionLabel(r.version) }),
@@ -2343,12 +2241,10 @@
       h("p", { class: "lede", text: "Suggested changes that the maintainers disapproved, or that were withdrawn or couldn't be applied. They're kept here for the record and no longer appear on the Suggest Edits page." })));
     const list = h("section", { class: "versions proposals" }, h("p", { class: "loading", text: "Loading…" }));
     $("#after").replaceChildren(list);
-    const { replies, records } = await loadProposals(cfg, governance, ledger);
-    const { closed } = sortProposals(records);
-    list.replaceChildren(...(closed.length ? closed.map((p) => proposalCard(p, cfg, governance?.rules || {}, replies))
+    const { closed } = sortProposals(ledger?.proposals || []);
+    list.replaceChildren(...(closed.length ? closed.map((p) => proposalCard(p, cfg, governance?.rules || {}))
       : [h("p", { class: "empty", text: "Nothing has been declined yet." })]),
-      h("p", { class: "muted" }, "A proposal made in a comment stays with the person who wrote it, so the comment can still appear in the comment sidebar on Suggest Edits. ",
-        h("a", { href: at("draft/"), text: "Back to Suggest Edits" }), "."));
+      h("p", { class: "muted" }, h("a", { href: at("draft/"), text: "Back to Suggest Edits" }), "."));
   }
 
   // ---------- Join the community ----------

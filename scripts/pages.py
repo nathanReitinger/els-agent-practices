@@ -107,7 +107,6 @@ SHELL = """<!doctype html>
   <footer id="footer" class="site-footer"></footer>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
-  <script src="{root}/assets/commands.js?v={asset}"></script>
   <script src="{root}/assets/app.js?v={asset}"></script>
 </body>
 </html>
@@ -130,7 +129,7 @@ REDIRECT = """<!doctype html>
 def asset_version() -> str:
     """A short hash of the site's CSS and JS, so browsers fetch new copies whenever they change."""
     digest = hashlib.sha1()
-    for name in ("style.css", "commands.js", "app.js"):
+    for name in ("style.css", "app.js"):
         digest.update((ROOT / "assets" / name).read_bytes())
     return digest.hexdigest()[:8]
 

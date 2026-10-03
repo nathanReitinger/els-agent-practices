@@ -1,24 +1,21 @@
 {
-  "about": "The maintainers: the people who approve or disapprove suggested changes to AGENTS.md, and the rules for deciding. A maintainer votes on the Suggest Edits page signed in with the email address listed here, or on GitHub or Hypothesis with the usernames listed here. The lead maintainer edits this file, and every change to it is kept in the git history. GOVERNANCE.md explains the rules in plain English.",
+  "about": "The maintainers: the people who approve or disapprove suggested changes to AGENTS.md, and the rules for deciding. A maintainer votes on the Suggest Edits page signed in with the email address listed here, or on GitHub with the username listed here. The lead maintainer edits this file, and every change to it is kept in the git history. GOVERNANCE.md explains the rules in plain English.",
   "rules": {
     "approvals_needed": 1,
     "maintainers_may_approve_their_own_proposals": true,
-    "hours_open_before_adoption": 0,
-    "proposals_count_from": "2026-10-02T21:53:00Z"
+    "hours_open_before_adoption": 0
   },
   "maintainers": [
     {
       "name": "Nathan Reitinger",
       "role": "lead maintainer",
       "email": "nathan.reitinger@gmail.com",
-      "hypothesis": "nathanReitinger",
       "github": "nathanReitinger",
       "since": "2026-10-02"
     }
   ],
   "ignored_accounts": {
     "site": [],
-    "hypothesis": [],
     "github": []
   }
 }

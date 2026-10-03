@@ -8,8 +8,6 @@ This project is one file, **AGENTS.md**: standing instructions for AI agents wor
 2. Verify an email address: enter any address you can check, then the 6-digit code the site emails to it. That address is your name on the site, and everyone can see it.
 3. Edit the text as in Word with track changes on: deleted words are struck out, and new words appear in blue under your name. Press Enter at the end of a rule to add a new one. Every change is saved automatically as a suggestion.
 
-To comment instead, choose **Comment instead** above the text, select words, and choose **Annotate** (comments use a free [Hypothesis](https://web.hypothes.is/start) account). A comment that starts with `Delete`, `Replace with:`, `Add after:`, or `Add rule:` is also a proposal.
-
 When a maintainer approves your suggestion, it's published as a new version automatically. You can follow it in the list below the text on Suggest Edits; if it's disapproved, it moves to the [Declined](https://nathanreitinger.github.io/els-agent-practices/declined/) page.
 
 ## Talk with others
@@ -18,7 +16,7 @@ People who use and shape AGENTS.md talk with each other in a Google group, agent
 
 ## Approve or disapprove (maintainers)
 
-Verify the email address listed for you in `governance/maintainers.json` on [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/). Then click a suggestion in the text, or use the list below it, and choose **Approve** or **Disapprove**. You can also comment `/approve` or `/reject` on a suggestion's GitHub issue (replying to GitHub's notification email works too), or reply **Approve** or **Reject** to a proposal made in a comment.
+Verify the email address listed for you in `governance/maintainers.json` on [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/). Then click a suggestion in the text, or use the list below it, and choose **Approve** or **Disapprove**. You can also comment `/approve` or `/reject` on a suggestion's GitHub issue (replying to GitHub's notification email works too).
 
 ## Check a copy
 
@@ -47,7 +45,7 @@ Each published version is a frozen snapshot with a permanent link and a fingerpr
 
 ## Maintainers
 
-- **Maintainers and rules** are in `governance/maintainers.json`. To add a maintainer, add their name, role, the email address they'll sign in with on Suggest Edits, and any GitHub and Hypothesis usernames they'll vote with. Changes take effect at the robot's next run.
+- **Maintainers and rules** are in `governance/maintainers.json`. To add a maintainer, add their name, role, the email address they'll sign in with on Suggest Edits, and any GitHub username they'll vote with. Changes take effect at the robot's next run.
 - **Sign-in and the database** are a free Supabase project; [supabase/README.md](supabase/README.md) sets it up.
 - **The robot** runs after every vote and every ten minutes (Supabase starts it; GitHub's schedule is a backup). Its runs are on GitHub under Actions, then Proposals. To run it now, choose **Run workflow** there; tick "Only say what would happen" for a dry run. On your own computer: `python3 scripts/proposals.py --dry-run`.
 - **If it needs a person**, the robot opens an issue that mentions the lead maintainer: when the database stops answering, or when Supabase stops starting it. It closes the issue itself once that's fixed.

@@ -226,22 +226,6 @@ body[data-mode="check"] [data-nav="check"] { color: var(--accent-contrast); back
   .reader-controls { order: 3; border-left: 0; padding-left: 0; }
 }
 
-/* The comment tool (Hypothesis) puts a toolbar on the right edge; keep the header and text clear of it,
-   with the same space on the left so the page stays centered. Phones keep the space on the right only. */
-.has-annotations .site-header {
-  margin-left: max(3.4rem, calc((100% - 80rem) / 2));
-  margin-right: max(3.4rem, calc((100% - 80rem) / 2));
-}
-@media (max-width: 760px) {
-  .has-annotations .site-header { margin-left: 0.5rem; margin-right: 3.1rem; }
-}
-@media (min-width: 761px) and (max-width: 1099px) {
-  .has-annotations .layout, .has-annotations .site-footer { padding-left: 3rem; padding-right: 3rem; }
-}
-@media (max-width: 760px) {
-  .has-annotations .layout, .has-annotations .site-footer { padding-right: 3rem; }
-}
-
 /* Layout: the outline sits to the left of the file on wide screens. */
 .layout {
   display: grid;
@@ -497,19 +481,6 @@ del { color: var(--del); background: var(--del-soft); text-decoration: line-thro
 ins { color: var(--ins); background: var(--ins-soft); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
 
 /* How to write a proposal */
-.commands { margin: 1.4rem 0 0; padding: 1.1rem 1.2rem 0.9rem; border: 1px solid var(--rule); border-radius: 14px; background: var(--panel); }
-.commands h2 { margin: 0 0 0.35rem; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; }
-.commands > p { margin: 0 0 0.8rem; font-family: var(--serif); }
-.commands > p.muted { margin: 0.8rem 0 0; font-size: 0.95rem; }
-.command-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
-@media (max-width: 560px) { .command-grid { grid-template-columns: minmax(0, 1fr); } }
-@media (min-width: 1100px) { .command-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-.command { padding: 0.75rem 0.85rem; border: 1px solid var(--rule); border-radius: 10px; background: var(--bg); }
-.command p { margin: 0; }
-.command-name code { color: var(--accent); font-family: var(--mono); font-size: 0.86rem; font-weight: 500; }
-.command-effect { margin: 0.3rem 0 0.45rem !important; color: var(--muted); font-size: 0.88rem; line-height: 1.45; }
-.command-example { font-family: var(--serif); font-size: 1rem; }
-.commands code { font-family: var(--mono); font-size: 0.85em; }
 .proposal-count { margin: 1rem 0 0; font-weight: 500; }
 .proposal-count:empty { display: none; }
 
@@ -641,8 +612,6 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
   .suggest-bar { padding: 0.55rem 0.7rem 0.5rem; }
 }
 .suggest-bar { padding: 0.75rem 1rem 0.6rem; border-bottom: 1px solid var(--rule); background: color-mix(in srgb, var(--bg) 90%, var(--mine)); box-shadow: 0 6px 12px -10px rgba(0, 0, 0, 0.25); }
-.suggest-bar.commenting { background: var(--panel); }
-.suggest-bar.commenting .suggest-undo { display: none; }
 .suggest-bar p { margin: 0; }
 .suggest-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.7rem; font-size: 0.9rem; line-height: 1.5; }
 .suggest-line .badge { margin-left: 0.4rem; vertical-align: 0.08em; }
@@ -661,8 +630,6 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .doc.suggesting { caret-color: var(--mine); outline: none; }
 .doc.suggesting:focus-visible { outline: none; }
 .suggesting-mode .doc { box-shadow: inset 3px 0 0 var(--mine); }
-.suggesting-mode hypothesis-adder { display: none !important; }
-.suggesting-mode hypothesis-highlight { background: none !important; }
 
 /* Your own changes: struck-out words, and new words in blue with your name (your email address). */
 .doc ins.track.mine { color: var(--mine); background: var(--mine-soft); text-decoration: none; border-bottom: 1px solid var(--mine); border-radius: 2px; }
