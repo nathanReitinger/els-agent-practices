@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.10] - 2026-10-03
+
+Deleted “If the project uses the Songer appeals database, it samples only published opin…” (Legal data cautions).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals>
+
+Argon2id fingerprint: `66b2fdcdebc9491c6fd807b7f4a60a1e6318389a773435fcad13d61d514843ae`
+
+
 ## [0.0.9] - 2026-10-03
 
 Deleted “If the project uses federal court administrative data (from the Administrative…” (Legal data cautions).

@@ -1,6 +1,6 @@
 # AGENTS.md for Empirical Legal Scholars
 
-*Version 0.0.9 (comment draft; not final) · Published 2026-10-03 · Argon2id fingerprint of this file without this line: 4ec06e23c260ea75849ae13ed73b6755d30f5b4a3a5297a627d7402d17bec3b7 · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.9/AGENTS.md>*
+*Version 0.0.10 (comment draft; not final) · Published 2026-10-03 · Argon2id fingerprint of this file without this line: 66b2fdcdebc9491c6fd807b7f4a60a1e6318389a773435fcad13d61d514843ae · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.10/AGENTS.md>*
 
 These are standing instructions for an AI agent working with me on empirical legal research. I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check.
 
@@ -157,4 +157,3 @@ Show every item that applies. If any part isn't finished, say "not done" in your
 - Most federal appellate decisions are unpublished, and publication isn't random. Never treat published opinions as a random sample of decisions.
 - Free case-law collections have gaps. The Caselaw Access Project covers opinions published in books, through 2020, and many district court opinions are effectively hidden. Say what each source covers.
 - PACER charges per page, and a retry loop can run up a bill. Estimate the cost and get my yes before any PACER download.
-- If the project uses the Songer appeals database, it samples only published opinions and needs weights. If it uses the Supreme Court Database, its issue codes were assigned conditional on the disposition and the Court's known preferences, which skews the "direction" variables, and it should be cited by release.

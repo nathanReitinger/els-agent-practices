@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": true
   },
-  "latest": "0.0.9",
+  "latest": "0.0.10",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.10",
+      "date": "2026-10-03",
+      "summary": "Deleted “If the project uses the Songer appeals database, it samples only published opin…” (Legal data cautions).",
+      "fingerprint": "66b2fdcdebc9491c6fd807b7f4a60a1e6318389a773435fcad13d61d514843ae",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.9",
       "date": "2026-10-03",
