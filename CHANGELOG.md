@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.5] - 2026-10-03
+
+Replaced “whether I read it” with “how well I know it (e.g., can I run it or write it)” (Getting oriented).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals>
+
+Argon2id fingerprint: `a6e574044ec28fa1f265ddc47e2a2307b144755b443e1c4a0da6fdba477ed63d`
+
+
 ## [0.0.4] - 2026-10-03
 
 Added “(e.g., Stata, Python, R)” after “code” (Getting oriented).
