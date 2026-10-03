@@ -1,5 +1,5 @@
 {
-  "about": "Every proposal made on the Suggest Edits page (suggestions and comments), its votes, and its outcome. Written by scripts/proposals.py; don't edit it by hand.",
+  "about": "Every suggestion made on the Suggest Edits page, its votes, and its outcome. Written by scripts/proposals.py; don't edit it by hand.",
   "proposals": [
     {
       "id": "sb-e330b786-9f43-46f4-b51e-90a0aa4a8d48",
