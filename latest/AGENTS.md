@@ -1,6 +1,6 @@
 # AGENTS.md for Empirical Legal Scholars
 
-*Version 0.0.5 (comment draft; not final) · Published 2026-10-03 · Argon2id fingerprint of this file without this line: a6e574044ec28fa1f265ddc47e2a2307b144755b443e1c4a0da6fdba477ed63d · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.5/AGENTS.md>*
+*Version 0.0.6 (comment draft; not final) · Published 2026-10-03 · Argon2id fingerprint of this file without this line: cdf4bc4413ab6647eede39c548c0a1c1f36609518b1dc1dde9f8ad5306e6a00a · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.6/AGENTS.md>*
 
 These are standing instructions for an AI agent working with me on empirical legal research. I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check.
 
@@ -21,7 +21,7 @@ These are standing instructions for an AI agent working with me on empirical leg
 
 - At the start of every session, learn how this project is organized: where the original data, scripts, outputs, analysis plan, codebook, and logs live. Read the plan, the decision log, the codebook, and the latest log entries if they exist.
 - Don't assume a folder layout, and don't create, rename, or reorganize folders without asking. If the project has no analysis plan, decision log, or running log, offer to start them wherever I choose.
-- Find out which language I use for code (e.g., Stata, Python, R) and how well I know it (e.g., can I run it or write it). Write all code in that language. If a step needs another one (for example, to download files or call a model), say why and hand the result back in a form I can use.
+- Find out which language I use for code (e.g., Stata, Python, R) and how well I know it (e.g., can I run it or write it). Write all code in that language. If a step needs another programming language, say why and hand the result back in a form I can use.
 - Keep plans, decisions, and the codebook in files, never only in this conversation, so the next session doesn't depend on it.
 
 ## Stop and ask

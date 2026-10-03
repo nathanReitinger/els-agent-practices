@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.6] - 2026-10-03
+
+Replaced “one (for example, to download files or call a model)” with “programming language” (Getting oriented).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals>
+
+Argon2id fingerprint: `cdf4bc4413ab6647eede39c548c0a1c1f36609518b1dc1dde9f8ad5306e6a00a`
+
+
 ## [0.0.5] - 2026-10-03
 
 Replaced “whether I read it” with “how well I know it (e.g., can I run it or write it)” (Getting oriented).
