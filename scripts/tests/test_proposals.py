@@ -178,6 +178,9 @@ class RunTest(unittest.TestCase):
                 shutil.rmtree(folder)
         manifest["versions"] = [r for r in manifest["versions"] if r["version"] in keep]
         manifest["latest"] = "0.0.2"
+        # No database, and no expecting Supabase to start the robot, whatever the live settings are; a test that
+        # needs them sets them (set_supabase).
+        manifest["supabase"] = {"url": "", "key": "", "starts_robot": False}
         (self.repo / "versions.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
         frozen = (self.repo / "versions" / "v0.0.2" / "AGENTS.md").read_bytes()
         (self.repo / "latest" / "AGENTS.md").write_bytes(frozen)
