@@ -23,6 +23,7 @@ permissions:
   contents: write  # commit and tag new versions
   issues: write  # open and close an issue for each proposal
   actions: write  # keep this schedule switched on (see the last step)
+  pages: write  # rebuild the site after publishing
 
 concurrency:
   group: proposals
@@ -56,10 +57,15 @@ jobs:
           REPO: ${{ github.repository }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
+          before=$(git rev-parse HEAD)
           if [ "$DRY_RUN" = "true" ]; then
             python3 scripts/proposals.py --dry-run
           else
             python3 scripts/proposals.py --push
+          fi
+          # GitHub doesn't always rebuild the site after a push made from here, so ask it to.
+          if [ "$(git rev-parse HEAD)" != "$before" ]; then
+            gh api -X POST "repos/$REPO/pages/builds" --silent || echo "Couldn't ask GitHub to rebuild the site."
           fi
 
       # GitHub switches off scheduled workflows in a repository with no activity for 60 days. Re-enabling this
