@@ -452,12 +452,12 @@
       new: ["New", `Received. It reaches the maintainers within ${CHECK_EVERY}.`],
       open: ["Waiting for a maintainer", need > 1 ? `${approvals} of ${need} approvals so far` : ""],
       "needs-fix": ["Needs a fix", p.note],
-      adopted: ["Adopted", `In version ${p.version}${p.decided ? `, ${formatDate(p.decided)}` : ""}`],
+      adopted: ["Done", `Published as version ${p.version}${p.decided ? `, ${formatDate(p.decided)}` : ""}`],
       declined: ["Disapproved", p.decided ? formatDate(p.decided) : ""],
       withdrawn: ["Withdrawn", p.note],
       "cannot-apply": ["Can't be applied", p.note],
-      approved: ["Approved", `Being published as version ${p.version}`],
-      disapproved: ["Disapproved", "Moving to the Declined page"],
+      approved: ["In the publishing queue", `${p.place === 1 ? "next" : `number ${p.place} in line`} · will be version ${p.version}`],
+      disapproved: ["Disapproved", "moving to the Declined page"],
     }[p.status] || [p.status, ""];
   }
 
@@ -1158,6 +1158,7 @@
     remote: null,  // everyone's suggestions, from the database (null until it answers)
     votes: [],  // everyone's votes, from the database
     pendingVotes: [],  // votes cast here that the database hasn't sent back yet
+    voting: new Map(),  // a maintainer's choices on a card before voting (version number, buttons shown), kept on redraws
     proposals: { records: [] },  // the robot's record (governance/proposals.json)
     others: [], saved: new Map(), undrawable: new Set(), undo: [], redo: [], lastGood: "",
     dirty: false, edits: 0, lastEdit: 0, busy: false, syncing: Promise.resolve(), timer: null,
@@ -1361,7 +1362,7 @@
     clearTimeout(refresh.timer);
     const typing = Date.now() - suggest.lastEdit < 2500;
     const field = document.activeElement;
-    const inForm = field?.matches?.("input, textarea") && $("#after")?.contains(field);
+    const inForm = field?.matches?.("input, textarea, select") && $("#after")?.contains(field);
     if (!suggest.ready || typing || inForm) {
       refresh.timer = setTimeout(refresh, 1500);
       return;
@@ -1629,11 +1630,11 @@
 
   // Decided suggestions the robot hasn't published or set aside yet, oldest first (the robot's order), each
   // approved one with the version it will become.
+  const robotOrder = (a, b) => (a.created || "").localeCompare(b.created || "") || a.id.localeCompare(b.id);
   function pendingDecisions() {
     const pending = new Map();
     let version = suggest.version;
-    const waiting = currentProposals().filter((p) => !FINAL_STATUS.has(p.status))
-      .sort((a, b) => (a.created || "").localeCompare(b.created || "") || a.id.localeCompare(b.id));
+    const waiting = currentProposals().filter((p) => !FINAL_STATUS.has(p.status)).sort(robotOrder);
     for (const p of waiting) {
       const decision = decisionFor(p);
       if (!decision) continue;
@@ -1654,7 +1655,7 @@
     const range = document.createRange();
     range.setStart(index.chars[a].node, index.chars[a].offset);
     range.setEnd(index.chars[b - 1].node, index.chars[b - 1].offset + 1);
-    const added = (text) => h("span", { class: "accepted", title: "Approved; being published" }, text);
+    const added = (text) => h("span", { class: "accepted", title: "Approved: in the publishing queue" }, text);
     if (p.kind === "rule") {
       if (!block) return false;
       block.after(h(block.tagName === "LI" ? "li" : "p", {}, added(p.new)));
@@ -1669,18 +1670,20 @@
     return true;
   }
 
-  // After a decision, look for the robot's new version every 30 seconds, for ten minutes, and show it. (GitHub
-  // answers 60 such questions an hour from one computer, so it doesn't look for longer.)
+  // After a decision, look for the robot's new version (every 15 seconds at first, then every 30) for ten minutes,
+  // and show it. (GitHub answers 60 such questions an hour from one computer, so it doesn't look for longer.)
   function watchForPublication(decidedNow = false) {
     if (decidedNow) watchForPublication.until = Date.now() + 10 * 60 * 1000;
-    if (isLocal || watchForPublication.timer || !(Date.now() < (watchForPublication.until || 0))) return;
+    if (watchForPublication.timer || !(Date.now() < (watchForPublication.until || 0))) return;
     const check = async () => {
       watchForPublication.timer = null;
       try {
-        const head = await fetchJSON(`https://api.github.com/repos/${suggest.cfg.repo}/commits/${suggest.cfg.branch}`);
+        // A local preview reads its own files; the site asks GitHub for its newest commit.
+        const head = isLocal ? { sha: String(Date.now()) }
+          : await fetchJSON(`https://api.github.com/repos/${suggest.cfg.repo}/commits/${suggest.cfg.branch}`);
         if (head.sha && head.sha !== suggest.seenSha) {
           suggest.seenSha = head.sha;
-          const raw = (path) => `https://raw.githubusercontent.com/${suggest.cfg.repo}/${head.sha}/${path}`;
+          const raw = (path) => (isLocal ? at(path) : `https://raw.githubusercontent.com/${suggest.cfg.repo}/${head.sha}/${path}`);
           const [markdown, ledger] = await Promise.all([fetchText(raw(DRAFT_PATH)), fetchJSON(raw(LEDGER_PATH)).catch(() => null)]);
           if (ledger) suggest.proposals.records = ledger.proposals || [];
           if (markdown !== suggest.markdown) {
@@ -1695,9 +1698,10 @@
           refresh();
         }
       } catch { /* try again next time */ }
-      if (Date.now() < watchForPublication.until && pendingDecisions().size) watchForPublication.timer = setTimeout(check, 30000);
+      const soon = watchForPublication.until - Date.now() > 7 * 60 * 1000;  // the first three minutes
+      if (Date.now() < watchForPublication.until && pendingDecisions().size) watchForPublication.timer = setTimeout(check, soon ? 15000 : 30000);
     };
-    watchForPublication.timer = setTimeout(check, 30000);
+    watchForPublication.timer = setTimeout(check, 15000);
   }
 
   function voteControls(p) {
@@ -1706,16 +1710,19 @@
     const say = (text, kind = "") => { status.className = `vote-status ${kind}`; status.textContent = text; };
     const mine = suggest.votes.filter((v) => v.suggestion === p.id && v.voter_id === suggest.me.id).pop();
     const labels = { patch: "", minor: " (middle number)", major: " (first number)" };
-    // The numbers follow any approved changes still being published.
-    const base = [...pendingDecisions().values()].filter((d) => d.kind === "adopt" && d.p.id !== p.id).map((d) => d.version).pop()
-      || suggest.version;
-    const step = h("select", { class: "step-select", "aria-label": "The new version's number" },
-      ...STEPS.map((value) => h("option", { value, selected: (mine?.version_step || "patch") === value,
+    // The numbers follow the approved changes ahead of this one in the publishing queue (the robot's order).
+    const base = [...pendingDecisions().values()].filter((d) => d.kind === "adopt" && d.p.id !== p.id && robotOrder(d.p, p) < 0)
+      .map((d) => d.version).pop() || suggest.version;
+    const choice = suggest.voting.get(p.id) || {};
+    const remember = (what) => suggest.voting.set(p.id, { ...suggest.voting.get(p.id), ...what });
+    const step = h("select", { class: "step-select", "aria-label": "The new version's number", onchange: () => remember({ step: step.value }) },
+      ...STEPS.map((value) => h("option", { value, selected: (choice.step || mine?.version_step || "patch") === value,
         text: `as version ${nextVersion(base, value)}${labels[value]}` })));
-    // A vote counts at once: the box closes, an approved change joins the text and the "being published" list,
+    // A vote counts at once: the box closes, an approved change joins the text and the publishing queue,
     // and the vote is saved in the background. If saving fails, the vote is taken back and the page says so.
     const cast = async (vote) => {
       const chosen = vote === "approve" ? step.value : "patch";
+      suggest.voting.delete(p.id);
       const me = suggest.me, at = new Date(Math.max(Date.now(), toTime(p.updated) || 0)).toISOString();
       const mine = { suggestion: p.id, voter_id: me.id, voter_email: me.email, vote, version_step: chosen, at };
       const others = (list) => list.filter((v) => !(v.suggestion === p.id && v.voter_id === me.id));
@@ -1724,8 +1731,8 @@
       $(".suggestion-pop")?.remove();
       await redrawNow();
       const decided = pendingDecisions().get(p.id);
-      hint(decided?.kind === "adopt" ? `Approved. The text shows the change now; it's being published as version ${decided.version}.`
-        : decided?.kind === "decline" ? "Disapproved. It's gone from the text, and it's moving to the Declined page."
+      hint(decided?.kind === "adopt" ? `Approved. It's in the publishing queue, and the text shows it now; it will be version ${decided.version}.`
+        : decided?.kind === "decline" ? "Disapproved. It's gone from the text, and it's in the queue to move to the Declined page."
           : `${vote === "approve" ? "Approved" : "Disapproved"}. It needs more maintainers' votes to be decided.`);
       try {
         await suggest.backend.vote(p.id, vote, chosen);
@@ -1743,16 +1750,24 @@
     const approve = action("Approve", () => cast("approve"), "button small");
     const disapprove = action("Disapprove", () => cast("reject"), "button secondary small");
     if (p.status === "needs-fix") { approve.disabled = true; approve.title = "It needs a fix before it can be approved"; }
-    if (mine && toTime(mine.at) >= (toTime(p.updated) || 0)) {
-      say(mine.vote === "approve" ? "You approved it." : "You disapproved it.", "done");
+    const current = mine && toTime(mine.at) >= (toTime(p.updated) || 0);
+    if (current) say(mine.vote === "approve" ? "You approved it." : "You disapproved it.", "done");
+    const buttons = h("p", { class: "vote-buttons" }, approve, " ", step, " ", disapprove);
+    if (!["approved", "disapproved"].includes(p.status)) return h("div", { class: "vote" }, buttons, status);
+    // Decided, and in the queue: it doesn't ask for a vote. The buttons are there only to change it.
+    if (!choice.open) {
+      buttons.hidden = true;
+      const change = h("button", { type: "button", class: "linklike", text: current ? "Change your vote" : "Vote on it",
+        onclick: () => { buttons.hidden = false; change.remove(); remember({ open: true }); } });
+      status.append(current ? " " : "", change);
     }
-    return h("div", { class: "vote" }, h("p", { class: "vote-buttons" }, approve, " ", step, " ", disapprove), status);
+    return h("div", { class: "vote" }, status, buttons);
   }
 
   // A reason for one of your suggestions, shown to the maintainers and kept in the record.
   function reasonField(p) {
     const s = (suggest.remote || []).find((x) => x.id === p.id);
-    if (!s || !isMine(s) || FINAL_STATUS.has(p.status)) return null;
+    if (!s || !isMine(s) || FINAL_STATUS.has(p.status) || ["approved", "disapproved"].includes(p.status)) return null;
     const input = h("input", { type: "text", class: "key-input reason-input", maxlength: "1000", value: s.reason || "",
       placeholder: "Why this change? (optional)", "aria-label": "Your reason for this change" });
     const note = h("span", { class: "signin-note", "aria-live": "polite" });
@@ -1834,13 +1849,21 @@
     const { cfg, governance } = suggest;
     const rules = governance?.rules || {};
     const decided = pendingDecisions();
+    // Redraw only when something shown has changed, so nothing a maintainer is doing is interrupted.
+    const shown = JSON.stringify([suggest.version, suggest.me?.id ?? null, currentProposals(), suggest.votes, decisionsKey(decided)]);
+    if (shown === renderProposals.shown && section.childElementCount) return;
+    renderProposals.shown = shown;
+    const place = new Map([...decided].filter(([, d]) => d.kind === "adopt").map(([id], i) => [id, i + 1]));  // the robot's order
     const { open: notFinal, adopted, closed } = sortProposals(currentProposals().map((p) => {
       const d = decided.get(p.id);
-      return d ? { ...p, status: d.kind === "adopt" ? "approved" : "disapproved", version: d.version || p.version } : p;
+      return d ? { ...p, status: d.kind === "adopt" ? "approved" : "disapproved", version: d.version || p.version, place: place.get(p.id) } : p;
     }));
     const open = notFinal.filter((p) => !decided.has(p.id));
-    const publishing = notFinal.filter((p) => p.status === "approved").reverse();
-    const settingAside = notFinal.filter((p) => p.status === "disapproved");
+    const rank = (p) => p.place || Number.MAX_SAFE_INTEGER;  // disapproved ones (no place) last
+    const queue = notFinal.filter((p) => decided.has(p.id)).sort((a, b) => rank(a) - rank(b));
+    // Anything that just left the queue, done, is shown with a brief highlight.
+    const justDone = new Set(adopted.filter((p) => renderProposals.queued?.has(p.id)).map((p) => p.id));
+    renderProposals.queued = new Set(queue.map((p) => p.id));
     const card = (p) => proposalCard(p, cfg, rules, [reasonField(p), voteControls(p)]);
     section.replaceChildren(
       h("h2", { text: "Suggestions" }),
@@ -1848,16 +1871,17 @@
         `, who approve or disapprove it. ${ruleSentence(rules)} An approved change is published as a new version within ${CHECK_EVERY} or so.`));
     if (!open.length) section.append(h("p", { class: "empty", text: "No suggestions are waiting right now. Edit the text above to make one." }));
     else section.append(h("h3", { text: `Waiting for a maintainer (${open.length})` }), ...open.map(card));
-    if (publishing.length) {
-      section.append(h("h3", { text: `Approved, being published (${publishing.length})` }),
-        h("p", { class: "muted", text: "The text above already shows these changes. Each is published as a new version within a minute or two." }),
-        ...publishing.map(card));
+    if (queue.length) {
+      section.append(h("div", { class: "queue", id: "queue" },
+        h("h3", { text: `Publishing queue (${queue.length})` }),
+        h("p", { class: "muted", text: "Decided, and waiting for the robot, which takes them in this order, usually within a minute or two. The text above already shows the approved changes, in purple; each moves to Done once it's published. Disapproved ones move to the Declined page." }),
+        ...queue.map(card)));
     }
-    if (settingAside.length) section.append(h("h3", { text: `Disapproved (${settingAside.length})` }), ...settingAside.map(card));
     if (adopted.length) {
       const shown = adopted.slice(0, 8), rest = adopted.slice(8);
-      section.append(h("h3", { text: `Adopted (${adopted.length})` }), ...shown.map(card));
-      if (rest.length) section.append(h("details", { class: "more" }, h("summary", { text: `Show ${plural(rest.length, "earlier change")}` }), ...rest.map(card)));
+      const doneCard = (p) => { const el = card(p); if (justDone.has(p.id)) el.classList.add("just-done"); return el; };
+      section.append(h("h3", { text: `Done (${adopted.length})` }), ...shown.map(doneCard));
+      if (rest.length) section.append(h("details", { class: "more" }, h("summary", { text: `Show ${plural(rest.length, "earlier change")}` }), ...rest.map(doneCard)));
     }
     section.append(h("p", { class: "muted" }, "Suggestions that maintainers disapprove, and ones that are withdrawn or can't be applied, move to the ",
       h("a", { href: at("declined/"), text: "Declined page" }), closed.length ? ` (${closed.length} so far)` : "",

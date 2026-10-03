@@ -36,6 +36,8 @@
   --mine-soft: rgba(31, 85, 199, 0.09);
   --others: #b25600;
   --others-soft: rgba(230, 126, 34, 0.11);
+  --pending: #6a46c2;
+  --pending-soft: rgba(106, 70, 194, 0.09);
   --shadow: 0 1px 2px rgba(29, 27, 32, 0.04), 0 10px 30px rgba(29, 27, 32, 0.06);
   --serif: "Playfair", "Playfair Display", Georgia, "Times New Roman", serif;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -75,6 +77,8 @@
   --mine-soft: rgba(143, 180, 255, 0.15);
   --others: #f2a35e;
   --others-soft: rgba(242, 163, 94, 0.15);
+  --pending: #b9a3f5;
+  --pending-soft: rgba(185, 163, 245, 0.15);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 @media (prefers-color-scheme: dark) {
@@ -110,6 +114,8 @@
     --mine-soft: rgba(143, 180, 255, 0.15);
     --others: #f2a35e;
     --others-soft: rgba(242, 163, 94, 0.15);
+    --pending: #b9a3f5;
+    --pending-soft: rgba(185, 163, 245, 0.15);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
   }
 }
@@ -489,8 +495,15 @@ ins { color: var(--ins); background: var(--ins-soft); text-decoration: underline
 .proposal { margin: 0 0 0.75rem; padding: 0.9rem 1.05rem; border: 1px solid var(--rule); border-left: 3px solid var(--border); border-radius: 12px; background: var(--bg); }
 .proposal.is-open, .proposal.is-new { border-left-color: var(--accent); }
 .proposal.is-needs-fix { border-left-color: var(--warn); }
-.proposal.is-adopted, .proposal.is-approved { border-left-color: var(--good); }
-.proposal.is-disapproved { border-left-color: var(--faint); }
+.proposal.is-adopted { border-left-color: var(--good); }
+/* The publishing queue: approved (or disapproved) suggestions the robot hasn't carried out yet. */
+.queue { margin: 0 0 1rem; padding: 0.85rem 0.9rem 0.15rem; border: 1px solid var(--pending); border-radius: 14px; background: var(--pending-soft); }
+.queue > h3 { margin-top: 0 !important; color: var(--pending); }
+.queue > p.muted { margin: 0 0 0.75rem; }
+.proposal.is-approved, .proposal.is-disapproved { border-left-color: var(--pending); }
+.proposal.is-approved .proposal-status strong, .proposal.is-disapproved .proposal-status strong { color: var(--pending); }
+.proposal.just-done { animation: just-done 2.4s ease-out; }
+@keyframes just-done { from { background: var(--good-soft); box-shadow: 0 0 0 3px var(--good-soft); } to { background: var(--bg); box-shadow: none; } }
 .proposal.is-declined, .proposal.is-withdrawn, .proposal.is-cannot-apply { border-left-color: var(--faint); }
 .proposal p { margin: 0.35rem 0 0; }
 .proposal-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.65rem; font-size: 0.9rem; }
@@ -663,7 +676,7 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .doc [data-proposal]:focus-visible { outline: 2px solid var(--others); outline-offset: 2px; }
 .doc .flash { outline: 2px solid var(--others); outline-offset: 3px; border-radius: 3px; }
 /* An approved change, shown as part of the text while the robot publishes it. */
-.doc .accepted { background: var(--good-soft); border-bottom: 1px solid var(--good); border-radius: 2px; }
+.doc .accepted { background: var(--pending-soft); border-bottom: 1px solid var(--pending); border-radius: 2px; }
 .doc .flash.mine, .doc [data-sid].flash { outline-color: var(--mine); }
 .suggestion-pop {
   position: absolute;
