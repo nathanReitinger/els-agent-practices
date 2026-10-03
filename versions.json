@@ -8,6 +8,15 @@
     "email": "agentselsmd@googlegroups.com",
     "page": "https://groups.google.com/g/agentselsmd"
   },
+  "created_by": {
+    "name": "Nathan Reitinger",
+    "url": "https://www.law.northwestern.edu/faculty/profiles/nathanreitinger/"
+  },
+  "supabase": {
+    "about": "The Supabase project behind Suggest Edits (supabase/README.md). Both values are public: the key only lets visitors do what supabase/schema.sql allows.",
+    "url": "",
+    "key": ""
+  },
   "latest": "0.0.3",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",

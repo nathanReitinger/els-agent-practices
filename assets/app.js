@@ -1,13 +1,15 @@
 /* AGENTS.md for Empirical Legal Scholars: shows one Markdown file, AGENTS.md, rendered for reading;
-   the Drafter, where anyone can comment and propose a change; the Maintainers page, where maintainers sign in to
-   approve or disapprove proposals; the Declined page; and a page that checks
-   whether a copy is exactly a published version.
+   Suggest Edits, where anyone can comment, and readers who sign in with their email suggest changes by editing
+   the text with track changes on; the Maintainers page; the Declined page; a page for joining the community's
+   group; and a page that checks whether a copy is exactly a published version.
    Each page says what to show with attributes on <body>:
-     data-mode     published (latest version) | drafter | archive (one version) | check
+     data-mode     published (latest version) | drafter (Suggest Edits) | archive (one version) | check | join |
+                   maintainers | declined
      data-root     path from the page to the site root: ".", "..", or "../.."
      data-version  archive pages only, e.g. "0.0.2"
-   There is no build step: GitHub Pages serves these files as they are. Proposals and votes are
-   counted by a robot (scripts/proposals.py); this page only shows them. */
+   There is no build step: GitHub Pages serves these files as they are. Suggestions and votes are kept in a
+   Supabase database (supabase/schema.sql); a robot (scripts/proposals.py) counts the votes and publishes each
+   approved change. */
 (() => {
   "use strict";
 
@@ -16,7 +18,7 @@
   const LEDGER_PATH = "governance/proposals.json";
   const MAINTAINERS_PATH = "governance/maintainers.json";
   const HYPOTHESIS_SEARCH = "https://api.hypothes.is/api/search";
-  const CHECK_EVERY = "15 minutes";
+  const CHECK_EVERY = "five minutes";
   const FINAL = ["adopted", "declined", "withdrawn", "cannot-apply"];
   const KIND_LABELS = { delete: "Delete", replace: "Replace", insert: "Add words", rule: "Add a rule" };
   const COMMAND = "tr -d '\\r' < AGENTS.md | sed 3d | python3 -c \"import sys; from argon2.low_level import hash_secret_raw, Type; " +
@@ -139,6 +141,17 @@
     label();
   }
 
+  // Things that stick to the top of the screen (the bar above the text on Suggest Edits) sit just below the
+  // header, however tall it is at this width.
+  function trackHeader() {
+    const header = $(".site-header");
+    if (!header || !("ResizeObserver" in window)) return;
+    const place = () => html.style.setProperty("--below-header",
+      `${(parseFloat(getComputedStyle(header).top) || 0) + header.offsetHeight + 6}px`);
+    new ResizeObserver(place).observe(header);
+    place();
+  }
+
   // A hairline across the top shows how far through the page you are.
   const bar = $(".progress span");
   function updateProgress() {
@@ -153,14 +166,19 @@
 
   let currentMarkdown = "";
 
-  function renderMarkdown(markdown) {
+  // The rendered file, without rebuilding the outline or scrolling: for drawing the text again in place.
+  function fillDoc(article, markdown) {
     currentMarkdown = markdown;
-    const article = $("#doc");
     article.classList.remove("raw");
     article.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
     markHeadings(article);
     addCopyButtons(article);
     for (const link of $$("a[href^='http']", article)) Object.assign(link, newTab);
+  }
+
+  function renderMarkdown(markdown) {
+    const article = $("#doc");
+    fillDoc(article, markdown);
     buildOutline(article);
     highlightTarget(true);
     updateProgress();
@@ -421,7 +439,8 @@
     try { return await fetchJSON(at(path)); } catch { return null; }
   }
 
-  // Proposals made since the robot last looked: read straight from Hypothesis, so a proposer sees theirs at once.
+  // Proposals made in comments since the robot last looked: read straight from Hypothesis, so a proposer sees
+  // theirs at once.
   async function liveComments(cfg) {
     const params = new URLSearchParams({ uri: `${cfg.site}draft/`, limit: "200", sort: "updated", order: "desc" });
     try {
@@ -546,88 +565,62 @@
       ].filter(Boolean))),
       votesView(p),
       h("p", { class: "proposal-links" }, ...joined([
-        external(open ? (count ? `Comment on it (${plural(count, "reply", "replies")})` : "Comment on it") :
-          (count ? `Read the discussion (${plural(count, "reply", "replies")})` : "Read the proposal"), p.link),
+        p.id.startsWith("sb-") ? (open && mode === "drafter" ? h("a", { href: "#doc", text: "Show it in the text",
+          onclick: (event) => { event.preventDefault(); showInText(p.id); } }) : null)
+          : external(open ? (count ? `Comment on it (${plural(count, "reply", "replies")})` : "Comment on it") :
+            (count ? `Read the discussion (${plural(count, "reply", "replies")})` : "Read the proposal"), p.link),
         p.issue ? external(`GitHub issue #${p.issue}`, `https://github.com/${cfg.repo}/issues/${p.issue}`) : null,
       ].filter(Boolean))),
       extra);
   }
 
-  // Every proposal: from the robot's record, plus any made since it last looked.
+  // Every proposal in the robot's record, and the ones made in comments since it last looked.
   async function loadProposals(cfg, governance, ledger) {
     const records = ledger?.proposals || [];
     const rows = await liveComments(cfg);
     const replies = new Map();
     for (const row of rows) if (row.references) replies.set(row.references[0], (replies.get(row.references[0]) || 0) + 1);
-    const fresh = newProposals(rows, new Set(records.map((r) => r.id)), governance);
+    return { replies, records, fresh: newProposals(rows, new Set(records.map((r) => r.id)), governance) };
+  }
+
+  function sortProposals(list) {
     const newest = (a, b) => (b.created || "").localeCompare(a.created || "");
     const latestDecision = (a, b) => (b.decided || b.created || "").localeCompare(a.decided || a.created || "");
     return {
-      replies,
-      open: [...fresh, ...records.filter((r) => !FINAL.includes(r.status))].sort(newest),
-      adopted: records.filter((r) => r.status === "adopted").sort(latestDecision),
-      closed: records.filter((r) => FINAL.includes(r.status) && r.status !== "adopted").sort(latestDecision),
+      open: list.filter((p) => !FINAL.includes(p.status)).sort(newest),
+      adopted: list.filter((p) => p.status === "adopted").sort(latestDecision),
+      closed: list.filter((p) => FINAL.includes(p.status) && p.status !== "adopted").sort(latestDecision),
     };
   }
 
-  async function showProposals(cfg, governance, ledger, section) {
-    const rules = governance?.rules || {};
-    const { replies, open, adopted, closed } = await loadProposals(cfg, governance, ledger);
-    section.replaceChildren(
-      h("h2", { text: "Proposals" }),
-      h("p", {}, "Each proposed change waits for the ", h("a", { href: at("maintainers/"), text: "maintainers" }),
-        `, who approve or disapprove it. ${ruleSentence(rules)} An approved change is published as a new version within a minute or two.`));
-    if (!open.length) section.append(h("p", { class: "empty" }, "No proposals are waiting right now. ", h("a", { href: "#propose", text: "Make one" }), "."));
-    else section.append(h("h3", { text: `Waiting for a maintainer (${open.length})` }), ...open.map((p) => proposalCard(p, cfg, rules, replies)));
-    if (adopted.length) {
-      const shown = adopted.slice(0, 8), rest = adopted.slice(8);
-      section.append(h("h3", { text: `Adopted (${adopted.length})` }), ...shown.map((p) => proposalCard(p, cfg, rules, replies)));
-      if (rest.length) section.append(h("details", { class: "more" }, h("summary", { text: `Show ${plural(rest.length, "earlier change")}` }),
-        ...rest.map((p) => proposalCard(p, cfg, rules, replies))));
-    }
-    section.append(h("p", { class: "muted" }, "Proposals that maintainers disapprove, and ones that are withdrawn or can't be applied, move to the ",
-      h("a", { href: at("declined/"), text: "Declined page" }), closed.length ? ` (${closed.length} so far)` : "",
-      ". Every proposal, vote, and outcome is also recorded in ", external(LEDGER_PATH, repoFile(cfg, LEDGER_PATH)), "."));
-
-    const count = $("#proposal-count");
-    if (count) {
-      count.replaceChildren(open.length
-        ? h("a", { href: "#proposals" }, `${plural(open.length, "proposal is", "proposals are")} waiting for a maintainer. See ${open.length === 1 ? "it" : "them"} below the text.`)
-        : adopted.length || closed.length ? h("a", { href: "#proposals", text: "No proposals are waiting right now. See past decisions below the text." })
-          : h("span", { text: "No proposals yet. Yours could be the first." }));
-    }
-  }
-
   function maintainerList(governance) {
-    const how = (m) => [m.github && `${m.github} on GitHub`, m.hypothesis && `${m.hypothesis} on Hypothesis`].filter(Boolean).join(", ");
+    const how = (m) => [m.email && `signs in as ${m.email}`, m.github && `${m.github} on GitHub`, m.hypothesis && `${m.hypothesis} on Hypothesis`]
+      .filter(Boolean).join(", ");
     return h("ul", { class: "member-list" }, ...(governance?.maintainers || []).map((m) => h("li", {},
       h("strong", { text: m.name }),
       m.role && m.role !== "maintainer" ? h("span", { class: "badge badge-soft", text: m.role }) : null,
       h("span", { class: "muted", text: ` · ${how(m)}${m.since ? ` · since ${formatDate(m.since)}` : ""}` }))));
   }
 
-  // In the Drafter: who decides, and where to read more.
+  // On Suggest Edits: who decides, and where to read more.
   function maintainersNote(governance) {
     const names = (governance?.maintainers || []).map((m) => m.name);
     return h("aside", { class: "note" },
       h("p", {}, h("strong", { text: "Who decides? " }),
-        `The maintainers${names.length ? ` (${names.join(", ")})` : ""} approve or disapprove each proposal. Anyone else can comment, and propose changes, but can't change the text.`),
-      h("p", {}, secondary("How it works, and the maintainers", at("maintainers/"))));
+        `The maintainers${names.length ? ` (${names.join(", ")})` : ""} approve or disapprove each suggestion. Anyone else can comment and suggest changes, but can't change the text.`),
+      h("p", {}, secondary("The maintainers", at("maintainers/"))));
   }
 
-  // ---------- Suggesting: edit the text directly, with every change tracked ----------
-  // Like a word processor's suggesting mode: deleted words stay, struck through; new words appear in blue, under
-  // your name. Submitting turns each change into one proposal, posted under your Hypothesis account, and the
-  // maintainers approve or disapprove each one. While reading, everyone's pending suggestions are drawn into the
-  // text; added words are drawn by CSS, so the page's own text doesn't change and comments keep their places.
+  // ---------- Suggest Edits: edit the text directly, with every change tracked ----------
+  // Like a word processor's suggesting mode: deleted words stay, struck through, and new words appear in blue
+  // under your name. Readers sign in with a code sent to their email address, which is their name on the site.
+  // Each change is saved as one suggestion while it's made, and everyone sees everyone else's right away, in
+  // orange. Maintainers approve or disapprove each one, and the robot (scripts/proposals.py) publishes each
+  // approved change as a new version. Other people's added words are drawn by CSS, so the page's own text
+  // doesn't change under them, and comments keep their places.
 
-  const HYP_KEY_STORE = "els-hypothesis-key";
-  const HYP_DEVELOPER = "https://hypothes.is/account/developer";
-  const HYP_SIGNUP = "https://hypothes.is/signup";
-  const SAVED_WORK = "els-suggesting";
   const ZWSP = "​";
   const BLOCKS = "p, li, h1, h2, h3, h4, h5, h6";
-  const suggesting = { on: false, me: null, undo: [], cfg: null, markdown: "", version: "", governance: null, open: [] };
 
   const elementOf = (node) => (node?.nodeType === 1 ? node : node?.parentElement);
   const within = (node, selector) => {
@@ -635,10 +628,10 @@
     return found && $("#doc").contains(found) ? found : null;
   };
   const mineIns = (node) => within(node, "ins.track.mine");
+  const myDel = (node) => within(node, "del.track.mine");
   const struck = (node) => within(node, "del.track");
   const blockOf = (node) => within(node, BLOCKS);
   const frozen = (node) => within(node, "[contenteditable='false']");
-  const myName = () => suggesting.me?.username || "you";
 
   function select(range) {
     const sel = getSelection();
@@ -680,14 +673,22 @@
     for (const ins of $$("ins.track.mine", doc)) {
       if (!ins.textContent.replaceAll(ZWSP, "") && !ins.closest(".track-new")) ins.remove();
     }
+    const caret = getSelection().anchorNode;
+    for (const block of $$(".track-new", doc)) {
+      if (!block.textContent.replaceAll(ZWSP, "").trim() && !block.contains(caret)) block.remove();
+    }
   }
 
+  const removedBy = (by) => ({ class: "track mine", "data-by": by, title: `Removed by ${by}` });
+  const addedBy = (by) => ({ class: "track mine", "data-by": by, title: `Added by ${by}` });
+
   // Strike out what's in `range`: original words are wrapped in <del>; words you added are simply removed.
-  // Returns where the struck text began and ended, for placing the cursor.
+  // Words someone else suggested removing are struck again, as yours. Returns where the struck text began and
+  // ended, for placing the cursor.
   function strike(range) {
     let start = null, end = null;
     for (const node of textNodesIn(range)) {
-      if (frozen(node) || struck(node) || !$("#doc").contains(node)) continue;
+      if (frozen(node) || myDel(node) || !blockOf(node)) continue;
       const from = node === range.startContainer ? range.startOffset : 0;
       const to = node === range.endContainer ? range.endOffset : node.length;
       if (to <= from) continue;
@@ -699,7 +700,7 @@
       }
       const part = from > 0 ? node.splitText(from) : node;
       if (to - from < part.length) part.splitText(to - from);
-      const del = h("del", { class: "track mine", "data-by": myName(), title: `Removed by ${myName()}` });
+      const del = h("del", removedBy(myName()));
       part.before(del);
       del.append(part);
       start ||= { before: del };
@@ -721,6 +722,15 @@
     return node.childNodes[offset - 1] || null;
   }
 
+  // A selection across more than a few rules is almost always a slip (say, Select All), so it isn't struck out.
+  const MOST_RULES_AT_ONCE = 5;
+  function tooMany(range) {
+    const blocks = new Set(textNodesIn(range).map(blockOf).filter(Boolean));
+    if (blocks.size <= MOST_RULES_AT_ONCE) return false;
+    hint(`To strike out more than ${MOST_RULES_AT_ONCE} rules, do it a few at a time.`);
+    return true;
+  }
+
   function typeText(text) {
     text = String(text || "").replace(/[\r\n]+/g, " ");
     const sel = getSelection();
@@ -728,6 +738,7 @@
     let range = sel.getRangeAt(0);
     if (frozen(range.startContainer) || !blockOf(range.startContainer)) return;
     if (!range.collapsed) {
+      if (tooMany(range)) return;
       placeCaret(strike(range).end);
       range = sel.getRangeAt(0);
     }
@@ -735,7 +746,6 @@
       caretBeside(del, true);
       range = sel.getRangeAt(0);
     }
-    const by = myName();
     const inside = mineIns(range.startContainer);
     if (inside && range.startContainer.nodeType === 3) {
       const node = range.startContainer, offset = range.startOffset;
@@ -748,25 +758,27 @@
       last.appendData(text);
       return caretAt(last, last.length);
     }
-    const ins = h("ins", { class: "track mine", "data-by": by, title: `Added by ${by}` }, text);
+    const ins = h("ins", addedBy(myName()), text);
     range.insertNode(ins);
     caretAt(ins.firstChild, text.length);
   }
 
   function deleteText(direction, target) {
     const sel = getSelection();
-    if (target) select(target);
     if (!sel.rangeCount) return;
-    let range = sel.getRangeAt(0);
+    const oneKey = sel.isCollapsed;  // Backspace or Delete with nothing selected
     const block = blockOf(sel.anchorNode);
+    if (target) select(target);
+    let range = sel.getRangeAt(0);
+    if (!block) return;
     if (range.collapsed) {
       sel.modify("extend", direction, "character");
       range = sel.getRangeAt(0);
     }
     if (range.collapsed) return;
-    if (blockOf(range.startContainer) !== block || blockOf(range.endContainer) !== block) {
-      // Rules can't be merged. But backing out of an empty new rule removes it.
-      if (direction === "backward" && block?.classList.contains("track-new") && !block.textContent.replaceAll(ZWSP, "").trim()) {
+    if (oneKey && (blockOf(range.startContainer) !== block || blockOf(range.endContainer) !== block)) {
+      // At the edge of a rule: rules aren't merged. But backing out of an empty new rule removes it.
+      if (direction === "backward" && block.classList.contains("track-new") && !block.textContent.replaceAll(ZWSP, "").trim()) {
         const previous = block.previousElementSibling;
         block.remove();
         if (previous) caretAt(previous, previous.childNodes.length);
@@ -776,6 +788,7 @@
       }
       return;
     }
+    if (tooMany(range)) return;  // a selection across rules strikes out the words in each
     const { start, end } = strike(range);
     placeCaret(direction === "backward" ? start : end);
   }
@@ -806,7 +819,7 @@
       return caretAt(ins, ins.childNodes.length);
     }
     const by = myName();
-    const ins = h("ins", { class: "track mine", "data-by": by, title: `Added by ${by}` }, ZWSP);
+    const ins = h("ins", addedBy(by), ZWSP);
     block.after(h(block.tagName === "LI" ? "li" : "p", { class: "track-new mine", "data-by": by }, ins));
     caretAt(ins.firstChild, 1);
   }
@@ -816,23 +829,23 @@
     if (!box) return;
     box.textContent = text;
     clearTimeout(hint.timer);
-    hint.timer = setTimeout(() => (box.textContent = ""), 6000);
+    hint.timer = setTimeout(() => (box.textContent = ""), 8000);
   }
 
   function rememberForUndo() {
-    suggesting.undo.push($("#doc").innerHTML);
-    if (suggesting.undo.length > 200) suggesting.undo.shift();
+    suggest.undo.push($("#doc").innerHTML);
+    if (suggest.undo.length > 200) suggest.undo.shift();
   }
   function undo() {
-    const html = suggesting.undo.pop();
-    if (html == null) return hint("Nothing to undo.");
-    $("#doc").innerHTML = html;
+    const saved = suggest.undo.pop();
+    if (saved == null) return hint("Nothing to undo.");
+    $("#doc").innerHTML = saved;
     freezeStamp();
     afterChange();
   }
 
   function onBeforeInput(event) {
-    if (!suggesting.on) return;
+    if (!suggest.editing) return;
     const type = event.inputType;
     if (type === "insertCompositionText") return; // composing (for example, with an accent or Asian-language keyboard)
     event.preventDefault();
@@ -861,12 +874,12 @@
 
   function onCompositionStart() {
     const sel = getSelection();
-    if (!suggesting.on || !sel.rangeCount) return;
+    if (!suggest.editing || !sel.rangeCount) return;
     rememberForUndo();
     const range = sel.getRangeAt(0);
     if (!range.collapsed) placeCaret(strike(range).end);
     if (!mineIns(sel.anchorNode)) {
-      const ins = h("ins", { class: "track mine", "data-by": myName(), title: `Added by ${myName()}` }, ZWSP);
+      const ins = h("ins", addedBy(myName()), ZWSP);
       sel.getRangeAt(0).insertNode(ins);
       caretAt(ins.firstChild, 1);
     }
@@ -883,7 +896,7 @@
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode, el = node.parentElement;
-      const type = el.closest("ins.track.mine") ? "ins" : el.closest("del.track") ? "del" : "orig";
+      const type = el.closest("ins.track.mine") ? "ins" : el.closest("del.track.mine") ? "del" : "orig";
       for (const ch of node.data) chars.push({ ch, type });
     }
     return chars;
@@ -896,15 +909,15 @@
       if (last && last.type === type) last.text += ch; else pieces.push({ type, text: ch });
     }
     block.replaceChildren(...pieces.map(({ type, text }) => type === "orig" ? document.createTextNode(text)
-      : h(type, { class: "track mine", "data-by": by, title: `${type === "ins" ? "Added" : "Removed"} by ${by}` }, text)));
+      : h(type, type === "ins" ? addedBy(by) : removedBy(by), text)));
   }
   function reconcile() {
     const doc = $("#doc");
     const before = document.createElement("div");
-    before.innerHTML = suggesting.lastGood;
+    before.innerHTML = suggest.lastGood;
     const oldBlocks = leafBlocks(before), newBlocks = leafBlocks(doc);
     if (oldBlocks.length !== newBlocks.length) {
-      doc.innerHTML = suggesting.lastGood;
+      doc.innerHTML = suggest.lastGood;
       freezeStamp();
       return hint("That change couldn't be tracked, so it was undone. Click in the text, then type or delete.");
     }
@@ -936,22 +949,13 @@
     if (lastAdded) caretAt(lastAdded, lastAdded.childNodes.length);
   }
 
-  // ---- From tracked marks to proposals ----
-
-  const commandFor = (change) => ({ delete: "Delete", replace: `Replace with: ${change.new}`,
-    insert: `Add after: ${change.new}`, rule: `Add rule: ${change.new}` })[change.kind];
-
-  function describe(change) {
-    const quote = (text) => `“${short(text, 70)}”`;
-    return { delete: `Delete ${quote(change.exact)}`, replace: `Replace ${quote(change.exact)} with ${quote(change.new)}`,
-      insert: `Add ${quote(change.new)} after ${quote(change.exact)}`, rule: `Add a new rule: ${quote(change.new)}` }[change.kind];
-  }
-  const short = (text, limit) => (text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text);
+  // ---- From tracked marks to suggestions ----
 
   const isWordChar = (ch) => /[\p{L}\p{N}_'’-]/u.test(ch);
 
   // Every change in the document, widened to whole words, with the words around it (as everyone else sees
-  // the text) so the robot can find the one place it belongs.
+  // the text) so the robot can find the one place it belongs. Each change also lists the marks it's made of,
+  // and the ids of the saved suggestions those marks came from.
   function collectChanges() {
     const doc = $("#doc");
     const parts = $$(BLOCKS, doc).filter((block) => !frozen(block) && !block.querySelector(BLOCKS)).map((block) => {
@@ -960,10 +964,11 @@
       while (walker.nextNode()) {
         const node = walker.currentNode;
         if (within(node, "button")) continue;
-        const type = mineIns(node) ? "ins" : struck(node) ? "del" : "orig";
-        for (const ch of node.data) if (ch !== ZWSP) chars.push({ ch, type });
+        const ins = mineIns(node), del = ins ? null : myDel(node);
+        const type = ins ? "ins" : del ? "del" : "orig";
+        for (const ch of node.data) if (ch !== ZWSP) chars.push({ ch, type, mark: ins || del });
       }
-      return { chars, isNew: block.classList.contains("track-new") };
+      return { block, chars, isNew: block.classList.contains("track-new") };
     });
     let source = "";
     for (const part of parts) {
@@ -974,6 +979,10 @@
     }
     const context = (start, end) => ({ prefix: source.slice(Math.max(0, start - 32), start), suffix: source.slice(end, end + 32) });
     const sourceOf = (chars) => chars.filter((c) => c.type !== "ins").map((c) => c.ch).join("");
+    const madeOf = (chars, extra = []) => {
+      const marks = [...new Set([...extra, ...chars.map((c) => c.mark).filter(Boolean)])];
+      return { marks, sids: new Set(marks.map((mark) => mark.dataset.sid).filter(Boolean)) };
+    };
     const changes = [];
     parts.forEach((part, index) => {
       if (part.isNew) {
@@ -990,7 +999,8 @@
         if (!words.length) words = [...prevText.matchAll(/\S+/g)].slice(-6);
         if (!words.length) return;
         const start = previous.at + words[0].index, end = previous.at + words.at(-1).index + words.at(-1)[0].length;
-        changes.push({ kind: "rule", exact: squash(source.slice(start, end)), new: text, ...context(start, end) });
+        changes.push({ kind: "rule", exact: squash(source.slice(start, end)), new: text, ...context(start, end),
+          ...madeOf(part.chars, [part.block, ...part.block.querySelectorAll("ins.track.mine")]) });
         return;
       }
       const chars = part.chars;
@@ -1011,96 +1021,398 @@
         const newText = squash(window.filter((c) => c.type !== "del").map((c) => c.ch).join(""));
         i = b;
         if (oldText === newText) continue;
-        if (!newText) { changes.push({ kind: "delete", exact: oldText, new: "", ...context(placeOf(a), placeOf(b)) }); continue; }
-        if (oldText) { changes.push({ kind: "replace", exact: oldText, new: newText, ...context(placeOf(a), placeOf(b)) }); continue; }
+        const marks = madeOf(window);
+        if (!newText) { changes.push({ kind: "delete", exact: oldText, new: "", ...context(placeOf(a), placeOf(b)), ...marks }); continue; }
+        if (oldText) { changes.push({ kind: "replace", exact: oldText, new: newText, ...context(placeOf(a), placeOf(b)), ...marks }); continue; }
         // New words between spaces: add them after the word before (or put them in front of the word after).
         let e = a - 1;
         while (e >= 0 && /\s/.test(chars[e].ch)) e -= 1;
         if (e >= 0) {
           let s2 = e;
           while (s2 > 0 && !/\s/.test(chars[s2 - 1].ch)) s2 -= 1;
-          changes.push({ kind: "insert", exact: squash(sourceOf(chars.slice(s2, e + 1))), new: newText, ...context(placeOf(s2), placeOf(e + 1)) });
+          changes.push({ kind: "insert", exact: squash(sourceOf(chars.slice(s2, e + 1))), new: newText, ...context(placeOf(s2), placeOf(e + 1)), ...marks });
         } else {
           let f = b;
           while (f < chars.length && /\s/.test(chars[f].ch)) f += 1;
           let g = f;
           while (g < chars.length && !/\s/.test(chars[g].ch)) g += 1;
           const next = squash(sourceOf(chars.slice(f, g)));
-          if (next) changes.push({ kind: "replace", exact: next, new: `${newText} ${next}`, ...context(placeOf(f), placeOf(g)) });
+          if (next) changes.push({ kind: "replace", exact: next, new: `${newText} ${next}`, ...context(placeOf(f), placeOf(g)), ...marks });
         }
       }
     });
     return changes;
   }
 
-  // ---- Hypothesis account ----
+  // ---- Signing in and saving: Supabase ----
+  // Readers sign in with a 6-digit code that Supabase emails them, through the project's own email account
+  // (supabase/README.md). Suggestions and votes are kept in the project's database (supabase/schema.sql): anyone
+  // can read them, and each reader can add, change, and withdraw only their own.
 
-  function storedHypothesisKey() {
-    try { return localStorage.getItem(HYP_KEY_STORE); } catch { return null; }
-  }
-  function storeHypothesisKey(key) {
-    try { if (key) localStorage.setItem(HYP_KEY_STORE, key); else localStorage.removeItem(HYP_KEY_STORE); } catch { /* blocked */ }
-  }
-  async function hypothesisAs(key, method, path, body) {
-    const res = await fetch(`https://api.hypothes.is/api${path}`, {
-      method, body: body ? JSON.stringify(body) : undefined,
-      headers: { Authorization: `Bearer ${key}`, Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
-    });
-    if (!res.ok) {
-      const detail = await res.json().catch(() => ({}));
-      throw Object.assign(new Error(detail.reason || detail.message || `Hypothesis answered ${res.status}`), { status: res.status });
-    }
-    return res.json();
-  }
-  async function connectHypothesis(key) {
-    const profile = await hypothesisAs(key, "GET", "/profile");
-    if (!profile.userid) throw new Error("Hypothesis didn't recognize that token. Copy it again from your developer page.");
-    const username = profile.userid.replace(/^acct:|@hypothes\.is$/g, "");
-    suggesting.me = { username, name: profile.user_info?.display_name || username, key };
-    storeHypothesisKey(key);
-    for (const mark of $$("#doc [data-by='you']")) {  // changes made before connecting get your name too
-      mark.dataset.by = username;
-      if (mark.title) mark.title = mark.title.replace(/you$/, username);
-    }
-    return suggesting.me;
-  }
+  // The Supabase library, pinned to one version and verified by the browser before it runs.
+  const SUPABASE_LIBRARY = {
+    src: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js",
+    integrity: "sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok",
+  };
 
-  // Post one change as a public proposal on the Drafter, under the reader's account.
-  function postChange(key, change, reason) {
-    const uri = `${suggesting.cfg.site}draft/`;
-    return hypothesisAs(key, "POST", "/annotations", {
-      uri,
-      document: { title: [document.title] },
-      text: [commandFor(change), reason ? `Why: ${reason}` : ""].filter(Boolean).join("\n"),
-      tags: ["suggestion"],
-      group: "__world__",
-      permissions: { read: ["group:__world__"] },  // public: without this, Hypothesis keeps it private
-      target: [{ source: uri, selector: [{ type: "TextQuoteSelector", exact: change.exact, prefix: change.prefix, suffix: change.suffix }] }],
+  function loadSupabase() {
+    return new Promise((resolve, reject) => {
+      if (window.supabase?.createClient) return resolve(window.supabase);
+      document.head.append(h("script", { src: SUPABASE_LIBRARY.src, integrity: SUPABASE_LIBRARY.integrity, crossorigin: "anonymous",
+        onload: () => resolve(window.supabase),
+        onerror: () => reject(new Error("the sign-in tool couldn't be loaded; check your connection and reload the page")) }));
     });
   }
 
-  // ---- The suggesting bar ----
+  // A suggestion as the page uses it, from a row of the database's suggestions table.
+  const fromRow = (row) => ({
+    id: `sb-${row.id}`, docId: row.id, kind: row.kind, exact: row.exact, prefix: row.prefix, suffix: row.suffix,
+    new: row.new_text, reason: row.reason, base: row.base, created: row.created, updated: row.updated,
+    author: { id: row.author_id, email: row.author_email },
+  });
+  const COLUMNS = { kind: "kind", exact: "exact", prefix: "prefix", suffix: "suffix", new: "new_text", reason: "reason", base: "base" };
+  const toRow = (fields) => Object.fromEntries(Object.entries(fields).filter(([key]) => COLUMNS[key]).map(([key, value]) => [COLUMNS[key], value ?? ""]));
 
-  function saveWork() {
-    try {
-      localStorage.setItem(SAVED_WORK, JSON.stringify({ version: suggesting.version, html: $("#doc").innerHTML }));
-    } catch { /* storage blocked: the work lasts until the page closes */ }
-  }
-  function savedWork() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(SAVED_WORK) || "null");
-      return saved && saved.version === suggesting.version ? saved.html : null;
-    } catch { return null; }
-  }
-  function clearWork() {
-    try { localStorage.removeItem(SAVED_WORK); } catch { /* blocked */ }
+  async function supabaseBackend(config) {
+    const library = await loadSupabase();
+    const client = library.createClient(config.url, config.key, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: "els-sign-in" },
+    });
+    const must = ({ data, error }) => {
+      if (error) throw new Error(error.message || String(error));
+      return data;
+    };
+    const everything = async (table, order) => {  // the database sends at most 1,000 rows at a time
+      const rows = [];
+      for (let from = 0; ; from += 1000) {
+        const batch = must(await client.from(table).select("*").order(order, { ascending: true }).range(from, from + 999));
+        rows.push(...batch);
+        if (batch.length < 1000) return rows;
+      }
+    };
+    return {
+      kind: "supabase",
+      onUser(callback) {
+        // Supabase asks that this callback not wait on other Supabase calls, so the work happens just after it.
+        client.auth.onAuthStateChange((event, session) => setTimeout(() =>
+          callback(session?.user?.email ? { id: session.user.id, email: session.user.email } : null), 0));
+      },
+      sendCode: async (email) => must(await client.auth.signInWithOtp({ email, options: { shouldCreateUser: true } })),
+      verifyCode: async (email, code) => must(await client.auth.verifyOtp({ email, token: code, type: "email" })),
+      signOut: async () => must(await client.auth.signOut()),
+      watch(callback, failed) {
+        let timer = null;
+        const load = async () => {
+          try {
+            const [suggestions, votes] = await Promise.all([everything("suggestions", "created"), everything("votes", "at")]);
+            callback({ suggestions: suggestions.map(fromRow), votes });
+          } catch (error) {
+            failed(error);
+          }
+        };
+        const soon = () => { clearTimeout(timer); timer = setTimeout(load, 400); };
+        client.channel("suggest-edits")
+          .on("postgres_changes", { event: "*", schema: "public", table: "suggestions" }, soon)
+          .on("postgres_changes", { event: "*", schema: "public", table: "votes" }, soon)
+          .subscribe();
+        setInterval(load, 60000);  // in case live updates are switched off
+        load();
+        return { refresh: soon };
+      },
+      // Saves the given fields of a suggestion; returns its id. One withdrawn meanwhile (say, in another tab)
+      // is saved again as a new one.
+      async save(docId, fields) {
+        if (docId) {
+          const updated = must(await client.from("suggestions").update(toRow(fields)).eq("id", docId).select());
+          if (updated.length) return updated[0].id;
+        }
+        const row = must(await client.from("suggestions").insert(toRow(fields)).select().single());
+        if (!row?.id) throw new Error("the database didn't say what it saved");
+        return row.id;
+      },
+      remove: async (docId) => must(await client.from("suggestions").delete().eq("id", docId)),
+      vote: async (proposalId, vote) => must(await client.from("votes").upsert({ suggestion: proposalId, vote }, { onConflict: "suggestion,voter_id" })),
+    };
   }
 
-  function afterChange(save = true) {
-    tidyMarks();
-    suggesting.lastGood = $("#doc").innerHTML;
-    if (save) saveWork();
-    updateSuggestBar();
+  // For trying the page on this computer without Supabase: add ?backend=local to a local preview's address.
+  // Everything stays in this browser, and any 6-digit code signs you in.
+  function localBackend() {
+    const SUGGESTIONS = "els-local-suggestions", VOTES = "els-local-votes", USER = "els-local-user";
+    const read = (key, empty) => { try { return JSON.parse(localStorage.getItem(key)) ?? empty; } catch { return empty; } };
+    const write = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+    let onData = null, onUser = () => {};
+    const emit = () => onData?.({ suggestions: read(SUGGESTIONS, []), votes: read(VOTES, []) });
+    addEventListener("storage", (event) => { if (event.key === SUGGESTIONS || event.key === VOTES) emit(); });
+    const me = () => read(USER, null);
+    return {
+      kind: "local",
+      onUser(callback) { onUser = callback; setTimeout(() => callback(me()), 0); },
+      async sendCode() { /* nothing is sent */ },
+      async verifyCode(email, code) {
+        if (!/^\d{6}$/.test(code)) throw new Error("the code is six digits");
+        const user = { id: `local-${email.toLowerCase()}`, email };
+        write(USER, user);
+        onUser(user);
+      },
+      async signOut() { localStorage.removeItem(USER); onUser(null); },
+      watch(callback) { onData = callback; setTimeout(emit, 0); return { refresh: emit }; },
+      async save(docId, fields) {
+        const list = read(SUGGESTIONS, []), now = new Date().toISOString(), user = me();
+        const i = docId ? list.findIndex((s) => s.docId === docId) : -1;
+        if (i >= 0) {
+          list[i] = { ...list[i], ...fields, updated: now };
+        } else {
+          docId = crypto.randomUUID();
+          list.push({ kind: "", exact: "", prefix: "", suffix: "", new: "", reason: "", base: "", ...fields,
+            id: `sb-${docId}`, docId, author: { id: user.id, email: user.email }, created: now, updated: now });
+        }
+        write(SUGGESTIONS, list);
+        emit();
+        return docId;
+      },
+      async remove(docId) { write(SUGGESTIONS, read(SUGGESTIONS, []).filter((s) => s.docId !== docId)); emit(); },
+      async vote(proposalId, vote) {
+        const user = me();
+        const votes = read(VOTES, []).filter((v) => !(v.suggestion === proposalId && v.voter_id === user.id));
+        votes.push({ suggestion: proposalId, voter_id: user.id, voter_email: user.email, vote, at: new Date().toISOString() });
+        write(VOTES, votes);
+        emit();
+      },
+    };
+  }
+
+  // ---- The page's state ----
+
+  const SAVED_WORK = "els-suggesting";  // changes made before signing in, kept in this browser
+  const suggest = {
+    cfg: null, governance: null, markdown: "", version: "",
+    editing: true, backend: null, watcher: null, me: null, ready: false,
+    remote: null,  // everyone's suggestions, from the database (null until it answers)
+    votes: [],  // everyone's votes, from the database
+    proposals: { replies: new Map(), records: [], fresh: [] },  // the robot's record, and new proposals in comments
+    others: [], saved: new Map(), undrawable: new Set(), undo: [], lastGood: "",
+    dirty: false, edits: 0, lastEdit: 0, busy: false, syncing: Promise.resolve(), timer: null,
+    status: { text: "All changes saved", problem: false },
+    signin: { step: "email", email: "", note: "" },
+  };
+  const FINAL_STATUS = new Set(FINAL);
+  const sameEmail = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+  const recordOf = (id) => suggest.proposals.records.find((r) => r.id === id);
+  const isOpen = (s) => !FINAL_STATUS.has(recordOf(s.id)?.status || "open");
+  const isMine = (s) => !!suggest.me && s.author?.id === suggest.me.id;
+  // Accounts the lead maintainer has listed to ignore (governance/maintainers.json): their suggestions aren't shown.
+  const isIgnored = (s) => (suggest.governance?.ignored_accounts?.site || []).some((email) => sameEmail(email, s.author?.email));
+  const isMaintainer = () => !!suggest.me && (suggest.governance?.maintainers || []).some((m) => sameEmail(m.email, suggest.me.email));
+  const myName = () => suggest.me?.email || "you";
+  const mineOpen = () => (suggest.remote || []).filter((s) => isMine(s) && isOpen(s));
+  const pickChange = (s) => ({ kind: s.kind, exact: s.exact, prefix: s.prefix, suffix: s.suffix, new: s.new });
+  const sameChange = (a, b) => ["kind", "exact", "prefix", "suffix", "new"].every((key) => (a?.[key] || "") === (b?.[key] || ""));
+
+  // ---- Drawing suggestions into the text ----
+
+  // The text as everyone sees it: the original words, struck ones included, without words anyone is adding.
+  function sourceIndex() {
+    const chars = [];
+    const walker = document.createTreeWalker($("#doc"), NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (within(node, "ins.track.mine, .track-new, button")) continue;
+      for (let i = 0; i < node.data.length; i++) if (!/\s/.test(node.data[i]) && node.data[i] !== ZWSP) chars.push({ node, offset: i });
+    }
+    return { chars, text: chars.map(({ node, offset }) => node.data[offset]).join("") };
+  }
+
+  // The same rule the robot uses (scripts/edits.py, locate): the quote, chosen among repeats by the words
+  // around it; a single match is trusted when one side still matches, or when the quote is long.
+  function locateQuote(index, exact, prefix, suffix) {
+    const key = squash(exact).replace(/\s/g, ""), before = squash(prefix).replace(/\s/g, ""), after = squash(suffix).replace(/\s/g, "");
+    if (!key) return null;
+    const hits = [];
+    for (let i = index.text.indexOf(key); i >= 0; i = index.text.indexOf(key, i + 1)) hits.push(i);
+    const sides = (i) => {
+      const seenBefore = index.text.slice(0, i), seenAfter = index.text.slice(i + key.length);
+      const n = Math.min(before.length, seenBefore.length), m = Math.min(after.length, seenAfter.length);
+      return [n === 0 || seenBefore.slice(-n) === before.slice(-n), m === 0 || seenAfter.slice(0, m) === after.slice(0, m), n > 0, m > 0];
+    };
+    const good = hits.filter((i) => { const [b, a] = sides(i); return b && a; });
+    if (good.length === 1) return [good[0], good[0] + key.length];
+    if (!good.length && hits.length === 1) {
+      const [b, a, hasBefore, hasAfter] = sides(hits[0]);
+      if (key.length >= 25 || (b && hasBefore) || (a && hasAfter)) return [hits[0], hits[0] + key.length];
+    }
+    return null;
+  }
+
+  function wrapRange(range, make) {
+    let last = null;
+    for (const node of textNodesIn(range)) {
+      const from = node === range.startContainer ? range.startOffset : 0;
+      const to = node === range.endContainer ? range.endOffset : node.length;
+      if (to <= from) continue;
+      const part = from > 0 ? node.splitText(from) : node;
+      if (to - from < part.length) part.splitText(to - from);
+      const mark = make();
+      part.before(mark);
+      mark.append(part);
+      last = mark;
+    }
+    return last;
+  }
+
+  // Draw one suggestion: someone else's in orange (with added words drawn by CSS, so the text itself doesn't
+  // change), or one of yours in blue, as marks you can keep editing.
+  function drawSuggestion(s, mine, taken) {
+    const index = sourceIndex();
+    const found = locateQuote(index, s.exact ?? s.old ?? "", s.prefix ?? s.before ?? "", s.suffix ?? s.after ?? "");
+    if (!found) return false;
+    const [a, b] = found;
+    if (taken.some(([x, y]) => a < y && x < b)) return false;
+    const first = blockOf(index.chars[a].node), block = blockOf(index.chars[b - 1].node);
+    if (!first || !block || frozen(first) || frozen(block) || (mine && first !== block)) return false;
+    taken.push([a, b]);
+    const who = s.author?.email || s.proposer?.hypothesis || s.proposer?.name || "someone";
+    const range = document.createRange();
+    range.setStart(index.chars[a].node, index.chars[a].offset);
+    range.setEnd(index.chars[b - 1].node, index.chars[b - 1].offset + 1);
+    const endNode = index.chars[b - 1].node, endOffset = index.chars[b - 1].offset + 1;
+    const label = mine ? { "data-sid": s.docId } : { "data-proposal": s.id, title: `Suggested by ${who} · click for details`, tabindex: "0" };
+    let last = null;
+    if (s.kind === "delete" || s.kind === "replace") {
+      last = wrapRange(range, () => h("del", mine ? { ...removedBy(who), ...label } : { class: "track others", "data-by": who, ...label }));
+    }
+    if (s.kind === "replace" || s.kind === "insert") {
+      const ins = mine ? h("ins", { ...addedBy(who), ...label }, s.kind === "insert" ? ` ${s.new}` : s.new)
+        : h("ins", { class: "track others added", "data-by": who, "data-text": ` ${s.new}`, contenteditable: "false", ...label });
+      if (last) last.after(ins);
+      else { const r = document.createRange(); r.setStart(endNode, endOffset); r.collapse(true); r.insertNode(ins); }
+    }
+    if (s.kind === "rule") {
+      const tag = block.tagName === "LI" ? "li" : "p";
+      block.after(mine ? h(tag, { class: "track-new mine", "data-by": who, ...label }, h("ins", { ...addedBy(who), ...label }, ZWSP + s.new))
+        : h(tag, { class: "track-rule others", "data-by": who, "data-text": s.new, contenteditable: "false", ...label }));
+    }
+    return true;
+  }
+
+  function clearOthers() {
+    const doc = $("#doc");
+    for (const del of $$("del.track.others", doc)) del.replaceWith(...del.childNodes);
+    for (const mark of $$("ins.track.others, .track-rule.others", doc)) mark.remove();
+    doc.normalize();
+  }
+
+  // Everyone else's open suggestions: from the database, and from comments (the robot's record, and any
+  // made since it last looked).
+  function othersOpen() {
+    const fromSite = (suggest.remote || []).filter((s) => !isMine(s) && isOpen(s) && !isIgnored(s));
+    const { records, fresh } = suggest.proposals;
+    const fromComments = [...fresh, ...records.filter((r) => !FINAL_STATUS.has(r.status))]
+      .filter((p) => !p.id.startsWith("sb-") || !suggest.remote);
+    return [...fromSite, ...fromComments].sort((x, y) => (x.created || "").localeCompare(y.created || ""));
+  }
+
+  function drawOthers() {
+    clearOthers();
+    const taken = [];
+    suggest.others = othersOpen();
+    for (const s of suggest.others) drawSuggestion(s, false, taken);
+  }
+
+  // Keep the cursor where it was while other people's marks are redrawn: they don't change the text itself.
+  function keepingCaret(fn) {
+    const doc = $("#doc"), sel = getSelection();
+    if (!sel.rangeCount || !doc.contains(sel.anchorNode)) return fn();
+    const range = sel.getRangeAt(0);
+    const offsetOf = (node, offset) => {
+      const before = document.createRange();
+      before.selectNodeContents(doc);
+      before.setEnd(node, offset);
+      return before.toString().length;
+    };
+    const start = offsetOf(range.startContainer, range.startOffset), end = offsetOf(range.endContainer, range.endOffset);
+    fn();
+    const pointAt = (n) => {
+      const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+      let seen = 0;
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (n <= seen + node.length) return [node, n - seen];
+        seen += node.length;
+      }
+      return [doc, doc.childNodes.length];
+    };
+    const restored = document.createRange();
+    restored.setStart(...pointAt(start));
+    restored.setEnd(...pointAt(end));
+    select(restored);
+  }
+
+  // Draw the whole text: your suggestions (or, before you sign in, your unsaved changes), and everyone else's.
+  function drawEverything() {
+    const doc = $("#doc");
+    fillDoc(doc, suggest.markdown);
+    freezeStamp();
+    suggest.saved = new Map();
+    suggest.undrawable = new Set();
+    if (suggest.me) {
+      const taken = [];
+      for (const s of mineOpen()) {
+        if (drawSuggestion(s, true, taken)) suggest.saved.set(s.docId, pickChange(s));
+        else suggest.undrawable.add(s.docId);  // it no longer fits the text; it's kept, and the robot reports it
+      }
+    } else {
+      const saved = savedWork();
+      if (saved) {
+        doc.innerHTML = DOMPurify.sanitize(saved);
+        for (const copy of $$("button.copy", doc)) copy.remove();
+        addCopyButtons(doc);
+        freezeStamp();
+      }
+    }
+    drawOthers();
+    setEditable(suggest.editing);
+    suggest.lastGood = doc.innerHTML;
+    suggest.undo = [];
+    suggest.dirty = false;
+    updateBar();
+  }
+
+  // Whether your suggestions in the database differ from the ones in the text (say, after you changed them in
+  // another tab), so the text needs drawing again.
+  function mineChangedElsewhere() {
+    const signature = (entries) => JSON.stringify(entries.map(([id, s]) => [id, s.kind, s.exact, s.prefix, s.suffix, s.new]).sort());
+    const remote = mineOpen().filter((s) => !suggest.undrawable.has(s.docId)).map((s) => [s.docId, s]);
+    return signature(remote) !== signature([...suggest.saved]);
+  }
+
+  // New data from the database: draw it once nobody's typing, so the text doesn't move under the cursor.
+  function refresh() {
+    clearTimeout(refresh.timer);
+    const typing = Date.now() - suggest.lastEdit < 2500;
+    const field = document.activeElement;
+    const inForm = field?.matches?.("input, textarea") && $("#after")?.contains(field);
+    if (!suggest.ready || typing || inForm) {
+      refresh.timer = setTimeout(refresh, 1500);
+      return;
+    }
+    if (suggest.me && !suggest.dirty && !suggest.busy && mineChangedElsewhere()) drawEverything();
+    else keepingCaret(drawOthers);
+    renderProposals();
+    updateBar();
+  }
+
+  // The text can be edited once the page knows whether you're signed in, so nothing typed is lost.
+  function setEditable(on) {
+    const doc = $("#doc");
+    if (on && suggest.ready) {
+      doc.setAttribute("contenteditable", "true");
+      doc.setAttribute("spellcheck", "true");
+    } else {
+      doc.removeAttribute("contenteditable");
+    }
+    doc.classList.toggle("suggesting", on);
+    html.classList.toggle("suggesting-mode", on);
   }
 
   function freezeStamp() {
@@ -1108,298 +1420,430 @@
     if (stamp) stamp.setAttribute("contenteditable", "false");
   }
 
-  function updateSuggestBar() {
-    const count = $("#suggest-count");
-    if (!count) return;
-    const n = collectChanges().length;
-    count.textContent = n ? `${plural(n, "change")} so far` : "No changes yet";
-    for (const id of ["#suggest-submit", "#suggest-discard"]) { const control = $(id); if (control) control.disabled = !n; }
+  // ---- Saving your changes as you go ----
+
+  function saveWork() {
+    try { localStorage.setItem(SAVED_WORK, JSON.stringify({ version: suggest.version, html: $("#doc").innerHTML })); } catch { /* blocked */ }
+  }
+  function savedWork() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SAVED_WORK) || "null");
+      return saved && saved.version === suggest.version ? saved.html : null;
+    } catch { return null; }
+  }
+  function clearWork() {
+    try { localStorage.removeItem(SAVED_WORK); } catch { /* blocked */ }
   }
 
-  function suggestBar() {
-    const who = h("span", { class: "suggest-who" });
-    const showWho = () => who.replaceChildren(suggesting.me
-      ? h("span", {}, "Suggesting as ", h("strong", { class: "mine-name", text: suggesting.me.username }), " · ",
-        h("button", { type: "button", class: "linklike", text: "Disconnect", onclick: () => { storeHypothesisKey(null); suggesting.me = null; showWho(); } }))
-      : h("span", { text: "Your changes are tracked. You'll add your Hypothesis name when you submit." }));
-    showWho();
-    suggestBar.showWho = showWho;
-    return h("div", { class: "suggest-bar", id: "suggest-bar", role: "region", "aria-label": "Suggesting" },
-      h("p", { class: "suggest-line" },
-        h("strong", { text: "Suggesting. " }),
-        h("span", { class: "suggest-help", text: "Select words and press Delete to strike them out, or type to add words. To add a rule, press Enter at the end of a rule. " }),
-        who),
-      h("p", { class: "suggest-actions" },
-        h("span", { class: "suggest-count", id: "suggest-count" }),
-        Object.assign(action("Submit for review", openSubmit, "button"), { id: "suggest-submit" }),
-        action("Undo", () => undo(), "button secondary"),
-        Object.assign(action("Discard all", discardAll, "button secondary"), { id: "suggest-discard" }),
-        action("Stop suggesting", () => setMode(false), "button secondary")),
-      h("p", { class: "suggest-hint", id: "suggest-hint", "aria-live": "polite" }),
-      h("div", { class: "suggest-panel", id: "suggest-panel" }));
+  function afterChange() {
+    tidyMarks();
+    suggest.lastGood = $("#doc").innerHTML;
+    suggest.lastEdit = Date.now();
+    suggest.edits += 1;
+    suggest.dirty = true;
+    if (suggest.me) setSaveStatus("Saving…");
+    else saveWork();
+    updateBar();
+    clearTimeout(suggest.timer);
+    suggest.timer = setTimeout(sync, 1200);
   }
 
-  function discardAll() {
-    if (!collectChanges().length || !confirm("Discard all of your changes?")) return;
-    clearWork();
-    suggesting.undo = [];
-    startEditing(suggesting.markdown, null);
+  function sync() {
+    suggest.syncing = suggest.syncing.then(syncNow, syncNow);
+    return suggest.syncing;
   }
 
-  function connectForm(onDone) {
-    const input = h("input", { type: "password", class: "key-input", autocomplete: "off", spellcheck: "false",
-      placeholder: "Paste your Hypothesis API token", "aria-label": "Your Hypothesis API token" });
-    const problem = h("p", { class: "error" });
-    const go = async () => {
-      const key = input.value.trim();
-      if (!key) return input.focus();
-      problem.textContent = "";
-      try {
-        await connectHypothesis(key);
-        suggestBar.showWho?.();
-        onDone();
-      } catch (error) {
-        problem.textContent = error.status === 401 ? "Hypothesis didn't accept that token. Copy it again from your developer page." : error.message;
+  // Make the database match the text: each change in it is one suggestion. A change made from marks that came
+  // from a saved suggestion updates that suggestion; a new change adds one; a suggestion whose marks are gone is
+  // withdrawn.
+  async function syncNow() {
+    const { backend, me } = suggest;
+    if (!backend?.save || !me || !suggest.dirty) return;
+    const edits = suggest.edits;
+    suggest.busy = true;
+    try {
+      const used = new Set();
+      for (const change of collectChanges()) {
+        const fields = { ...pickChange(change), base: suggest.version };
+        const docId = [...change.sids].find((id) => suggest.saved.has(id) && !used.has(id));
+        if (docId && sameChange(suggest.saved.get(docId), fields)) { used.add(docId); continue; }
+        const id = await backend.save(docId || null, fields);
+        if (docId && id !== docId) suggest.saved.delete(docId);
+        used.add(id);
+        suggest.saved.set(id, pickChange(fields));
+        for (const mark of change.marks) mark.dataset.sid = id;
       }
-    };
-    input.addEventListener("keydown", (event) => { if (event.key === "Enter") go(); });
-    return h("div", { class: "connect" },
-      h("p", {}, h("strong", { text: "Your suggestions go out under your Hypothesis name, " }),
-        "so everyone can see who suggested what. Connect your account once:"),
-      h("ol", { class: "signin-steps" },
-        h("li", {}, "Sign in to Hypothesis, or ", external("make a free account", HYP_SIGNUP), "."),
-        h("li", {}, "Open your ", external("Hypothesis developer page", HYP_DEVELOPER), ", choose ", h("em", { text: "Create API token" }),
-          ", and copy the token."),
-        h("li", {}, "Paste it here: ", h("span", { class: "key-row" }, input, action("Connect", go, "button")))),
-      problem,
-      h("p", { class: "muted", text: "The token stays in this browser and is sent only to Hypothesis. It lets this page post your suggestions for you; don't share it." }));
-  }
-
-  function openSubmit() {
-    const panel = $("#suggest-panel");
-    const changes = collectChanges();
-    if (!changes.length) return hint("There's nothing to submit yet.");
-    if (!suggesting.me) return panel.replaceChildren(connectForm(openSubmit));
-    const reason = h("textarea", { class: "check-text", rows: "2", placeholder: "Why? (optional; everyone sees it)", "aria-label": "Why you suggest these changes" });
-    const status = h("p", { class: "vote-status", "aria-live": "polite" });
-    const send = action(`Submit ${plural(changes.length, "change")}`, async () => {
-      send.disabled = true;
-      const failed = [];
-      for (const [i, change] of changes.entries()) {
-        status.textContent = `Sending ${i + 1} of ${changes.length}…`;
-        try { await postChange(suggesting.me.key, change, squash(reason.value)); } catch (error) { failed.push([change, error]); }
-      }
-      if (failed.length) {
-        status.className = "vote-status failed";
-        status.textContent = `${plural(failed.length, "change")} couldn't be sent: ${failed[0][1].message}`;
-        send.disabled = false;
-        return;
+      for (const id of [...suggest.saved.keys()]) {
+        if (used.has(id)) continue;
+        await backend.remove(id);
+        suggest.saved.delete(id);
       }
       clearWork();
-      suggesting.undo = [];
-      await setMode(false, false);
-      announce(`Thanks, ${suggesting.me.name}. Your ${plural(changes.length, "suggestion")} now wait for a maintainer, and you can see them marked in the text.`);
-    }, "button");
-    panel.replaceChildren(h("div", { class: "submit" },
-      h("p", { text: "These go to the maintainers, who approve or disapprove each one:" }),
-      h("ul", { class: "submit-list" }, ...changes.map((change) => h("li", { text: describe(change) }))),
-      reason,
-      h("p", { class: "vote-buttons" }, send, " ", action("Keep editing", () => panel.replaceChildren(), "button secondary")),
-      status));
-  }
-
-  function announce(text) {
-    const box = $("#suggest-note");
-    if (box) { box.textContent = text; box.hidden = false; }
-  }
-
-  function startEditing(markdown, savedHtml) {
-    renderMarkdown(markdown);
-    const doc = $("#doc");
-    if (savedHtml) doc.innerHTML = DOMPurify.sanitize(savedHtml);
-    freezeStamp();
-    doc.setAttribute("contenteditable", "true");
-    doc.setAttribute("spellcheck", "true");
-    doc.classList.add("suggesting");
-    suggesting.lastGood = doc.innerHTML;
-    updateSuggestBar();
-  }
-
-  async function setMode(on, keep = true) {
-    suggesting.on = on;
-    html.classList.toggle("suggesting-mode", on);
-    for (const control of $$(".mode-switch button")) control.setAttribute("aria-pressed", String(control.dataset.mode === (on ? "suggest" : "read")));
-    const raw = $(".raw-toggle");
-    if (raw) raw.disabled = on;
-    $(".suggestion-pop")?.remove();
-    const doc = $("#doc");
-    if (on) {
-      $("#suggest-note").hidden = true;
-      $("#suggest-legend").hidden = true;
-      $("#suggest-slot").replaceChildren(suggestBar());
-      startEditing(suggesting.markdown, savedWork());
-      doc.focus();
-      return;
+      if (suggest.edits === edits) suggest.dirty = false;
+      suggest.lastGood = $("#doc").innerHTML;
+      setSaveStatus(suggest.dirty ? "Saving…" : "All changes saved");
+      suggest.watcher?.refresh();  // so the list below the text shows them now
+    } catch (error) {
+      setSaveStatus(`Not saved yet (${error.message}). Trying again…`, true);
+      clearTimeout(suggest.timer);
+      suggest.timer = setTimeout(sync, 15000);
+    } finally {
+      suggest.busy = false;
     }
-    if (keep && collectChanges().length) saveWork();  // kept for when you come back
-    doc.removeAttribute("contenteditable");
-    doc.classList.remove("suggesting");
-    $("#suggest-slot").replaceChildren();
-    renderMarkdown(suggesting.markdown);
-    await refreshSuggestions();
   }
 
-  // ---- Everyone's pending suggestions, drawn into the text ----
+  // ---- The bar above the text ----
 
-  // Each visible (non-space) character of the document, with the text node and offset it comes from.
-  function docTextIndex() {
-    const chars = [];
-    const walker = document.createTreeWalker($("#doc"), NodeFilter.SHOW_TEXT);
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      if (within(node, ".track, button")) continue;
-      for (let i = 0; i < node.data.length; i++) if (!/\s/.test(node.data[i])) chars.push({ node, offset: i });
+  function setSaveStatus(text, problem = false) {
+    suggest.status = { text, problem };
+    const box = $("#save-status");
+    if (box) { box.textContent = text; box.classList.toggle("problem", problem); }
+  }
+
+  function signInBox() {
+    const { backend, signin: step } = suggest;
+    if (!backend || backend.kind === "none") {
+      return h("span", { class: "muted" }, "Saving suggestions isn't switched on yet. To propose a change now, choose ",
+        h("strong", { text: "Commenting" }), " and start a comment with a command (", h("a", { href: "#propose", text: "how" }), ").");
     }
-    return { chars, text: chars.map(({ node, offset }) => node.data[offset]).join("") };
-  }
-
-  // The same rule the robot uses (scripts/edits.py, locate): the quote, chosen among repeats by the words around it.
-  function locateQuote(index, exact, prefix, suffix) {
-    const key = squash(exact).replace(/\s/g, ""), before = squash(prefix).replace(/\s/g, ""), after = squash(suffix).replace(/\s/g, "");
-    if (!key) return null;
-    const hits = [];
-    for (let i = index.text.indexOf(key); i >= 0; i = index.text.indexOf(key, i + 1)) hits.push(i);
-    const fits = (i) => {
-      const seenBefore = index.text.slice(0, i), seenAfter = index.text.slice(i + key.length);
-      const n = Math.min(before.length, seenBefore.length), m = Math.min(after.length, seenAfter.length);
-      return (n === 0 || seenBefore.slice(-n) === before.slice(-n)) && seenAfter.slice(0, m) === after.slice(0, m);
+    const note = h("span", { class: "signin-note", "aria-live": "polite", text: step.note });
+    const say = (text) => { step.note = text; note.textContent = text; };
+    if (step.step === "code") {
+      const code = h("input", { type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "10", spellcheck: "false",
+        class: "key-input code-input", placeholder: "123456", "aria-label": "The code from the email" });
+      const go = async () => {
+        const value = code.value.replace(/\D/g, "");
+        if (value.length < 6) { say("Type the 6-digit code from the email."); return code.focus(); }
+        say("Signing in…");
+        try {
+          await backend.verifyCode(step.email, value);
+          Object.assign(step, { step: "email", note: "" });
+        } catch (error) {
+          say(`That didn't work: ${error.message}.`);
+        }
+      };
+      code.addEventListener("keydown", (event) => { if (event.key === "Enter") go(); });
+      setTimeout(() => code.focus(), 0);
+      return h("span", { class: "signin" },
+        h("span", {}, "We emailed a code to ", h("strong", { text: step.email }), ". Type it here: "),
+        code, action("Sign in", go, "button small"), " ",
+        h("button", { type: "button", class: "linklike", text: "Use a different email",
+          onclick: () => { Object.assign(step, { step: "email", note: "" }); updateBar(true); } }),
+        note);
+    }
+    const email = h("input", { type: "email", class: "key-input email-input", value: step.email, placeholder: "you@example.edu",
+      autocomplete: "email", spellcheck: "false", "aria-label": "Your email address" });
+    const send = async () => {
+      const address = email.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) { say("Type your email address first."); return email.focus(); }
+      say("Sending…");
+      try {
+        await backend.sendCode(address);
+        Object.assign(step, { step: "code", email: address, note: backend.kind === "local" ? "(Local test: any six digits work.)" : "" });
+        updateBar(true);
+      } catch (error) {
+        say(`That didn't work: ${error.message}.`);
+      }
     };
-    const good = hits.filter(fits);
-    if (good.length === 1) return [good[0], good[0] + key.length];
-    if (!good.length && hits.length === 1 && key.length >= 25) return [hits[0], hits[0] + key.length];
-    return null;
+    email.addEventListener("keydown", (event) => { if (event.key === "Enter") send(); });
+    return h("span", { class: "signin" },
+      h("strong", { text: "Sign in to save your suggestions: " }), email, action("Email me a code", send, "button small"), note,
+      h("span", { class: "signin-fine", text: "Your email address is your name here: it's shown with your suggestions and in the record of changes." }));
   }
 
-  function markSuggestion(index, p, taken) {
-    const found = locateQuote(index, p.old || "", p.before || "", p.after || "");
-    if (!found) return false;
-    const [a, b] = found;
-    if (taken.some(([x, y]) => a < y && x < b)) return false;
-    taken.push([a, b]);
-    const who = p.proposer?.hypothesis || p.proposer?.name || "someone";
-    const start = index.chars[a], end = index.chars[b - 1];
-    const range = document.createRange();
-    range.setStart(start.node, start.offset);
-    range.setEnd(end.node, end.offset + 1);
-    const label = { "data-by": who, "data-proposal": p.id, title: `Suggested by ${who} · click for details`, tabindex: "0" };
-    let last = null;
-    if (p.kind === "delete" || p.kind === "replace") {
-      for (const node of textNodesIn(range)) {
-        const from = node === range.startContainer ? range.startOffset : 0;
-        const to = node === range.endContainer ? range.endOffset : node.length;
-        if (to <= from) continue;
-        const part = from > 0 ? node.splitText(from) : node;
-        if (to - from < part.length) part.splitText(to - from);
-        const del = h("del", { class: "track others", ...label });
-        part.before(del);
-        del.append(part);
-        last = del;
+  // The line at the top of the bar: who you are, and whether your changes are saved. Rebuilt only when that
+  // changes, so typing your email address or code isn't interrupted.
+  function updateBar(rebuild = false) {
+    const who = $("#suggest-who");
+    if (!who) return;
+    const key = !suggest.ready ? "loading" : suggest.me ? `in ${suggest.me.email} ${isMaintainer()}`
+      : `out ${suggest.backend?.kind} ${suggest.signin.step} ${suggest.signin.email}`;
+    if (rebuild || who.dataset.key !== key) {
+      who.dataset.key = key;
+      if (!suggest.ready) {
+        who.replaceChildren(h("span", { class: "muted", text: "Loading…" }));
+      } else if (suggest.me) {
+        who.replaceChildren(
+          h("span", {}, "Suggesting as ", h("strong", { class: "mine-name", text: suggest.me.email }),
+            isMaintainer() ? h("span", { class: "badge badge-soft", text: "maintainer" }) : ""),
+          h("span", { class: `save-status${suggest.status.problem ? " problem" : ""}`, id: "save-status", "aria-live": "polite", text: suggest.status.text }),
+          h("button", { type: "button", class: "linklike", text: "Sign out", onclick: signOut }));
+      } else {
+        who.replaceChildren(signInBox(), h("span", { class: "save-status problem", id: "unsaved" }));
       }
     }
-    if (p.kind === "replace" || p.kind === "insert") {
-      const ins = h("ins", { class: "track others added", "data-text": p.kind === "insert" ? ` ${p.new}` : ` ${p.new}`, ...label });
-      if (last) last.after(ins);
-      else { const r = document.createRange(); r.setStart(end.node, end.offset + 1); r.collapse(true); r.insertNode(ins); }
-    }
-    if (p.kind === "rule") {
-      const block = blockOf(end.node);
-      if (block) block.after(h(block.tagName === "LI" ? "li" : "p", { class: "track-rule others", "data-text": p.new, ...label }));
-    }
-    return true;
-  }
-
-  async function refreshSuggestions() {
-    const cfg = suggesting.cfg;
-    const ledger = await loadRecord(cfg, LEDGER_PATH);
-    const { open } = await loadProposals(cfg, suggesting.governance, ledger);
-    suggesting.open = open;
-    const index = docTextIndex();
-    const taken = [];
-    let shown = 0;
-    for (const p of [...open].sort((x, y) => (x.created || "").localeCompare(y.created || ""))) {
-      if (p.status === "needs-fix" && !p.new && p.kind !== "delete") continue;
-      if (markSuggestion(index, p, taken)) shown += 1;
-    }
-    const legend = $("#suggest-legend");
-    if (legend) {
-      legend.hidden = !shown;
-      legend.replaceChildren(h("span", { class: "legend-marks" }, h("del", { class: "track others", text: "struck" }), " would be removed, ",
-        h("ins", { class: "track others added", "data-text": "orange" }), " would be added"),
-        ` · ${plural(shown, "suggestion")} waiting for a maintainer. Click one for details.`);
+    const unsaved = $("#unsaved");
+    if (unsaved) {
+      const n = suggest.ready && !suggest.me ? collectChanges().length : 0;
+      unsaved.textContent = n ? `${plural(n, "change")} not saved yet: sign in to save ${n === 1 ? "it" : "them"}.` : "";
     }
   }
 
-  function suggestionCard(p) {
-    const box = h("div", { class: "suggestion-pop", role: "dialog", "aria-label": "Suggestion" });
-    const key = storedKey();
+  async function signOut() {
+    await sync();
+    try { await suggest.backend.signOut(); } catch (error) { hint(`Signing out didn't work: ${error.message}`); }
+  }
+
+  const HELP = {
+    suggest: "Select words and press Delete to strike them out; type to add words; press Enter at the end of a rule to add one. Your changes are saved as you go. Yours are blue; other people's are orange (click one to see it).",
+    comment: "Select words, then choose Annotate to comment on them. To change the text, switch to Suggesting.",
+  };
+
+  function suggestBar() {
+    return h("div", { class: "suggest-bar", id: "suggest-bar", role: "region", "aria-label": "Suggesting" },
+      h("div", { class: "suggest-line", id: "suggest-who" }),
+      h("p", { class: "suggest-tools" },
+        h("span", { class: "suggest-help", id: "suggest-help", text: HELP.suggest }),
+        action("Undo", () => undo(), "button secondary small suggest-undo")),
+      h("p", { class: "suggest-hint", id: "suggest-hint", "aria-live": "polite" }));
+  }
+
+  function setMode(editing) {
+    suggest.editing = editing;
+    for (const control of $$(".mode-switch button")) control.setAttribute("aria-pressed", String(control.dataset.mode === (editing ? "suggest" : "comment")));
+    $(".suggestion-pop")?.remove();
+    setEditable(editing);
+    $("#suggest-bar")?.classList.toggle("commenting", !editing);
+    const help = $("#suggest-help");
+    if (help) help.textContent = editing ? HELP.suggest : HELP.comment;
+  }
+
+  function modeSwitch() {
+    return h("span", { class: "mode-switch", role: "group", "aria-label": "Mode" },
+      h("button", { type: "button", "data-mode": "suggest", "aria-pressed": "true", text: "Suggesting", onclick: () => setMode(true) }),
+      h("button", { type: "button", "data-mode": "comment", "aria-pressed": "false", text: "Commenting", onclick: () => setMode(false) }));
+  }
+
+  // ---- Approving and disapproving ----
+
+  function voteControls(p) {
+    if (!isMaintainer() || !suggest.backend?.vote || FINAL_STATUS.has(p.status)) return null;
     const status = h("p", { class: "vote-status", "aria-live": "polite" });
     const say = (text, kind = "") => { status.className = `vote-status ${kind}`; status.textContent = text; };
-    const vote = (which) => async () => {
-      for (const b of box.querySelectorAll("button.vote-action")) b.disabled = true;
-      try { await castVote(suggesting.cfg, key, p, which, say); } catch (error) { say(`That didn't work: ${error.message}`, "failed"); }
+    const outcome = (vote) => vote === "approve"
+      ? `Approved. It's published as a new version at the robot's next check, usually within ${CHECK_EVERY}.`
+      : `Disapproved. It moves to the Declined page at the robot's next check, usually within ${CHECK_EVERY}.`;
+    const cast = async (vote) => {
+      approve.disabled = disapprove.disabled = true;
+      say(vote === "approve" ? "Approving…" : "Disapproving…", "pending");
+      try {
+        await suggest.backend.vote(p.id, vote);
+        say(outcome(vote), "done");
+        suggest.watcher?.refresh();
+      } catch (error) {
+        say(`That didn't work: ${error.message}`, "failed");
+      }
+      approve.disabled = p.status === "needs-fix";
+      disapprove.disabled = false;
     };
-    box.append(
-      h("p", { class: "pop-head" }, h("strong", { text: KIND_LABELS[p.kind] || "Change" }), ` · suggested by ${p.proposer?.name || "someone"}, ${formatDate(p.created)}`),
-      changeView(p),
-      p.reason ? h("p", { class: "proposal-reason", text: `“${p.reason}”` }) : "",
-      h("p", { class: "proposal-links" }, external("Comment on it", p.link), " · ", h("a", { href: `#proposal-${p.id}`, text: "See it in the list" })),
-      key ? h("p", { class: "vote-buttons" }, action("Approve", vote("approve"), "button vote-action"), " ",
-        action("Disapprove", vote("reject"), "button secondary vote-action")) : "",
-      status);
-    return box;
+    const approve = action("Approve", () => cast("approve"), "button small");
+    const disapprove = action("Disapprove", () => cast("reject"), "button secondary small");
+    if (p.status === "needs-fix") { approve.disabled = true; approve.title = "It needs a fix before it can be approved"; }
+    const mine = suggest.votes.filter((v) => v.suggestion === p.id && v.voter_id === suggest.me.id).pop();
+    if (mine && Date.parse(mine.at) >= Date.parse(p.updated || 0)) say(outcome(mine.vote), "done");
+    return h("div", { class: "vote" }, h("p", { class: "vote-buttons" }, approve, " ", disapprove), status);
+  }
+
+  // A reason for one of your suggestions, shown to the maintainers and kept in the record.
+  function reasonField(p) {
+    const s = (suggest.remote || []).find((x) => x.id === p.id);
+    if (!s || !isMine(s) || FINAL_STATUS.has(p.status)) return null;
+    const input = h("input", { type: "text", class: "key-input reason-input", maxlength: "1000", value: s.reason || "",
+      placeholder: "Why this change? (optional)", "aria-label": "Your reason for this change" });
+    const note = h("span", { class: "signin-note", "aria-live": "polite" });
+    const save = async () => {
+      note.textContent = "Saving…";
+      try {
+        await suggest.backend.save(s.docId, { reason: input.value.trim() });
+        note.textContent = "Saved.";
+        suggest.watcher?.refresh();
+      } catch (error) {
+        note.textContent = `Not saved: ${error.message}`;
+      }
+    };
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") save(); });
+    return h("p", { class: "reason-row" }, input, action("Save", save, "button secondary small"), note);
+  }
+
+  function suggestionCard(s) {
+    const record = { ...s, old: s.old ?? s.exact, before: s.before ?? s.prefix, after: s.after ?? s.suffix,
+      proposer: s.proposer || { name: s.author?.email } };
+    const known = recordOf(s.id);
+    const p = known && Date.parse(known.updated) === Date.parse(s.updated) ? { ...record, ...known } : { ...record, status: known?.status || "new" };
+    return h("div", { class: "suggestion-pop", role: "dialog", "aria-label": "Suggestion" },
+      h("p", { class: "pop-head" }, h("strong", { text: KIND_LABELS[s.kind] || "Change" }),
+        ` · suggested by ${record.proposer?.name || "someone"}, ${formatDate(s.created)}`),
+      changeView(record),
+      s.reason ? h("p", { class: "proposal-reason", text: `“${s.reason}”` }) : "",
+      s.link ? h("p", { class: "proposal-links" }, external("Comment on it", s.link)) : "",
+      voteControls(p));
   }
 
   function onSuggestionClick(event) {
     const mark = event.target.closest?.("[data-proposal]");
-    $(".suggestion-pop")?.remove();
-    if (!mark || suggesting.on || !$("#doc").contains(mark)) return;
-    const p = suggesting.open.find((x) => x.id === mark.dataset.proposal);
-    if (!p) return;
-    event.preventDefault();
-    const card = suggestionCard(p);
+    if (!event.target.closest?.(".suggestion-pop")) $(".suggestion-pop")?.remove();
+    if (!mark || !$("#doc").contains(mark)) return;
+    const s = suggest.others.find((x) => x.id === mark.dataset.proposal);
+    if (!s) return;
+    const card = suggestionCard(s);
     document.body.append(card);
     const box = mark.getBoundingClientRect();
     card.style.top = `${scrollY + box.bottom + 8}px`;
     card.style.left = `${Math.max(12, Math.min(scrollX + box.left, scrollX + innerWidth - card.offsetWidth - 12))}px`;
   }
 
-  function modeSwitch() {
-    return h("span", { class: "mode-switch", role: "group", "aria-label": "Mode" },
-      h("button", { type: "button", "data-mode": "read", "aria-pressed": "true", text: "Read & comment", onclick: () => suggesting.on && setMode(false) }),
-      h("button", { type: "button", "data-mode": "suggest", "aria-pressed": "false", text: "Suggest edits", onclick: () => !suggesting.on && setMode(true) }));
+  // ---- The list of suggestions below the text ----
+
+  // A suggestion from the database as a proposal: the robot's record of it if that's up to date, or what's known
+  // until the robot looks (within a few minutes).
+  function asProposal(s, known) {
+    if (known && (FINAL_STATUS.has(known.status) || Date.parse(known.updated) === Date.parse(s.updated))) return known;
+    return { id: s.id, status: "new", kind: s.kind, old: s.exact, new: s.new, before: s.prefix, after: s.suffix, reason: s.reason,
+      created: s.created, updated: s.updated, proposer: { name: s.author.email, email: s.author.email }, issue: known?.issue };
   }
 
-  function setupSuggesting(cfg, governance, markdown) {
-    Object.assign(suggesting, { cfg, governance, markdown, version: stampedVersion(markdown) || cfg.latest });
-    const key = storedHypothesisKey();
-    if (key) connectHypothesis(key).then(() => suggestBar.showWho?.()).catch(() => storeHypothesisKey(null));
+  function currentProposals() {
+    const { records, fresh } = suggest.proposals;
+    if (!suggest.remote) return [...fresh, ...records];
+    const live = new Map(suggest.remote.filter((s) => !isIgnored(s)).map((s) => [s.id, s]));
+    const list = [...fresh];
+    for (const r of records) {
+      if (!r.id.startsWith("sb-")) list.push(r);
+      else if (live.has(r.id)) { list.push(asProposal(live.get(r.id), r)); live.delete(r.id); }
+      else if (FINAL_STATUS.has(r.status)) list.push(r);  // an open one that's gone was withdrawn
+    }
+    for (const s of live.values()) list.push(asProposal(s));
+    return list;
+  }
+
+  function showInText(id) {
+    const mark = $(`#doc [data-proposal="${CSS.escape(id)}"]`) || $(`#doc [data-sid="${CSS.escape(id.replace(/^sb-/, ""))}"]`);
+    if (!mark) return hint("That suggestion isn't in the text as it is now.");
+    mark.scrollIntoView({ behavior: "smooth", block: "center" });
+    mark.classList.add("flash");
+    setTimeout(() => mark.classList.remove("flash"), 1800);
+  }
+
+  function renderProposals() {
+    const section = $("#proposals");
+    if (!section) return;
+    const { cfg, governance } = suggest;
+    const rules = governance?.rules || {};
+    const { replies } = suggest.proposals;
+    const { open, adopted, closed } = sortProposals(currentProposals());
+    const card = (p) => proposalCard(p, cfg, rules, replies, [reasonField(p), voteControls(p)]);
+    section.replaceChildren(
+      h("h2", { text: "Suggestions" }),
+      h("p", {}, "Each suggestion waits for the ", h("a", { href: at("maintainers/"), text: "maintainers" }),
+        `, who approve or disapprove it. ${ruleSentence(rules)} An approved change is published as a new version within ${CHECK_EVERY} or so.`));
+    if (!open.length) section.append(h("p", { class: "empty", text: "No suggestions are waiting right now. Edit the text above to make one." }));
+    else section.append(h("h3", { text: `Waiting for a maintainer (${open.length})` }), ...open.map(card));
+    if (adopted.length) {
+      const shown = adopted.slice(0, 8), rest = adopted.slice(8);
+      section.append(h("h3", { text: `Adopted (${adopted.length})` }), ...shown.map(card));
+      if (rest.length) section.append(h("details", { class: "more" }, h("summary", { text: `Show ${plural(rest.length, "earlier change")}` }), ...rest.map(card)));
+    }
+    section.append(h("p", { class: "muted" }, "Suggestions that maintainers disapprove, and ones that are withdrawn or can't be applied, move to the ",
+      h("a", { href: at("declined/"), text: "Declined page" }), closed.length ? ` (${closed.length} so far)` : "",
+      ". Every suggestion, vote, and outcome is also recorded in ", external(LEDGER_PATH, repoFile(cfg, LEDGER_PATH)), "."));
+    const count = $("#proposal-count");
+    if (count) {
+      count.replaceChildren(open.length
+        ? h("a", { href: "#proposals" }, `${plural(open.length, "suggestion is", "suggestions are")} waiting for a maintainer. See ${open.length === 1 ? "it" : "them"} below the text.`)
+        : adopted.length || closed.length ? h("a", { href: "#proposals", text: "No suggestions are waiting right now. See past decisions below the text." })
+          : h("span", { text: "No suggestions yet. Yours could be the first." }));
+    }
+  }
+
+  // ---- Starting up ----
+
+  async function setupSuggesting(cfg, governance, ledger, markdown) {
+    Object.assign(suggest, { cfg, governance, markdown, version: stampedVersion(markdown) || cfg.latest,
+      proposals: { replies: new Map(), records: ledger?.proposals || [], fresh: [] } });
+    $("#suggest-slot").replaceChildren(suggestBar());
     const doc = $("#doc");
     doc.addEventListener("beforeinput", onBeforeInput);
     doc.addEventListener("compositionstart", onCompositionStart);
-    doc.addEventListener("compositionend", () => { if (suggesting.on) { reconcile(); afterChange(); } });
-    // Every change this page makes cancels the browser's own; so any input event means one got past.
-    doc.addEventListener("input", (event) => { if (suggesting.on && !event.isComposing) { reconcile(); afterChange(); } });
-    doc.addEventListener("dragstart", (event) => suggesting.on && event.preventDefault());
-    doc.addEventListener("drop", (event) => suggesting.on && event.preventDefault());
+    doc.addEventListener("compositionend", () => { if (suggest.editing) { reconcile(); afterChange(); } });
+    doc.addEventListener("input", (event) => { if (suggest.editing && !event.isComposing) { reconcile(); afterChange(); } });
+    doc.addEventListener("dragstart", (event) => suggest.editing && event.preventDefault());
+    doc.addEventListener("drop", (event) => suggest.editing && event.preventDefault());
     doc.addEventListener("keydown", (event) => {
-      if (suggesting.on && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); undo(); }
+      if (suggest.editing && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); undo(); }
     });
     document.addEventListener("click", onSuggestionClick);
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") $(".suggestion-pop")?.remove();
       if (event.key === "Enter" && event.target.matches?.("[data-proposal]")) onSuggestionClick(event);
     });
-    if (savedWork()) announce("You have unsent changes. Choose “Suggest edits” to keep working on them.");
+    addEventListener("beforeunload", (event) => {
+      if (suggest.me && suggest.dirty) { sync(); event.preventDefault(); }
+    });
+    drawEverything();
+    setMode(true);
+    loadProposals(cfg, governance, ledger).then((data) => { suggest.proposals = data; refresh(); }).catch(() => {});
+
+    const useLocal = isLocal && new URLSearchParams(location.search).get("backend") === "local";
+    try {
+      suggest.backend = useLocal ? localBackend()
+        : cfg.supabase?.url && cfg.supabase?.key ? await supabaseBackend(cfg.supabase) : { kind: "none" };
+    } catch (error) {
+      suggest.backend = { kind: "none" };
+      hint(`Signing in isn't available right now: ${error.message}.`);
+    }
+    let gotUser = false, gotData = false;
+    const start = () => {
+      if (suggest.ready || !gotUser || !gotData) return;
+      suggest.ready = true;
+      const me = suggest.me;
+      if (me && savedWork()) {  // changes made in this browser before you signed in
+        suggest.me = null;
+        drawEverything();
+        suggest.me = me;
+        saveUnsavedAs(me);
+      } else {
+        drawEverything();
+      }
+      renderProposals();
+      loadHypothesis();  // after the text is drawn, so comments' highlights stay put
+    };
+    const backend = suggest.backend;
+    if (backend.kind === "none") { gotUser = gotData = true; return start(); }
+    suggest.watcher = backend.watch(({ suggestions, votes }) => {
+      suggest.remote = suggestions;
+      suggest.votes = votes;
+      if (!gotData) { gotData = true; return start(); }
+      refresh();
+    }, (error) => {
+      hint(`Suggestions couldn't be loaded: ${error.message}.`);
+      if (!gotData) { gotData = true; start(); }
+    });
+    backend.onUser((user) => {
+      const before = suggest.me;
+      suggest.me = user;
+      if (!gotUser) { gotUser = true; return start(); }
+      if (!suggest.ready || (before?.id ?? null) === (user?.id ?? null)) return updateBar();
+      if (user && !before && collectChanges().length) return saveUnsavedAs(user);
+      drawEverything();
+      renderProposals();
+    });
+    setTimeout(() => { gotUser = gotData = true; start(); }, 10000);  // don't wait forever for a slow connection
+  }
+
+  // Changes made before signing in are saved under your name. Your earlier suggestions are drawn in once the
+  // database has the new ones.
+  function saveUnsavedAs(user) {
+    for (const mark of $$("#doc .mine")) {
+      mark.dataset.by = user.email;
+      if (mark.title) mark.title = mark.title.replace(/ by .*$/, ` by ${user.email}`);
+    }
+    suggest.saved = new Map();
+    suggest.undrawable = new Set();
+    suggest.dirty = true;
+    suggest.edits += 1;
+    setSaveStatus("Saving…");
+    updateBar();
+    sync();
   }
 
   // ---------- Pages ----------
@@ -1407,9 +1851,9 @@
   function draftNote() {
     return h("aside", { class: "note" },
       h("p", {}, h("strong", { text: "Nothing here is final. " }),
-        "This is a comment draft. Anyone can propose a change in the ", h("a", { href: at("draft/"), text: "Drafter" }),
-        ". The maintainers approve or disapprove each proposal, and each approved change is published as a new version, with its own number and fingerprint."),
-      h("p", {}, button("Open the Drafter", at("draft/"))));
+        "This is a comment draft. Anyone can suggest a change on the ", h("a", { href: at("draft/"), text: "Suggest Edits" }),
+        " page, by editing the text with track changes on. The maintainers approve or disapprove each suggestion, and each approved change is published as a new version, with its own number and fingerprint."),
+      h("p", {}, button("Suggest edits", at("draft/"))));
   }
 
   // The community's Google group (versions.json: "community").
@@ -1452,10 +1896,10 @@
       h("p", { class: "command-name" }, h("code", { text: command })),
       h("p", { class: "command-effect", text: effect }),
       h("p", { class: "command-example" }, ...example));
-    return h("details", { class: "commands", id: "propose" },
+    return h("details", { class: "how", id: "propose" },
       h("summary", {}, h("h2", { id: "propose-title", text: "Or propose a change in a comment" })),
-      h("p", {}, "You can also select words in the text, choose ", h("em", { text: "Annotate" }),
-        ", and start your comment with one of these:"),
+      h("p", {}, "Choose ", h("em", { text: "Commenting" }), " above the text, select words, choose ", h("em", { text: "Annotate" }),
+        ", and start your comment with one of these. Comments use a free ", external("Hypothesis", "https://web.hypothes.is/start"), " account."),
       h("div", { class: "command-grid" },
         card("Delete", "Strikes out the words you selected. Select a whole rule to remove it.", h("del", { text: "quickly" })),
         card("Replace with: new words", "Puts your words in place of the ones you selected.", h("del", { text: "look at" }), " ", h("ins", { text: "read" })),
@@ -1467,16 +1911,16 @@
 
   function drafterIntro(governance) {
     return h("section", { class: "intro" },
-      h("h1", { text: "Drafter" }),
-      h("p", { class: "lede", text: "Anyone can comment on AGENTS.md here, and suggest changes. The maintainers approve or disapprove each suggestion, and every approved change is published right away as a new version." }),
-      h("ol", { class: "steps" },
-        h("li", {}, h("strong", { text: "Suggest. " }), "Choose ", h("em", { text: "Suggest edits" }),
-          " above the text and edit it directly, as in a word processor with track changes on: words you delete are struck out, and words you type appear in blue under your name. Then submit. Your suggestions go out under your free ",
-          external("Hypothesis", "https://web.hypothes.is/start"), " account; you don't need GitHub."),
-        h("li", {}, h("strong", { text: "A maintainer decides. " }), "The ", h("a", { href: at("maintainers/"), text: "maintainers" }),
-          " approve or disapprove each proposal. ", ruleSentence(governance?.rules)),
-        h("li", {}, h("strong", { text: "It's published, or set aside. " }), "An approved change is published within a minute or two as a new version, with its own number and fingerprint. A disapproved one moves to the ",
-          h("a", { href: at("declined/"), text: "Declined page" }), ". Every proposal, decision, and version is kept, so nothing is ever lost.")),
+      h("h1", { text: "Suggest Edits" }),
+      h("p", { class: "lede", text: "Change AGENTS.md right here, as in a shared document with track changes on. Sign in with your email, and your changes are saved as suggestions under your name. The maintainers approve or disapprove each one, and every approved change is published as a new version." }),
+      h("details", { class: "how" },
+        h("summary", {}, h("h2", { text: "How it works" })),
+        h("ol", { class: "steps" },
+          h("li", {}, h("strong", { text: "Suggest. " }), "Edit the text below: words you delete are struck out, and words you type appear in blue, labeled with your email address. Press Enter at the end of a rule to add a new one. Sign in with your email (we send you a code), and each change is saved as one suggestion as you make it. You don't need GitHub."),
+          h("li", {}, h("strong", { text: "A maintainer decides. " }), "The ", h("a", { href: at("maintainers/"), text: "maintainers" }),
+            " approve or disapprove each suggestion. ", ruleSentence(governance?.rules)),
+          h("li", {}, h("strong", { text: "It's published, or set aside. " }), `An approved change is published within ${CHECK_EVERY} or so as a new version, with its own number and fingerprint. A disapproved one moves to the `,
+            h("a", { href: at("declined/"), text: "Declined page" }), ". Every suggestion, decision, and version is kept, so nothing is ever lost."))),
       commandGuide(),
       h("p", { class: "proposal-count", id: "proposal-count" }));
   }
@@ -1491,16 +1935,14 @@
       ? ` Last changed ${formatDate(commit.commit.author.date)} by ${commit.author?.login ?? commit.commit.author.name} · ` : " ";
     fileBar(
       [h("span", { class: "badge", text: versionLabel(version) }), `${changed}${fileStats(markdown)}`],
-      [modeSwitch(), secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton(), rawToggle()]);
-    $(".file-bar").after(h("div", { id: "suggest-slot" }), h("p", { class: "suggest-legend", id: "suggest-legend", hidden: true }),
-      h("p", { class: "suggest-note", id: "suggest-note", hidden: true, "aria-live": "polite" }));
+      [modeSwitch(), secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton()]);
+    $(".file-bar").after(h("div", { id: "suggest-slot" }));
     renderMarkdown(markdown);
-    const proposals = h("section", { class: "versions proposals", id: "proposals" }, h("h2", { text: "Proposals" }), h("p", { class: "loading", text: "Loading proposals…" }));
+    const proposals = h("section", { class: "versions proposals", id: "proposals" }, h("h2", { text: "Suggestions" }), h("p", { class: "loading", text: "Loading suggestions…" }));
     $("#after").replaceChildren(proposals, maintainersNote(governance), communityNote(cfg) || "");
     setCanonical(at("draft/"));
-    setupSuggesting(cfg, governance, markdown);
-    loadHypothesis();
-    await Promise.all([showProposals(cfg, governance, ledger, proposals), showEveryVersion(cfg), refreshSuggestions()]);
+    await setupSuggesting(cfg, governance, ledger, markdown);
+    await showEveryVersion(cfg);
     highlightTarget(true);
     updateProgress();
   }
@@ -1511,8 +1953,8 @@
     $("#intro").replaceChildren(h("section", { class: "intro" },
       h("h1", { text: "An earlier version of the text" }),
       h("p", { class: "lede" }, `This is how AGENTS.md looked after change ${sha.slice(0, 7)}. Nothing is ever lost: `,
-        "to bring back words from it, propose the change in the Drafter (select the current words and write “Replace with:” and the earlier words), or ask a maintainer to restore the whole text."),
-      h("p", {}, button("Back to the Drafter", at("draft/")), " ",
+        "to bring back words from it, suggest the change on the Suggest Edits page (strike out the current words and type the earlier ones), or ask a maintainer to restore the whole text."),
+      h("p", {}, button("Back to Suggest Edits", at("draft/")), " ",
         secondary("What changed in this edit", `https://github.com/${cfg.repo}/commit/${sha}`, newTab))));
     fileBar(
       [h("span", { class: "badge", text: `Change ${sha.slice(0, 7)}` }), ` ${fileStats(markdown)}`],
@@ -1678,177 +2120,30 @@
   }
 
   // ---------- Maintainers ----------
-  // Maintainers sign in with a GitHub key (a personal access token) that stays in their browser. The page uses it
-  // only to post their vote on the proposal's GitHub issue, opening the issue first if the robot hasn't yet. The
-  // robot then checks that the voter is on the list of maintainers and acts on the vote.
-
-  const KEY_STORE = "els-maintainer-key";
-  const KEY_FOR_LEAD = "https://github.com/settings/personal-access-tokens/new";
-  const KEY_FOR_OTHERS = "https://github.com/settings/tokens/new?scopes=public_repo&description=AGENTS.md%20for%20Empirical%20Legal%20Scholars%20maintainer";
-
-  function storedKey() {
-    try { return sessionStorage.getItem(KEY_STORE) || localStorage.getItem(KEY_STORE); } catch { return null; }
-  }
-  function storeKey(key, stay = false) {
-    try {
-      sessionStorage.removeItem(KEY_STORE);
-      localStorage.removeItem(KEY_STORE);
-      if (key) (stay ? localStorage : sessionStorage).setItem(KEY_STORE, key);
-    } catch { /* storage blocked: signed in for this page only */ }
-  }
-
-  async function githubAs(key, method, path, body) {
-    const res = await fetch(`https://api.github.com${path}`, {
-      method, cache: "no-store", body: body ? JSON.stringify(body) : undefined,
-      headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${key}`, "X-GitHub-Api-Version": "2022-11-28",
-        ...(body ? { "Content-Type": "application/json" } : {}) },
-    });
-    if (!res.ok) {
-      const detail = await res.json().catch(() => ({}));
-      throw Object.assign(new Error(detail.message || `GitHub answered ${res.status}`), { status: res.status });
-    }
-    return res.status === 204 ? null : res.json();
-  }
-
-  // The proposal's GitHub issue: the robot's, or one this page opens (with the marker the robot looks for).
-  async function issueFor(cfg, key, p) {
-    if (p.issue) return p.issue;
-    const marker = `<!-- proposal:${p.id} -->`;
-    for (let page = 1; page <= 5; page++) {
-      const issues = await githubAs(key, "GET", `/repos/${cfg.repo}/issues?state=all&per_page=100&page=${page}`);
-      const found = issues.find((issue) => (issue.body || "").includes(marker));
-      if (found) return found.number;
-      if (issues.length < 100) break;
-    }
-    const made = await githubAs(key, "POST", `/repos/${cfg.repo}/issues`, {
-      title: `Proposal: ${KIND_LABELS[p.kind] || "Change"} “${squash(p.old).slice(0, 48)}”`,
-      body: `A proposal from the Drafter by ${p.proposer?.name || "a reader"}, filed on the Maintainers page so it can be decided. The robot adds the details.\n\n${marker}`,
-      labels: ["proposal"],
-    });
-    return made.number;
-  }
-
-  // After a vote, watch the issue: the robot closes it with the outcome.
-  async function outcomeOf(cfg, key, number) {
-    for (let i = 0; i < 24; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 10000));
-      try {
-        const issue = await githubAs(key, "GET", `/repos/${cfg.repo}/issues/${number}`);
-        if (issue.state === "closed") return issue.state_reason === "completed" ? "adopted" : "declined";
-      } catch { /* try again */ }
-    }
-    return null;
-  }
-
-  // Post a maintainer's vote on the proposal's GitHub issue, then wait for the robot to act on it.
-  async function castVote(cfg, key, p, vote, say) {
-    say(vote === "approve" ? "Approving…" : "Disapproving…");
-    const number = await issueFor(cfg, key, p);
-    await githubAs(key, "POST", `/repos/${cfg.repo}/issues/${number}/comments`,
-      { body: `/${vote}\n\n${vote === "approve" ? "Approved" : "Disapproved"} on the site.` });
-    say(vote === "approve" ? "Approved. The robot is publishing it as a new version (usually a minute or two)…"
-      : "Disapproved. The robot is moving it to the Declined page (usually a minute or two)…", "pending");
-    const outcome = await outcomeOf(cfg, key, number);
-    if (outcome === "adopted") say("Done: it's published as a new version. Reload the page to see it.", "done");
-    else if (outcome === "declined") say("Done: it's on the Declined page.", "done");
-    else say("Your vote is in. The robot hasn't finished yet; reload in a few minutes to see the result.", "pending");
-  }
-
-  function voteButtons(cfg, key, p) {
-    const status = h("p", { class: "vote-status", "aria-live": "polite" });
-    const say = (text, kind = "") => { status.className = `vote-status ${kind}`; status.textContent = text; };
-    const approve = action("Approve", () => cast("approve"), "button");
-    const disapprove = action("Disapprove", () => cast("reject"), "button secondary");
-    if (p.status === "needs-fix") { approve.disabled = true; approve.title = "It needs a fix before it can be approved"; }
-    async function cast(vote) {
-      approve.disabled = disapprove.disabled = true;
-      try {
-        await castVote(cfg, key, p, vote, say);
-      } catch (error) {
-        say(`That didn't work: ${error.message}`, "failed");
-        approve.disabled = p.status === "needs-fix";
-        disapprove.disabled = false;
-      }
-    }
-    return h("div", { class: "vote" }, h("p", { class: "vote-buttons" }, approve, " ", disapprove), status);
-  }
-
-  function showSignIn(cfg, governance, ledger, section, problem = "") {
-    const input = h("input", { type: "password", class: "key-input", autocomplete: "off", spellcheck: "false",
-      placeholder: "Paste your key here", "aria-label": "Your GitHub key" });
-    const stay = h("input", { type: "checkbox", id: "stay-signed-in" });
-    const go = () => {
-      const key = input.value.trim();
-      if (!key) return input.focus();
-      storeKey(key, stay.checked);
-      showReview(cfg, governance, ledger, section, key);
-    };
-    input.addEventListener("keydown", (event) => { if (event.key === "Enter") go(); });
-    section.replaceChildren(
-      h("h2", { text: "Approve or disapprove proposals" }),
-      h("p", { text: "Maintainers sign in here with a key from GitHub. The key stays in this browser, and your votes are posted on GitHub under your name. Readers don't need to sign in: they comment in the Drafter." }),
-      problem ? h("p", { class: "error", text: problem }) : "",
-      h("ol", { class: "signin-steps" },
-        h("li", {}, h("strong", { text: "Create a key on GitHub. " }),
-          "The lead maintainer: ", external("create a fine-grained key", KEY_FOR_LEAD),
-          ", choose “Only select repositories” and pick ", h("code", { text: cfg.repo.split("/")[1] }),
-          ", then under Repository permissions set Issues to “Read and write.” Other maintainers: ",
-          external("create a classic key", KEY_FOR_OTHERS), " (the form is filled in for you). Either way, choose how long it lasts (90 days is fine), choose Generate token, and copy the key."),
-        h("li", {}, h("strong", { text: "Paste it here and sign in. " }), h("span", { class: "key-row" }, input, action("Sign in", go, "button"))),
-        h("li", {}, h("label", { for: "stay-signed-in" }, stay, " Stay signed in on this computer. Otherwise you're signed out when you close this tab."))),
-      h("p", { class: "muted", text: "The key lets this page post comments on GitHub for you, and it's sent only to GitHub. Anyone who has it could do the same, so don't share it. You can delete it any time in GitHub's settings." }));
-  }
-
-  async function showReview(cfg, governance, ledger, section, key = storedKey()) {
-    if (!key) return showSignIn(cfg, governance, ledger, section);
-    section.replaceChildren(h("h2", { text: "Approve or disapprove proposals" }), h("p", { class: "loading", text: "Signing in…" }));
-    let user;
-    try {
-      user = await githubAs(key, "GET", "/user");
-    } catch (error) {
-      storeKey(null);
-      return showSignIn(cfg, governance, ledger, section, error.status === 401
-        ? "GitHub didn't accept that key. It may have expired or been mistyped; create a new one." : `Couldn't sign in: ${error.message}`);
-    }
-    const me = (governance?.maintainers || []).find((m) => m.github && m.github.toLowerCase() === user.login.toLowerCase());
-    const { replies, open } = await loadProposals(cfg, governance, ledger);
-    section.replaceChildren(
-      h("h2", { text: "Approve or disapprove proposals" }),
-      h("p", { class: `signed-in${me ? "" : " not-maintainer"}` }, "Signed in as ", h("strong", { text: user.name || user.login }),
-        ` (${user.login} on GitHub)`, me ? ", a maintainer. " : ". That account isn't on the list of maintainers, so its votes won't count. ",
-        action("Sign out", () => { storeKey(null); showSignIn(cfg, governance, ledger, section); }, "button secondary small")));
-    if (!open.length) return section.append(h("p", { class: "empty", text: "Nothing is waiting for a decision right now." }));
-    section.append(h("p", { class: "muted", text: `${plural(open.length, "proposal is", "proposals are")} waiting. Your vote is posted on the proposal's GitHub issue under your name, and the robot acts on it, usually within a minute or two. ${ruleSentence(governance?.rules)}` }));
-    for (const p of open) section.append(proposalCard(p, cfg, governance?.rules || {}, replies, voteButtons(cfg, key, p)));
-  }
 
   async function showMaintainers(cfg) {
     $(".file").hidden = true;
-    const [governance, ledger] = await Promise.all([loadRecord(cfg, MAINTAINERS_PATH), loadRecord(cfg, LEDGER_PATH)]);
+    const governance = await loadRecord(cfg, MAINTAINERS_PATH);
     const rules = governance?.rules || {};
     $("#intro").replaceChildren(h("section", { class: "intro" },
       h("h1", { text: "Maintainers" }),
-      h("p", { class: "lede", text: "Anyone can comment on AGENTS.md. The maintainers decide which proposed changes go in: they approve or disapprove each one, and every approved change is published as a new version." }),
-      h("ol", { class: "steps" },
-        h("li", {}, h("strong", { text: "Anyone suggests. " }), "In the ", h("a", { href: at("draft/"), text: "Drafter" }),
-          ", readers comment, and suggest changes by editing the text with track changes on (", h("em", { text: "Suggest edits" }),
-          "). Each change they submit becomes one proposal under their name. Readers can't change the text themselves."),
-        h("li", {}, h("strong", { text: "A maintainer decides. " }), `Each proposal waits for a maintainer to approve or disapprove it, here on this page. ${ruleSentence(rules)}`),
-        h("li", {}, h("strong", { text: "Approved: a new version. " }), "Within a minute or two, the change is made and published as a new version, with its own number and fingerprint. The record says who proposed it and who approved it."),
-        h("li", {}, h("strong", { text: "Disapproved: set aside. " }), "It leaves the Drafter's list and moves to the ",
-          h("a", { href: at("declined/"), text: "Declined page" }), ", where it's kept for the record."))));
-    const review = h("section", { class: "versions", id: "review" });
-    $("#after").replaceChildren(
-      h("section", { class: "versions", id: "maintainers" },
-        h("h2", { text: "The maintainers" }),
-        maintainerList(governance),
-        h("p", {}, "Maintainers can change the text too: they propose a change like anyone else, then approve it. The lead maintainer can also edit the text directly, and keeps this list in ",
+      h("p", { class: "lede", text: "The maintainers decide which suggested changes go into AGENTS.md." }),
+      maintainerList(governance)));
+    $("#after").replaceChildren(h("section", { class: "versions", id: "how" },
+      h("details", { class: "how" },
+        h("summary", {}, h("h2", { text: "What maintainers do" })),
+        h("ol", { class: "steps" },
+          h("li", {}, h("strong", { text: "Anyone suggests. " }), "On the ", h("a", { href: at("draft/"), text: "Suggest Edits" }),
+            " page, readers sign in with their email and edit the text with track changes on. Each change is one suggestion under their name. Readers can't change the text themselves."),
+          h("li", {}, h("strong", { text: "A maintainer decides. " }), `Signed in on Suggest Edits, a maintainer can approve or disapprove each suggestion: click it in the text, or use the list below the text. ${ruleSentence(rules)}`),
+          h("li", {}, h("strong", { text: "Approved: a new version. " }), `Within ${CHECK_EVERY} or so, the change is made and published as a new version, with its own number and fingerprint. The record says who suggested it and who approved it.`),
+          h("li", {}, h("strong", { text: "Disapproved: set aside. " }), "It leaves the list and moves to the ",
+            h("a", { href: at("declined/"), text: "Declined page" }), ", where it's kept for the record.")),
+        h("p", {}, "Maintainers suggest changes like anyone else, then approve them. The lead maintainer can also edit the text directly, and keeps this list in ",
           external(MAINTAINERS_PATH, repoFile(cfg, MAINTAINERS_PATH)), ", where every change is public."),
         h("p", { class: "muted" }, "To become a maintainer, ask the lead maintainer", cfg.community ? [", for example in the ",
           h("a", { href: at("join/"), text: "community's Google group" })] : "", ". The full rules are in ",
-          external("GOVERNANCE.md", repoFile(cfg, "GOVERNANCE.md")), ".")),
-      review);
-    await showReview(cfg, governance, ledger, review);
+          external("GOVERNANCE.md", repoFile(cfg, "GOVERNANCE.md")), "."))));
     highlightTarget(true);
   }
 
@@ -1857,14 +2152,15 @@
     const [governance, ledger] = await Promise.all([loadRecord(cfg, MAINTAINERS_PATH), loadRecord(cfg, LEDGER_PATH)]);
     $("#intro").replaceChildren(h("section", { class: "intro" },
       h("h1", { text: "Declined proposals" }),
-      h("p", { class: "lede", text: "Proposed changes that the maintainers disapproved, or that were withdrawn or couldn't be applied. They're kept here for the record and no longer appear in the Drafter's list." })));
+      h("p", { class: "lede", text: "Suggested changes that the maintainers disapproved, or that were withdrawn or couldn't be applied. They're kept here for the record and no longer appear on the Suggest Edits page." })));
     const list = h("section", { class: "versions proposals" }, h("p", { class: "loading", text: "Loading…" }));
     $("#after").replaceChildren(list);
-    const { replies, closed } = await loadProposals(cfg, governance, ledger);
+    const { replies, records } = await loadProposals(cfg, governance, ledger);
+    const { closed } = sortProposals(records);
     list.replaceChildren(...(closed.length ? closed.map((p) => proposalCard(p, cfg, governance?.rules || {}, replies))
       : [h("p", { class: "empty", text: "Nothing has been declined yet." })]),
-      h("p", { class: "muted" }, "A proposal's comment stays with the person who wrote it, so it can still appear in the Drafter's comment sidebar. ",
-        h("a", { href: at("draft/"), text: "Back to the Drafter" }), "."));
+      h("p", { class: "muted" }, "A proposal made in a comment stays with the person who wrote it, so the comment can still appear in the comment sidebar on Suggest Edits. ",
+        h("a", { href: at("draft/"), text: "Back to Suggest Edits" }), "."));
   }
 
   // ---------- Join the community ----------
@@ -1911,17 +2207,19 @@
         addressLine(group.email),
         h("p", {}, "You can also read and reply to conversations ", external("on Google Groups", group.page), ". To leave, send an email to ",
           h("code", { text: groupAddress(cfg, "+unsubscribe") }), "."),
-        h("p", { class: "muted" }, "The group is for conversation. To change AGENTS.md itself, propose the change in the ",
-          h("a", { href: at("draft/"), text: "Drafter" }), ", where the maintainers decide on it."))));
+        h("p", { class: "muted" }, "The group is for conversation. To change AGENTS.md itself, suggest the change on the ",
+          h("a", { href: at("draft/"), text: "Suggest Edits" }), " page, where the maintainers decide on it."))));
   }
 
   function showFooter(cfg) {
+    const maker = cfg.created_by;
     $("#footer")?.replaceChildren(
       h("p", {}, h("span", { class: "brand-file", text: "AGENTS.md" }), " ", h("em", { text: "for Empirical Legal Scholars" })),
+      maker ? h("p", { class: "made-by" }, "Created by ", maker.url ? external(maker.name, maker.url) : maker.name) : null,
       h("p", {}, ...joined([
         external("Source on GitHub", `https://github.com/${cfg.repo}`),
         external("Changelog", repoFile(cfg, "CHANGELOG.md")),
-        h("a", { href: at("maintainers/"), text: "How changes are approved" }),
+        h("a", { href: at("maintainers/"), text: "Maintainers" }),
         cfg.community ? h("a", { href: at("join/"), text: "Join the group" }) : null,
         h("a", { href: at("check/"), text: "Check a copy" }),
         h("a", { href: at("llms.txt"), text: "llms.txt" }),
@@ -1930,6 +2228,7 @@
 
   async function main() {
     setupReaderControls();
+    trackHeader();
     const views = { published: showPublished, drafter: showDrafter, archive: showArchive, check: showCheck, join: showJoin,
       maintainers: showMaintainers, declined: showDeclined };
     try {

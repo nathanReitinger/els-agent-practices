@@ -16,8 +16,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from commands import parse_command  # noqa: E402
 from fingerprint import fingerprint  # noqa: E402
-from proposals import Governance, count_votes, decide, parse_time  # noqa: E402
+from proposals import Governance, count_votes, decide, fetch_site, parse_time  # noqa: E402
 
 DRAFTER = "https://nathanreitinger.github.io/els-agent-practices/draft/"
 # Like GitHub's machines: no git settings from this computer, and no guessing a name or email from it.
@@ -42,6 +43,29 @@ def note(id, user, text, exact=None, prefix="", suffix="", created="2026-10-03T1
 
 def reply(id, user, text, to, when="2026-10-03T11:00:00+00:00"):
     return note(id, user, text, created=when, refs=[to])
+
+
+LEAD_EMAIL = MAINTAINERS["maintainers"][0]["email"]
+
+
+def site_vote(suggestion, email, vote, at="2026-10-03T11:00:00.123456+00:00"):
+    """A row of the Suggest Edits database's votes table, as its API returns it."""
+    return {"suggestion": suggestion, "voter_id": f"id-{email}", "voter_email": email, "vote": vote, "at": at}
+
+
+def site_suggestions(email="reader@example.org", start=0):
+    """The editor's four captured suggestions as rows of the Suggest Edits database's suggestions table."""
+    posted = json.loads((ROOT / "scripts" / "tests" / "suggestions.json").read_text())["posted"]
+    rows = []
+    for i, body in enumerate(posted):
+        selector = body["target"][0]["selector"][0]
+        command = parse_command(body["text"], selector["exact"])
+        when = f"2026-10-03T10:0{start + i}:00.000001+00:00"
+        rows.append({"id": f"0000000{i}-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "author_id": f"id-{email}", "author_email": email,
+                     "kind": command["kind"], "exact": selector["exact"], "prefix": selector["prefix"],
+                     "suffix": selector["suffix"], "new_text": command["new"], "reason": "", "base": "0.0.2",
+                     "created": when, "updated": when})
+    return rows
 
 
 class VotesTest(unittest.TestCase):
@@ -75,12 +99,26 @@ class VotesTest(unittest.TestCase):
         votes, _, _ = count_votes(self.record, [reply("r1", "nathanReitinger", "Approve", "p")], comments, self.gov)
         self.assertEqual([(v.vote, v.via) for v in votes], [("reject", "GitHub")])
 
+    def test_votes_on_suggest_edits_count_by_email(self):
+        votes, support, stale = count_votes(self.record, [], [], self.gov, [
+            site_vote("p", LEAD_EMAIL.upper(), "approve"),
+            site_vote("p", "reader@example.org", "approve"),
+            site_vote("p", LEAD_EMAIL, "reject", at="2026-10-03T09:00:00+00:00"),  # older, and before the last edit
+        ])
+        self.assertEqual([(v.maintainer.name, v.vote, v.via) for v in votes], [("Nathan Reitinger", "approve", "Suggest Edits")])
+        self.assertEqual((support, stale), (1, 0))
+        votes, _, stale = count_votes(self.record, [], [], self.gov, [site_vote("p", LEAD_EMAIL, "approve", at="2026-10-03T09:00:00Z")])
+        self.assertEqual((votes, stale), ([], 1))
+
     def test_self_approval_can_be_turned_off(self):
         data = json.loads(json.dumps(MAINTAINERS))
         data["rules"]["maintainers_may_approve_their_own_proposals"] = False
         gov = Governance(data)
         record = {**self.record, "proposer": {"name": "N", "hypothesis": "nathanReitinger"}}
         votes, _, _ = count_votes(record, [reply("r1", "nathanReitinger", "Approve", "p")], [], gov)
+        self.assertEqual(votes, [])
+        on_site = {**self.record, "proposer": {"name": LEAD_EMAIL, "email": LEAD_EMAIL}}
+        votes, _, _ = count_votes(on_site, [], [], gov, [site_vote("p", LEAD_EMAIL, "approve")])
         self.assertEqual(votes, [])
 
     def test_decisions(self):
@@ -136,8 +174,11 @@ class RunTest(unittest.TestCase):
         return subprocess.run(["git", "-c", "user.name=Maintainer", "-c", "user.email=maintainer@example.org", *args],
                               cwd=self.repo, capture_output=True, text=True, check=True, env=NO_GIT_SETTINGS).stdout.strip()
 
-    def robot(self, rows, *extra, now="2026-10-03T12:00:00Z"):
+    def robot(self, rows, *extra, now="2026-10-03T12:00:00Z", site=None):
         self.fixture.write_text(json.dumps(rows))
+        if site is not None:
+            (self.dir / "site.json").write_text(json.dumps(site))
+            extra = (*extra, "--site-data", str(self.dir / "site.json"))
         result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--offline",
                                  "--now", now, *extra], cwd=self.repo, capture_output=True, text=True, env=NO_GIT_SETTINGS)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -301,6 +342,50 @@ class RunTest(unittest.TestCase):
                 self.assertIn("- Set and record a random seed in each script that samples or simulates.\n"
                               "- Name the model and its version in every log.\n", draft)
 
+    def test_suggestions_and_votes_from_suggest_edits(self):
+        rows = site_suggestions()
+        ids = [f"sb-{row['id']}" for row in rows]
+        votes = [site_vote(ids[0], LEAD_EMAIL, "approve"), site_vote(ids[1], "someone@example.org", "approve"),
+                 site_vote(ids[2], LEAD_EMAIL, "reject")]
+        self.robot([], site={"suggestions": rows, "votes": votes})
+        ledger = self.ledger()
+        self.assertEqual([ledger[i]["status"] for i in ids], ["adopted", "open", "declined", "open"])
+        self.assertEqual((ledger[ids[1]]["support"], ledger[ids[0]]["proposer"]), (1, {"name": "reader@example.org", "email": "reader@example.org"}))
+        self.assertEqual(ledger[ids[0]]["votes"][0]["via"], "Suggest Edits")
+        draft = (self.repo / "draft" / "AGENTS.md").read_text()
+        self.assertIn("- If the project isn't under version control, offer to set it up", draft)
+
+        # The record credits the proposer by email address, and the commit is theirs.
+        changelog = (self.repo / "CHANGELOG.md").read_text()
+        self.assertIn("Proposed by reader@\u2060example.org (Suggest Edits) on 2026-10-03", changelog)
+        self.assertIn("Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)", changelog)
+        self.assertEqual(self.git("log", "-1", "--format=%an <%ae>", "v0.0.3"), "reader@example.org <reader@example.org>")
+        message = self.git("log", "-1", "--format=%B", "v0.0.3")
+        self.assertIn("Suggested-by: reader@example.org (Suggest Edits)", message)
+        self.assertIn("Approved-by: Nathan Reitinger (Suggest Edits)", message)
+
+        # Editing a suggestion makes earlier votes stale; withdrawing one (deleting its row) closes it.
+        rows[3] = {**rows[3], "new_text": "Name the model and its exact version in every log.",
+                   "updated": "2026-10-03T12:10:00.5+00:00"}
+        votes.append(site_vote(ids[3], LEAD_EMAIL, "approve", at="2026-10-03T12:05:00+00:00"))
+        self.robot([], site={"suggestions": [rows[3]], "votes": votes}, now="2026-10-03T12:30:00Z")
+        ledger = self.ledger()
+        self.assertEqual((ledger[ids[1]]["status"], ledger[ids[1]]["note"]), ("withdrawn", "The proposer withdrew it."))
+        self.assertEqual((ledger[ids[3]]["status"], ledger[ids[3]]["stale_votes"]), ("open", 1))
+        votes.append(site_vote(ids[3], LEAD_EMAIL, "approve", at="2026-10-03T12:40:00+00:00"))
+        self.robot([], site={"suggestions": [rows[3]], "votes": votes}, now="2026-10-03T13:00:00Z")
+        self.assertEqual(self.ledger()[ids[3]]["status"], "adopted")
+        self.assertIn("- Name the model and its exact version in every log.\n", (self.repo / "draft" / "AGENTS.md").read_text())
+
+    def test_suggest_edits_accounts_can_be_ignored(self):
+        governance = self.repo / "governance" / "maintainers.json"
+        data = json.loads(governance.read_text())
+        data["ignored_accounts"]["site"] = ["Spam@Example.org"]
+        governance.write_text(json.dumps(data))
+        self.git("commit", "--quiet", "-am", "Ignore a spammer")
+        self.robot([], site={"suggestions": site_suggestions("spam@example.org"), "votes": []})
+        self.assertEqual(self.ledger(), {})
+
     def test_a_changed_frozen_version_stops_the_robot(self):
         frozen = self.repo / "versions" / "v0.0.1" / "AGENTS.md"
         frozen.write_text(frozen.read_text().replace("Never", "Always", 1))
@@ -311,8 +396,53 @@ class RunTest(unittest.TestCase):
         self.assertIn("no longer matches its recorded fingerprint", result.stderr)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class FetchSiteTest(unittest.TestCase):
+    """Reading Suggest Edits' database, from a stand-in for Supabase's API on a local port."""
+
+    def setUp(self):
+        import http.server
+        import threading
+        self.requests = []
+        rows = [{"id": str(i), "created": f"{i:06d}"} for i in range(1500)]
+        test = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                from urllib.parse import parse_qs, urlparse
+                url = urlparse(self.path)
+                query = {k: v[0] for k, v in parse_qs(url.query).items()}
+                test.requests.append((url.path, query, {k.lower(): v for k, v in self.headers.items()}))
+                table = rows if url.path == "/rest/v1/suggestions" else [{"suggestion": "sb-1", "vote": "approve"}]
+                offset, limit = int(query.get("offset", 0)), int(query.get("limit", 1000))
+                body = json.dumps(table[offset:offset + limit]).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def test_every_row_with_the_public_key(self):
+        data = fetch_site(self.url + "/", "sb_publishable_test")
+        self.assertEqual(len(data["suggestions"]), 1500)
+        self.assertEqual(data["votes"], [{"suggestion": "sb-1", "vote": "approve"}])
+        paths = [(path, query.get("offset")) for path, query, _ in self.requests]
+        self.assertEqual(paths, [("/rest/v1/suggestions", "0"), ("/rest/v1/suggestions", "1000"), ("/rest/v1/votes", "0")])
+        headers = self.requests[0][2]
+        self.assertEqual(headers.get("apikey"), "sb_publishable_test")
+        self.assertNotIn("authorization", headers)  # a publishable key isn't a JWT
+        fetch_site(self.url, "eyJhbGciOiJIUzI1NiJ9.e30.x")
+        self.assertEqual(self.requests[-1][2].get("authorization"), "Bearer eyJhbGciOiJIUzI1NiJ9.e30.x")
 
 
 class FakeGitHub:
@@ -394,6 +524,7 @@ class FakeGitHub:
 
     def close(self):
         self.server.shutdown()
+        self.server.server_close()
 
 
 class GitHubRunTest(RunTest):
@@ -461,7 +592,7 @@ class GitHubRunTest(RunTest):
         self.assertEqual(self.origin_git("rev-parse", "main"), head)
         self.assertEqual(len([c for c in self.github.comments[number] if c["user"]["type"] == "Bot"]), 1)
 
-    def test_an_issue_opened_on_the_maintainers_page_counts(self):
+    def test_an_issue_opened_by_hand_counts(self):
         rows = [r for r in self.rows() if r["id"] in ("p2",)]
         self.github.issues[1] = {"number": 1, "title": "Proposal", "state": "open", "labels": [],
                                  "body": "Filed on the Maintainers page.\n\n<!-- proposal:p2 -->"}
@@ -478,7 +609,22 @@ class GitHubRunTest(RunTest):
                                  "body": "Filed on the Maintainers page.\n\n<!-- proposal:p2 -->"}
         self.robot_online(rows)
         self.assertEqual(self.github.issues[1]["labels"], [{"name": "proposal"}])
-        self.assertIn("**Maintainers:** approve or disapprove it on the [Maintainers page]", self.github.issues[1]["body"])
+        self.assertIn("**Maintainers:** approve or disapprove it on [Suggest Edits]", self.github.issues[1]["body"])
+
+    def test_a_suggestion_gets_an_issue_once_it_has_settled(self):
+        row = {**site_suggestions()[0], "created": "2026-10-03T11:55:00+00:00", "updated": "2026-10-03T11:55:00+00:00"}
+        (self.dir / "site.json").write_text(json.dumps({"suggestions": [row], "votes": []}))
+        env = {**NO_GIT_SETTINGS, "GH_TOKEN": "test-token", "REPO": "owner/name", "GITHUB_API_URL": self.github.url}
+        for now, issues in (("2026-10-03T12:00:00Z", 0), ("2026-10-03T12:06:00Z", 1)):
+            self.fixture.write_text("[]")
+            result = subprocess.run([sys.executable, "scripts/proposals.py", "--annotations", str(self.fixture), "--site-data",
+                                     str(self.dir / "site.json"), "--push", "--now", now], cwd=self.repo, capture_output=True,
+                                    text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(len(self.github.issues), issues)
+        body = self.github.issues[1]["body"]
+        self.assertIn("**reader@\u2060example.org** (Suggest Edits) proposes a change", body)
+        self.assertNotIn("the comment that proposes it", body)
 
     def test_a_rejected_push_starts_again(self):
         # Someone else pushes first; the robot's push is rejected, so it starts over from GitHub's copy.
@@ -495,3 +641,7 @@ class GitHubRunTest(RunTest):
         self.assertIn("Elsewhere", log)
         self.assertIn("Version 0.0.3: Replaced", log)
         self.assertEqual(self.origin_git("tag", "--list", "v0.0.3"), "v0.0.3")
+
+
+if __name__ == "__main__":
+    unittest.main()

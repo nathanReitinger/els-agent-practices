@@ -174,10 +174,14 @@ button { font: inherit; color: inherit; }
   transition: background 0.15s, color 0.15s;
 }
 .site-nav a:hover { color: var(--text); background: var(--accent-soft); }
+.site-nav a.nav-icon { display: inline-grid; place-items: center; padding: 0.3rem 0.6rem; }
+.icon-github { width: 1.15rem; height: 1.15rem; }
 body[data-mode="published"] [data-nav="file"],
 body[data-mode="archive"] [data-nav="file"],
 body[data-mode="drafter"] [data-nav="drafter"],
 body[data-mode="join"] [data-nav="join"],
+body[data-mode="maintainers"] [data-nav="maintainers"],
+body[data-mode="declined"] [data-nav="maintainers"],
 body[data-mode="check"] [data-nav="check"] { color: var(--accent-contrast); background: var(--accent); }
 
 /* Reading controls: text size and light or dark. */
@@ -273,7 +277,7 @@ body[data-mode="check"] [data-nav="check"] { color: var(--accent-contrast); back
   .toc details { padding: 0.2rem 0 0; border: 0; background: none; }
 }
 
-/* Drafter introduction */
+/* The introduction at the top of a page (Suggest Edits, Maintainers, and others) */
 .intro { margin: 0 0 1.75rem; }
 .intro h1 { margin: 0 0 0.45rem; font-family: var(--sans); font-size: 2.1rem; font-weight: 700; letter-spacing: -0.02em; }
 .intro .lede { margin: 0 0 1rem; color: var(--muted); font-family: var(--serif); font-size: 1.15rem; line-height: 1.6; }
@@ -459,7 +463,7 @@ button.button { appearance: none; }
 .loading { font-style: italic; }
 .error { color: #c0392b; }
 
-/* After the file: the note on the published page, and every version in the Drafter. */
+/* After the file: the note on the published page, and every version on Suggest Edits. */
 .note {
   margin-top: 1.5rem;
   padding: 1rem 1.15rem;
@@ -578,18 +582,9 @@ details.more summary { margin: 0.4rem 0 0.8rem; color: var(--accent); font-weigh
 .line-diff del, .line-diff ins { overflow-wrap: anywhere; }
 table.fingerprints td:first-child { font-weight: 600; white-space: nowrap; }
 
-/* Maintainers: sign-in and votes */
+/* Votes, sign-in, and the accordions that hold how-to text */
 .button.small { padding: 0.18rem 0.65rem; font-size: 0.8rem; }
 .button:disabled { opacity: 0.45; cursor: default; filter: none; }
-.signed-in { padding: 0.7rem 0.9rem; border: 1px solid var(--rule); border-left: 3px solid var(--good); border-radius: 10px; background: var(--good-soft); }
-.signed-in.not-maintainer { border-left-color: var(--warn); background: var(--warn-soft); }
-.signed-in .button { margin-left: 0.3rem; vertical-align: 0.05em; }
-.signin-steps { margin: 0.6rem 0 0.9rem; padding-left: 1.3rem; font-family: var(--serif); line-height: 1.6; }
-.signin-steps li { margin: 0.55rem 0; }
-.signin-steps strong { font-family: var(--sans); font-weight: 600; }
-.signin-steps code { font-family: var(--mono); font-size: 0.85em; }
-.signin-steps label { cursor: pointer; }
-.key-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.4rem; }
 .key-input { flex: 1 1 16rem; min-width: 0; padding: 0.45rem 0.7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: 0.85rem var(--mono); }
 .key-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .vote { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--rule); }
@@ -599,52 +594,69 @@ table.fingerprints td:first-child { font-weight: 600; white-space: nowrap; }
 .vote-status.pending { color: var(--muted); }
 .vote-status.done { color: var(--good); font-weight: 600; }
 .vote-status.failed { color: var(--bad); }
+.reason-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0.6rem 0 0 !important; }
+.reason-input { font-family: var(--sans); font-size: 0.88rem; }
+details.how { margin: 1rem 0 0; }
+details.how + details.how { margin-top: 0.4rem; }
+details.how > summary { list-style: none; cursor: pointer; }
+details.how > summary::-webkit-details-marker { display: none; }
+details.how > summary h2 { display: inline; font-size: 1.15rem; }
+details.how > summary::after { content: " ▸"; color: var(--muted); }
+details.how[open] > summary::after { content: " ▾"; }
+details.how[open] > summary { margin-bottom: 0.7rem; }
+.intro .member-list { margin-top: 0.4rem; }
 
-/* Suggesting: track changes, always on */
+/* Suggest Edits: track changes, always on */
 .mode-switch { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); }
 .mode-switch button { padding: 0.3rem 0.75rem; border: 0; border-radius: 7px; background: none; color: var(--muted); font: 500 0.86rem var(--sans); cursor: pointer; }
 .mode-switch button[aria-pressed="true"] { background: var(--accent); color: var(--accent-contrast); }
 .mode-switch button:not([aria-pressed="true"]):hover { color: var(--text); background: var(--accent-soft); }
-#suggest-slot { position: sticky; top: 4.6rem; z-index: 5; }
+#suggest-slot { position: sticky; top: var(--below-header, 4.6rem); z-index: 5; }
 @media (max-width: 760px) {
   #suggest-slot { top: 0; }
   .suggest-help { display: none; }  /* the steps above the text say the same */
   .suggest-bar { padding: 0.55rem 0.7rem 0.5rem; }
-  .suggest-actions { gap: 0.3rem; }
-  .suggest-actions .button { padding: 0.28rem 0.6rem; font-size: 0.8rem; }
-  .suggest-count { flex-basis: 100%; }
 }
 .suggest-bar { padding: 0.75rem 1rem 0.6rem; border-bottom: 1px solid var(--rule); background: color-mix(in srgb, var(--bg) 90%, var(--mine)); box-shadow: 0 6px 12px -10px rgba(0, 0, 0, 0.25); }
+.suggest-bar.commenting { background: var(--panel); }
+.suggest-bar.commenting .suggest-undo, .suggest-bar.commenting .suggest-line { display: none; }
 .suggest-bar p { margin: 0; }
-.suggest-line { font-size: 0.9rem; line-height: 1.5; }
-.suggest-line strong { color: var(--mine); }
-.suggest-who { color: var(--muted); }
-.mine-name { color: var(--mine); }
-.suggest-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.5rem !important; }
-.suggest-count { margin-right: auto; color: var(--muted); font-size: 0.86rem; }
+.suggest-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.7rem; font-size: 0.9rem; line-height: 1.5; }
+.suggest-line .badge { margin-left: 0.4rem; vertical-align: 0.08em; }
+.mine-name { color: var(--mine); overflow-wrap: anywhere; }
+.save-status { color: var(--muted); font-size: 0.86rem; }
+.save-status:empty { display: none; }
+.save-status.problem { color: var(--warn); }
+.signin { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.45rem; }
+.signin .key-input { flex: 1 1 13rem; max-width: 20rem; padding: 0.3rem 0.6rem; font-family: var(--sans); }
+.signin .code-input { flex: 0 1 8rem; letter-spacing: 0.15em; font-family: var(--mono); }
+.signin-note { color: var(--muted); font-size: 0.86rem; }
+.signin-note:empty { display: none; }
+.signin-fine { flex-basis: 100%; color: var(--muted); font-size: 0.8rem; }
+.suggest-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin-top: 0.45rem !important; }
+.suggest-help { flex: 1 1 20rem; color: var(--muted); font-size: 0.84rem; line-height: 1.45; }
 .suggest-hint { margin-top: 0.35rem !important; color: var(--warn); font-size: 0.85rem; }
 .suggest-hint:empty { display: none; }
-.suggest-panel:empty { display: none; }
-.suggest-panel { margin-top: 0.7rem; padding: 0.8rem 0.9rem; border: 1px solid var(--rule); border-radius: 10px; background: var(--bg); }
-.suggest-panel .signin-steps { margin: 0.4rem 0 0.5rem; }
-.submit-list { margin: 0.4rem 0 0.6rem; padding-left: 1.2rem; font-family: var(--serif); }
-.submit-list li { margin: 0.25rem 0; }
-.linklike { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.linklike { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 0.86rem; text-decoration: underline; cursor: pointer; }
 .doc.suggesting { caret-color: var(--mine); outline: none; }
 .doc.suggesting:focus-visible { outline: none; }
 .suggesting-mode .doc { box-shadow: inset 3px 0 0 var(--mine); }
 .suggesting-mode hypothesis-adder { display: none !important; }
 .suggesting-mode hypothesis-highlight { background: none !important; }
 
-/* Your own changes, while suggesting: struck-out words, and new words in blue with your name. */
+/* Your own changes: struck-out words, and new words in blue with your name (your email address). */
 .doc ins.track.mine { color: var(--mine); background: var(--mine-soft); text-decoration: none; border-bottom: 1px solid var(--mine); border-radius: 2px; }
 .doc del.track.mine { color: var(--del); background: var(--del-soft); }
-.doc ins.track.mine::before, .doc .track.others::before {
+.doc ins.track.mine::before, .doc .track.others::before, .doc .track-rule.others::before {
   content: attr(data-by);
+  display: inline-block;
+  max-width: 16em;
+  overflow: hidden;
   margin: 0 0.15em 0 0.05em;
   padding: 0 0.3em;
   border-radius: 4px;
   font: 600 0.55em/1.6 var(--sans);
+  text-overflow: ellipsis;
   vertical-align: 0.5em;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -652,7 +664,7 @@ table.fingerprints td:first-child { font-weight: 600; white-space: nowrap; }
 .doc ins.track.mine::before { background: var(--mine); color: var(--bg); }
 .doc .track-new.mine { box-shadow: inset 2px 0 0 var(--mine); }
 
-/* Everyone's pending suggestions, while reading: orange, with the suggester's name. */
+/* Everyone else's suggestions: orange, with the suggester's name. */
 .doc del.track.others { color: var(--others); background: var(--others-soft); text-decoration-color: var(--others); cursor: pointer; }
 .doc del.track.others::before { content: none; }
 .doc ins.track.others.added { background: none; text-decoration: none; cursor: pointer; }
@@ -662,11 +674,8 @@ table.fingerprints td:first-child { font-weight: 600; white-space: nowrap; }
 .doc .track-rule.others::after { content: attr(data-text); background: var(--others-soft); border-bottom: 1px solid var(--others); }
 .doc .track-rule.others::before { background: var(--others); color: var(--bg); }
 .doc [data-proposal]:focus-visible { outline: 2px solid var(--others); outline-offset: 2px; }
-.suggest-legend { margin: 0; padding: 0.55rem 1rem; border-bottom: 1px solid var(--rule); background: var(--panel); color: var(--muted); font-size: 0.86rem; }
-.suggest-legend del.track.others { color: var(--others); background: var(--others-soft); text-decoration-color: var(--others); }
-.suggest-legend ins.track.others.added { text-decoration: none; background: none; }
-.suggest-legend ins.track.others.added::after { content: attr(data-text); color: var(--others); background: var(--others-soft); border-bottom: 1px solid var(--others); }
-.suggest-note { margin: 0; padding: 0.6rem 1rem; border-bottom: 1px solid var(--rule); background: var(--good-soft); color: var(--good); font-size: 0.9rem; }
+.doc .flash { outline: 2px solid var(--others); outline-offset: 3px; border-radius: 3px; }
+.doc .flash.mine, .doc [data-sid].flash { outline-color: var(--mine); }
 .suggestion-pop {
   position: absolute;
   z-index: 30;
@@ -680,13 +689,8 @@ table.fingerprints td:first-child { font-weight: 600; white-space: nowrap; }
   font-size: 0.9rem;
 }
 .suggestion-pop p { margin: 0.35rem 0 0; }
-.suggestion-pop .pop-head { margin: 0; color: var(--muted); }
+.suggestion-pop .pop-head { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 .suggestion-pop .pop-head strong { color: var(--text); }
-details.commands > summary { list-style: none; cursor: pointer; }
-details.commands > summary::-webkit-details-marker { display: none; }
-details.commands > summary h2 { display: inline; }
-details.commands > summary::after { content: " ▸"; color: var(--muted); }
-details.commands[open] > summary::after { content: " ▾"; }
 
 /* Join the community */
 .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; margin-top: 1.4rem; }
@@ -713,6 +717,7 @@ details.commands[open] > summary::after { content: " ▾"; }
 }
 .site-footer p { margin: 0.25rem 0; }
 .site-footer a { color: var(--muted); }
+.site-footer .made-by a { color: var(--text); }
 
 @media print {
   .progress, .site-header, .toc, .file-actions, .copy, .copy-inline, .site-footer, #after, #intro { display: none !important; }

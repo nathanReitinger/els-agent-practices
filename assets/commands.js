@@ -1,4 +1,4 @@
-/* How a comment in the Drafter becomes a proposal, and how a reply becomes a vote.
+/* How a comment on Suggest Edits becomes a proposal, and how a reply becomes a vote.
    The robot that counts votes (scripts/commands.py) uses the same rules; keep the two identical.
    scripts/tests/commands.json checks both. Works in the browser (window.ELSCommands) and in Node. */
 (function (root) {

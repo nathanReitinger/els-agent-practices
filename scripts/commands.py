@@ -1,4 +1,4 @@
-"""How a comment in the Drafter becomes a proposal, and how a reply becomes a vote.
+"""How a comment on Suggest Edits becomes a proposal, and how a reply becomes a vote.
 
 A proposal is a comment on selected words whose first line is a command:
 
@@ -10,7 +10,7 @@ A proposal is a comment on selected words whose first line is a command:
 Anything else is an ordinary comment. Later lines are the reason, optionally
 starting with "Why:". A vote is a reply whose first word is Approve or Reject.
 
-assets/commands.js does the same in the browser, for the Drafter's preview.
+assets/commands.js does the same in the browser, so Suggest Edits shows new proposals right away.
 Keep the two identical: scripts/tests/commands.json checks both.
 """
 

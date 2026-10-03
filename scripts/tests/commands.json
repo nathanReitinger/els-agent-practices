@@ -1,5 +1,5 @@
 {
-  "about": "Test cases for how a Drafter comment becomes a proposal or a vote. scripts/tests/test_commands.py checks scripts/commands.py and assets/commands.js against every case, so the robot and the page always agree.",
+  "about": "Test cases for how a comment on Suggest Edits becomes a proposal or a vote. scripts/tests/test_commands.py checks scripts/commands.py and assets/commands.js against every case, so the robot and the page always agree.",
   "commands": [
     {"text": "Delete", "expect": {"kind": "delete", "new": "", "reason": "", "problems": []}},
     {"text": "delete this", "expect": {"kind": "delete", "new": "", "reason": "", "problems": []}},

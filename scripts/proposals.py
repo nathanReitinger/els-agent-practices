@@ -5,21 +5,24 @@
     python3 scripts/proposals.py             # make the changes and commit them in this copy
     python3 scripts/proposals.py --push      # ...then push them and update GitHub issues
 
-.github/workflows/proposals.yml runs it with --push every 15 minutes, and right away
+.github/workflows/proposals.yml runs it with --push every five minutes, and right away
 when someone comments on a proposal's GitHub issue or a maintainer changes the text.
 Each run:
 
 1. Checks that every published version still matches its recorded fingerprint.
 2. Publishes a maintainer's direct edit to draft/AGENTS.md as a new version.
-3. Reads every comment on the Drafter from Hypothesis. A comment on selected words
+3. Reads the suggestions and votes made on the Suggest Edits page, from the site's
+   Supabase database (supabase/README.md), with the public key in versions.json.
+   Each suggestion is a proposal; each vote is approve or reject.
+4. Reads every comment on Suggest Edits from Hypothesis. A comment on selected words
    that starts with a command (Delete, Replace with:, Add after:, Add rule:) is a
    proposal; a reply that starts with Approve or Reject is a vote (scripts/commands.py).
-4. Checks each open proposal against the current text (scripts/edits.py) and counts
+5. Checks each open proposal against the current text (scripts/edits.py) and counts
    the votes of the maintainers in governance/maintainers.json. Maintainers can also vote by
    commenting /approve or /reject on the proposal's GitHub issue.
-5. Applies each approved proposal and publishes it as the next version
+6. Applies each approved proposal and publishes it as the next version
    (scripts/release.py), one version per proposal, each with its own commit and tag.
-6. Records every proposal, vote, and outcome in governance/proposals.json, opens a
+7. Records every proposal, vote, and outcome in governance/proposals.json, opens a
    GitHub issue for each new proposal (so people watching the repository get an
    email), and closes it with the outcome.
 """
@@ -62,8 +65,12 @@ BOT_IDENTITY = {"GIT_COMMITTER_NAME": BOT_NAME, "GIT_COMMITTER_EMAIL": BOT_EMAIL
                 "GIT_AUTHOR_NAME": BOT_NAME, "GIT_AUTHOR_EMAIL": BOT_EMAIL}
 FINAL = ("adopted", "declined", "withdrawn", "cannot-apply")
 NEW_ISSUES_PER_RUN = 10
-LEDGER_ABOUT = ("Every proposal made in the Drafter, its votes, and its outcome. Written by scripts/proposals.py; "
-                "don't edit it by hand.")
+# A suggestion on Suggest Edits is saved while it's typed, so its GitHub issue waits until it has been left alone
+# this long. (Votes on it count right away.)
+SETTLE_MINUTES = 10
+SITE = "Suggest Edits"
+LEDGER_ABOUT = ("Every proposal made on the Suggest Edits page (suggestions and comments), its votes, and its outcome. "
+                "Written by scripts/proposals.py; don't edit it by hand.")
 
 
 class PushRejected(Exception):
@@ -137,6 +144,7 @@ class Maintainer:
     role: str
     hypothesis: str
     github: str
+    email: str = ""
 
 
 class Governance:
@@ -148,16 +156,17 @@ class Governance:
             self.hours_open = float(rules.get("hours_open_before_adoption", 0))
             self.count_from = parse_time(rules["proposals_count_from"])
             self.maintainers = [Maintainer(m["name"], m.get("role", "maintainer"), m.get("hypothesis") or "",
-                                           m.get("github") or "") for m in data["maintainers"]]
+                                           m.get("github") or "", m.get("email") or "") for m in data["maintainers"]]
             ignored = data.get("ignored_accounts", {})
+            self.ignored_site = {u.lower() for u in ignored.get("site", [])}
             self.ignored_hypothesis = {u.lower() for u in ignored.get("hypothesis", [])}
             self.ignored_github = {u.lower() for u in ignored.get("github", [])}
         except (KeyError, TypeError, ValueError) as error:
             raise SystemExit(f"governance/maintainers.json isn't in the expected form ({error!r}); see GOVERNANCE.md")
         if self.approvals_needed < 1 or not self.maintainers:
             raise SystemExit("governance/maintainers.json needs at least one maintainer and approvals_needed of at least 1")
-        if any(not (m.hypothesis or m.github) for m in self.maintainers):
-            raise SystemExit("every maintainer in governance/maintainers.json needs a Hypothesis or GitHub username")
+        if any(not (m.email or m.hypothesis or m.github) for m in self.maintainers):
+            raise SystemExit("every maintainer in governance/maintainers.json needs an email address, or a Hypothesis or GitHub username")
 
     def by_hypothesis(self, user: str) -> Maintainer | None:
         name = username(user).lower()
@@ -165,6 +174,9 @@ class Governance:
 
     def by_github(self, login: str) -> Maintainer | None:
         return next((m for m in self.maintainers if m.github and m.github.lower() == (login or "").lower()), None)
+
+    def by_email(self, email: str) -> Maintainer | None:
+        return next((m for m in self.maintainers if m.email and m.email.lower() == (email or "").lower()), None)
 
     def rule_sentence(self) -> str:
         n = self.approvals_needed
@@ -190,10 +202,18 @@ class Vote:
                 "link": self.link}
 
 
-def count_votes(record: dict, replies: list[dict], comments: list[dict], gov: Governance) -> tuple[list[Vote], int, int]:
-    """Each maintainer's latest vote cast since the proposal was last edited; readers in favor; votes made stale by an edit."""
+def is_proposer(maintainer: Maintainer, proposer: dict) -> bool:
+    hypothesis, email = (proposer.get("hypothesis") or "").lower(), (proposer.get("email") or "").lower()
+    return bool(hypothesis and maintainer.hypothesis.lower() == hypothesis or email and maintainer.email.lower() == email)
+
+
+def count_votes(record: dict, replies: list[dict], comments: list[dict], gov: Governance,
+                site_votes: list[dict] = ()) -> tuple[list[Vote], int, int]:
+    """Each maintainer's latest vote cast since the proposal was last edited; readers in favor; votes made stale by an edit.
+
+    Votes come from replies to a comment (Hypothesis), comments on the proposal's GitHub issue, and the Suggest Edits
+    page (rows of the database's votes table)."""
     since = parse_time(record["updated"])
-    proposer = record["proposer"]["hypothesis"].lower()
     latest: dict[str, Vote] = {}
     stale: set[str] = set()
     support: set[str] = set()
@@ -206,7 +226,7 @@ def count_votes(record: dict, replies: list[dict], comments: list[dict], gov: Go
         if when < since:
             stale.add(maintainer.name)
             return
-        if vote == "approve" and not gov.self_approval and maintainer.hypothesis.lower() == proposer:
+        if vote == "approve" and not gov.self_approval and is_proposer(maintainer, record["proposer"]):
             return
         if maintainer.name not in latest or when > latest[maintainer.name].when:
             latest[maintainer.name] = Vote(maintainer, vote, when, via, link)
@@ -225,6 +245,10 @@ def count_votes(record: dict, replies: list[dict], comments: list[dict], gov: Go
         if vote:
             consider(gov.by_github(login), vote, parse_time(comment.get("updated_at") or comment["created_at"]),
                      "GitHub", comment.get("html_url", ""), f"github:{login}")
+    for row in site_votes:
+        email = row.get("voter_email") or ""
+        if row.get("vote") in ("approve", "reject") and email.lower() not in gov.ignored_site:
+            consider(gov.by_email(email), row["vote"], parse_time(row["at"]), SITE, "", f"site:{email.lower()}")
     votes = sorted(latest.values(), key=lambda v: v.when)
     return votes, len(support), len(stale - set(latest))
 
@@ -275,6 +299,46 @@ def quote_of(annotation: dict) -> tuple[str, str, str] | None:
     return None
 
 
+# ---------- Suggest Edits (Supabase) ----------
+
+def site_headers(key: str) -> dict:
+    """Supabase takes a project key in the apikey header. A legacy "anon" key is a JWT, and goes in both."""
+    headers = {"apikey": key, "Accept": "application/json"}
+    if key.startswith("eyJ"):
+        headers["Authorization"] = f"Bearer {key}"
+    return headers
+
+
+def fetch_site(url: str, key: str) -> dict[str, list[dict]]:
+    """Every suggestion and vote made on Suggest Edits. Anyone may read them (supabase/schema.sql), so the public key
+    in versions.json is all this needs."""
+    def table(name: str, order: str) -> list[dict]:
+        rows: list[dict] = []
+        while True:  # the database sends at most 1,000 rows at a time
+            query = urllib.parse.urlencode({"select": "*", "order": order, "limit": 1000, "offset": len(rows)})
+            batch = get_json(f"{url.rstrip('/')}/rest/v1/{name}?{query}", site_headers(key))
+            rows.extend(batch)
+            if len(batch) < 1000:
+                return rows
+    return {"suggestions": table("suggestions", "created.asc,id.asc"), "votes": table("votes", "at.asc")}
+
+
+def site_proposer(email: str) -> dict:
+    return {"name": email, "email": email}
+
+
+def proposer_parts(who: dict) -> tuple[str, str]:
+    """Who proposed it, and where, in Markdown: ("Jane Doe", "Hypothesis: jdoe") or ("jane@example.org", "Suggest Edits")."""
+    if who.get("hypothesis"):
+        return md(who["name"]), f"Hypothesis: {md(who['hypothesis'])}"
+    return md(who.get("email") or who["name"]), SITE
+
+
+def proposer_line(who: dict) -> str:
+    name, via = proposer_parts(who)
+    return f"{name} ({via})"
+
+
 # ---------- GitHub ----------
 
 class GitHub:
@@ -305,8 +369,8 @@ class GitHub:
             page += 1
 
     def proposal_issues(self) -> dict[str, dict]:
-        """Every issue for a proposal, found by the marker in its text: the robot opens most of them, but the
-        Maintainers page opens one when a maintainer votes on a proposal the robot hasn't filed yet."""
+        """Every issue for a proposal, found by the marker in its text. The robot opens them, but anyone can open
+        one with the marker (earlier versions of the Maintainers page did), and it counts the same."""
         found: dict[str, dict] = {}
         self.duplicates: list[tuple[dict, dict]] = []
         for issue in sorted(self.pages("/issues?state=all"), key=lambda i: i["number"]):
@@ -326,7 +390,7 @@ class GitHub:
             if error.code != 404:
                 raise
             self.call("POST", "/labels", {"name": "proposal", "color": "8a2432",
-                                          "description": "A change proposed in the Drafter, waiting for the maintainers"})
+                                          "description": "A change suggested on Suggest Edits, waiting for the maintainers"})
 
 
 # ---------- Showing a proposal ----------
@@ -415,10 +479,11 @@ def issue_title(record: dict) -> str:
 def issue_body(record: dict, gov: Governance, site: str) -> str:
     who = record["proposer"]
     preview = record.get("preview") or {}
+    name, via = proposer_parts(who)
     lines = [
-        f"**{md(who['name'])}** (Hypothesis: {md(who['hypothesis'])}) proposes a change"
-        f"{' to **' + md(record['section']) + '**' if record.get('section') else ''} in the "
-        f"[Drafter]({site}draft/#proposals):",
+        f"**{name}** ({via}) proposes a change"
+        f"{' to **' + md(record['section']) + '**' if record.get('section') else ''} on "
+        f"[{SITE}]({site}draft/#proposals):",
         "",
         f"**{md(phrase(record, limit=200))}**",
         "",
@@ -432,9 +497,11 @@ def issue_body(record: dict, gov: Governance, site: str) -> str:
         "",
         "---",
         "",
-        f"**Maintainers:** approve or disapprove it on the [Maintainers page]({site}maintainers/), reply `/approve` or `/reject` "
-        "here (replying to the notification email works too), or reply "
-        f"**Approve** or **Reject** to [the proposal in the Drafter]({record['link']}). {gov.rule_sentence()} "
+        f"**Maintainers:** approve or disapprove it on [{SITE}]({site}draft/#proposals), signed in with your email; "
+        "or reply `/approve` or `/reject` here (replying to the notification email works too)"
+        + ("" if record["id"].startswith("sb-") else
+           f"; or reply **Approve** or **Reject** to [the comment that proposes it]({record['link']})")
+        + f". {gov.rule_sentence()} "
         "Only a maintainer's latest vote counts, and votes cast before the proposal was last edited don't count.",
         "",
         f"<!-- proposal:{record['id']} -->",
@@ -467,6 +534,7 @@ class Options:
     annotations: Path | None = None
     offline: bool = False
     now: dt.datetime | None = None
+    site_data: Path | None = None
 
 
 class Robot:
@@ -477,7 +545,7 @@ class Robot:
         self.gov = Governance(json.loads(MAINTAINERS.read_text()))
         self.manifest = json.loads(MANIFEST.read_text())
         self.site = self.manifest["site"]
-        self.drafter = f"{self.site}draft/"
+        self.suggest_page = f"{self.site}draft/"  # where comments are anchored in Hypothesis
         self.now = options.now or now_utc()
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
         repo = os.environ.get("REPO") or os.environ.get("GITHUB_REPOSITORY") or self.manifest["repo"]
@@ -555,10 +623,53 @@ class Robot:
             data = json.loads(self.o.annotations.read_text())
             return data["rows"] if isinstance(data, dict) else data
         try:
-            return fetch_annotations(self.drafter)
+            return fetch_annotations(self.suggest_page)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-            self.say(f"Couldn't read the Drafter's comments from Hypothesis ({error}); proposals weren't checked.")
+            self.say(f"Couldn't read the comments on {SITE} from Hypothesis ({error}); proposals weren't checked.")
             return None
+
+    def site_data(self) -> dict[str, list[dict]] | None:
+        """Suggest Edits' suggestions and votes; None if they couldn't be read (so nothing is withdrawn by mistake)."""
+        if self.o.site_data:
+            return json.loads(self.o.site_data.read_text())
+        config = self.manifest.get("supabase") or {}
+        if self.o.annotations or not (config.get("url") and config.get("key")):  # tests, or not set up yet
+            return {"suggestions": [], "votes": []}
+        try:
+            return fetch_site(config["url"], config["key"])
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError) as error:
+            self.say(f"Couldn't read the suggestions from {SITE} ({error}); they weren't checked.")
+            return None
+
+    def gather_site(self, rows: list[dict], records: dict[str, dict]) -> None:
+        """Bring the ledger up to date with the suggestions made on Suggest Edits."""
+        seen = set()
+        for row in sorted(rows, key=lambda r: (r["created"], r["id"])):
+            rid = f"sb-{row['id']}"
+            email = row.get("author_email") or ""
+            record = records.get(rid)
+            if email.lower() in self.gov.ignored_site:
+                if record and record["status"] not in FINAL:
+                    record.update(status="withdrawn", note="The proposer's account is ignored.", decided=self.now.isoformat())
+                continue
+            seen.add(rid)
+            if record and record["status"] in FINAL:
+                continue
+            if record is None:
+                record = records[rid] = {"id": rid, "status": "new", "based_on": self.manifest["latest"], "issue": None}
+                self.say(f"New suggestion {rid} from {email}: {row['kind']}.")
+            new = " ".join((row.get("new_text") or "").split())
+            problems = [] if row["kind"] == "delete" or new else ["missing-new"]
+            record.update({
+                "kind": row["kind"], "old": row["exact"], "new": new, "before": row.get("prefix") or "",
+                "after": row.get("suffix") or "", "reason": " ".join((row.get("reason") or "").split()),
+                "problems": problems, "proposer": site_proposer(email), "created": row["created"], "updated": row["updated"],
+                "link": f"{self.site}draft/#proposals",
+            })
+        for record in records.values():
+            if record["id"].startswith("sb-") and record["status"] not in FINAL and record["id"] not in seen:
+                record.update(status="withdrawn", note="The proposer withdrew it.", decided=self.now.isoformat())
+                self.say(f"Suggestion {record['id']} was withdrawn.")
 
     def gather(self, rows: list[dict], records: dict[str, dict]) -> dict[str, list[dict]]:
         """Bring the ledger up to date with the comments; returns the replies to each comment."""
@@ -600,7 +711,7 @@ class Robot:
                 "link": (row.get("links") or {}).get("incontext") or f"https://hypothes.is/a/{row['id']}",
             })
         for record in records.values():
-            if record["status"] in FINAL or record["id"] in seen:
+            if record["status"] in FINAL or record["id"] in seen or record["id"].startswith("sb-"):
                 continue
             # Missing from the search: make sure it was really deleted before calling it withdrawn.
             if self.o.annotations or annotation_exists(record["id"]) is False:
@@ -639,21 +750,27 @@ class Robot:
         who = record["proposer"]
         issue = f" · Discussion: <https://github.com/{self.repo}/issues/{record['issue']}>" if record.get("issue") else ""
         details = [
-            f"- Proposed by {md(who['name'])} (Hypothesis: {md(who['hypothesis'])}) on {record['created'][:10]}"
+            f"- Proposed by {proposer_line(who)} on {record['created'][:10]}"
             + (f": “{md(short(record['reason'], 300))}”" if record.get("reason") else ""),
             "- Approved by " + ", ".join(f"{md(v.maintainer.name)} ({v.via}, {v.when.date().isoformat()})" for v in approvals),
             f"- Proposal: <{record['link']}>{issue}",
         ]
-        author_name = re.sub(r"[<>\n]", "", who["name"]).strip() or who["hypothesis"]
-        author_mail = re.sub(r"[^\w.+-]", "", who["hypothesis"]) or "proposer"
+        if who.get("hypothesis"):
+            author_name = re.sub(r"[<>\n]", "", who["name"]).strip() or who["hypothesis"]
+            author_mail = re.sub(r"[^\w.+-]", "", who["hypothesis"]) or "proposer"
+            author = f"{author_name} <{author_mail}@hypothes.is.invalid>"
+            suggested = f"{author_name} (Hypothesis: {who['hypothesis']})"
+        else:  # on Suggest Edits, a proposer's email address is their name
+            email = re.sub(r"[<>\s]", "", who.get("email") or "") or "proposer@suggest-edits.invalid"
+            author, suggested = f"{email} <{email}>", f"{email} ({SITE})"
         message = "\n".join([
             f"Version {{version}}: {summary_of(record)}", "",
             f"Proposal: {record['link']}",
-            f"Suggested-by: {author_name} (Hypothesis: {who['hypothesis']})",
+            f"Suggested-by: {suggested}",
             *[f"Approved-by: {v.maintainer.name} ({v.via})" for v in approvals],
             "Fingerprint (Argon2id): {fingerprint}",
         ])
-        entry = self.publish(summary_of(record), details, message, f"{author_name} <{author_mail}@hypothes.is.invalid>")
+        entry = self.publish(summary_of(record), details, message, author)
         record.update(status="adopted", decided=self.now.isoformat(), version=entry["version"],
                       fingerprint=entry["fingerprint"], diff=edit.diff)
         self.say(f"Adopted proposal {record['id']} as version {entry['version']}: {summary_of(record)}")
@@ -674,9 +791,14 @@ class Robot:
         records = self.load_ledger()
         before = LEDGER.read_text() if LEDGER.exists() else ""
         rows = self.annotations()
-        if rows is None:
+        site = self.site_data()
+        if rows is None or site is None:
             return self.finish(records, before)
+        self.gather_site(site.get("suggestions") or [], records)
         replies = self.gather(rows, records)
+        site_votes: dict[str, list[dict]] = {}
+        for vote in site.get("votes") or []:
+            site_votes.setdefault(vote["suggestion"], []).append(vote)
 
         issues = self.github.proposal_issues() if self.github else {}
         for record in records.values():
@@ -689,7 +811,8 @@ class Robot:
         for record in pending:  # oldest first, each against the text as the earlier ones left it
             edit = self.evaluate(record, text)
             comments = self.github.pages(f"/issues/{record['issue']}/comments") if self.github and record.get("issue") else []
-            votes, support, stale = count_votes(record, replies.get(record["id"], []), comments, self.gov)
+            votes, support, stale = count_votes(record, replies.get(record["id"], []), comments, self.gov,
+                                                site_votes.get(record["id"], []))
             record.update(votes=[v.record() for v in votes], support=support, stale_votes=stale)
             if record["status"] in FINAL:  # it can't be applied any more
                 continue
@@ -712,7 +835,9 @@ class Robot:
     def open_issues(self, records: dict[str, dict], issues: dict[str, dict]) -> None:
         if not self.github:
             return
-        waiting = [r for r in records.values() if not r.get("issue") and r["status"] == "open"]
+        settled = lambda r: (not r["id"].startswith("sb-")
+                             or (self.now - parse_time(r["updated"])).total_seconds() >= SETTLE_MINUTES * 60)
+        waiting = [r for r in records.values() if not r.get("issue") and r["status"] == "open" and settled(r)]
         if waiting and self.github.write:
             self.github.ensure_label()
         for record in sorted(waiting, key=lambda r: r["created"])[:NEW_ISSUES_PER_RUN]:
@@ -779,10 +904,13 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="say what would happen, and change nothing")
     parser.add_argument("--push", action="store_true", help="push the results and update GitHub issues")
     parser.add_argument("--annotations", type=Path, help="read comments from this file instead of Hypothesis")
+    parser.add_argument("--site-data", type=Path,
+                        help="read Suggest Edits' suggestions and votes from this file instead of its database")
     parser.add_argument("--offline", action="store_true", help="don't use GitHub at all")
     parser.add_argument("--now", help="the current time, for tests (ISO 8601)")
     args = parser.parse_args()
-    options = Options(args.dry_run, args.push, args.annotations, args.offline, parse_time(args.now) if args.now else None)
+    options = Options(args.dry_run, args.push, args.annotations, args.offline, parse_time(args.now) if args.now else None,
+                      args.site_data)
     for attempt in range(3):
         robot = Robot(options)
         try:
