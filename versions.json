@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": false
   },
-  "latest": "0.0.3",
+  "latest": "0.0.4",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.4",
+      "date": "2026-10-03",
+      "summary": "Added “(e.g., Stata, Python, R)” after “code” (Getting oriented).",
+      "fingerprint": "3cca1b123156da9b56417c68ec3b260bd044ed3d2426cbd6e46899fa2f3a32b1",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.3",
       "date": "2026-10-02",

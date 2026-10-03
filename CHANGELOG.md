@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.4] - 2026-10-03
+
+Added “(e.g., Stata, Python, R)” after “code” (Getting oriented).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals>
+
+Argon2id fingerprint: `3cca1b123156da9b56417c68ec3b260bd044ed3d2426cbd6e46899fa2f3a32b1`
+
+
 ## [0.0.3] - 2026-10-02
 
 Changes from the lead maintainer's comments in the Drafter: the version-control (git) rule is struck, "trigger" is explained, cost estimates are only for costs beyond a flat monthly plan, two stop-and-ask rules are deleted, the agent checks earlier notes or asks whether the researcher reads code, and the random-seed rule gives its reason.

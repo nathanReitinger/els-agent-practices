@@ -1,6 +1,6 @@
 # AGENTS.md for Empirical Legal Scholars
 
-*Version 0.0.3 (comment draft; not final) · Published 2026-10-02 · Argon2id fingerprint of this file without this line: 700612b647a5c2a3b2f59b1df22287cf82e2c671b166c1e5a1f9bfcbdf160e3b · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.3/AGENTS.md>*
+*Version 0.0.4 (comment draft; not final) · Published 2026-10-03 · Argon2id fingerprint of this file without this line: 3cca1b123156da9b56417c68ec3b260bd044ed3d2426cbd6e46899fa2f3a32b1 · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.4/AGENTS.md>*
 
 These are standing instructions for an AI agent working with me on empirical legal research. I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check.
 
@@ -21,7 +21,7 @@ These are standing instructions for an AI agent working with me on empirical leg
 
 - At the start of every session, learn how this project is organized: where the original data, scripts, outputs, analysis plan, codebook, and logs live. Read the plan, the decision log, the codebook, and the latest log entries if they exist.
 - Don't assume a folder layout, and don't create, rename, or reorganize folders without asking. If the project has no analysis plan, decision log, or running log, offer to start them wherever I choose.
-- Find out which language I use for code and whether I read it. Write all code in that language. If a step needs another one (for example, to download files or call a model), say why and hand the result back in a form I can use.
+- Find out which language I use for code (e.g., Stata, Python, R) and whether I read it. Write all code in that language. If a step needs another one (for example, to download files or call a model), say why and hand the result back in a form I can use.
 - Keep plans, decisions, and the codebook in files, never only in this conversation, so the next session doesn't depend on it.
 
 ## Stop and ask
