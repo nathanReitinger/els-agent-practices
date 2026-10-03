@@ -402,6 +402,144 @@
       "version": "0.0.12",
       "fingerprint": "504546fd221269121b54fdb6f152feee5f3b8663ed6e33530d489cb4db1be1ab",
       "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -17,0 +18 @@\n+10. Logs should be in .log format and should be append-only and should include timestamps."
+    },
+    {
+      "id": "sb-f4d30d47-3c8e-426f-a081-cc8457c5b64e",
+      "status": "adopted",
+      "based_on": "0.0.12",
+      "issue": null,
+      "kind": "replace",
+      "old": "the",
+      "new": "a neutral answer; do not give an",
+      "before": "easure, code, or critique, give ",
+      "after": " answer you would give if I hope",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-03T21:02:00.993213+00:00",
+      "updated": "2026-10-03T21:02:00.993213+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Pushing back",
+      "preview": {
+        "before": [
+          "When I ask you to measure, code, or critique, give the answer you would give if I hoped for the opposite result."
+        ],
+        "after": [
+          "When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you would give if I hoped for the opposite result."
+        ],
+        "context": "Pushing back"
+      },
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-03T21:02:29.361499+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
+      "support": 0,
+      "stale_votes": 0,
+      "decided": "2026-10-03T21:03:08.819094+00:00",
+      "version": "0.0.13",
+      "fingerprint": "62751b86358cdacc6c93959727187a51b20193ecda1389d2574d0f2ebdad205c",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -63 +63 @@\n-- When I ask you to measure, code, or critique, give the answer you would give if I hoped for the opposite result.\n+- When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you would give if I hoped for the opposite result."
+    },
+    {
+      "id": "sb-077f2eab-0722-4f5a-ab2b-c139a074427f",
+      "status": "adopted",
+      "based_on": "0.0.12",
+      "issue": null,
+      "kind": "replace",
+      "old": "would give if",
+      "new": "think",
+      "before": "r critique, give the answer you ",
+      "after": "I hoped for the opposite result.",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-03T21:02:02.962069+00:00",
+      "updated": "2026-10-03T21:02:04.670225+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Pushing back",
+      "preview": {
+        "before": [
+          "When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you would give if I hoped for the opposite result."
+        ],
+        "after": [
+          "When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you think I hoped for the opposite result."
+        ],
+        "context": "Pushing back"
+      },
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-03T21:02:28.319397+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
+      "support": 0,
+      "stale_votes": 0,
+      "decided": "2026-10-03T21:03:08.819094+00:00",
+      "version": "0.0.14",
+      "fingerprint": "03185a7e6ffe5aaf0ce8680dc66b9f2f3489472680deb6a0558420fe8e8ab44e",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -63 +63 @@\n-- When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you would give if I hoped for the opposite result.\n+- When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you think I hoped for the opposite result."
+    },
+    {
+      "id": "sb-f7a92f7b-b5b0-4140-803d-3bdd332a5478",
+      "status": "adopted",
+      "based_on": "0.0.12",
+      "issue": null,
+      "kind": "delete",
+      "old": "the opposite result",
+      "new": "",
+      "before": "er you would give if I hoped for",
+      "after": ".\nWhen I ask for feedback, lead ",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-03T21:02:08.076076+00:00",
+      "updated": "2026-10-03T21:02:11.073271+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Pushing back",
+      "preview": {
+        "before": [
+          "When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you think I hoped for the opposite result."
+        ],
+        "after": [
+          "When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you think I hoped for."
+        ],
+        "context": "Pushing back"
+      },
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-03T21:02:24.835249+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
+      "support": 0,
+      "stale_votes": 0,
+      "decided": "2026-10-03T21:03:08.819094+00:00",
+      "version": "0.0.15",
+      "fingerprint": "c99c7c9b5be5d44f0c72e8074892d20f6f7f5ca765cd0258ad48067f81d52239",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -63 +63 @@\n-- When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you think I hoped for the opposite result.\n+- When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you think I hoped for."
     }
   ]
 }
