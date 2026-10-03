@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.8] - 2026-10-03
+
+Deleted “Commercial databases (Westlaw, Lexis, Bloomberg) often restrict bulk downloadin…” (Legal data cautions).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals>
+
+Argon2id fingerprint: `73366070f6c4b26114a586179d7a785a7f0bd5055180e8c2d4fb15590affb0b1`
+
+
 ## [0.0.7] - 2026-10-03
 
 Deleted “Never open, print, copy, or summarize restricted or confidential material (data…” (Non-negotiable rules).
