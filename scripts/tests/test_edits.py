@@ -91,6 +91,13 @@ class LocateTest(unittest.TestCase):
         a, _ = locate(doc, "AGENTS.md for Empirical", prefix="AGENTS.md\n166 lines · about 12 minutes ", suffix=" Legal")
         self.assertEqual(a, 0)
 
+    def test_one_side_of_the_context_is_enough_for_a_single_match(self):
+        doc = Doc(AGENTS)
+        a, b = locate(doc, "samples or simulates.", prefix="something else entirely", suffix="\nWhen I correct you about")
+        self.assertEqual(doc.squeezed[a:b], squeeze("samples or simulates."))
+        with self.assertRaises(Refused):
+            locate(doc, "samples or simulates.", prefix="something else", suffix="and something else")
+
     def test_missing_and_changed_text(self):
         doc = Doc(AGENTS)
         with self.assertRaises(Refused) as caught:

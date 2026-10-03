@@ -440,12 +440,19 @@ def locate(doc: Doc, exact: str, prefix: str = "", suffix: str = "") -> tuple[in
         n, m = min(len(before), len(seen_before)), min(len(after), len(seen_after))
         return (n == 0 or seen_before[-n:] == before[-n:]) and seen_after[:m] == after[:m]
 
+    def one_side_fits(i: int) -> bool:
+        seen_before, seen_after = text[:i], text[i + len(key):]
+        n, m = min(len(before), len(seen_before)), min(len(after), len(seen_after))
+        return (n > 0 and seen_before[-n:] == before[-n:]) or (m > 0 and seen_after[:m] == after[:m])
+
     good = [i for i in hits if fits(i)]
     if len(good) == 1:
         return good[0], good[0] + len(key)
     if len(good) > 1:
         raise Refused("ambiguous")
-    if len(hits) == 1 and len(key) >= LONG_QUOTE:
+    # The words on one side changed (say, another approved change nearby): a single match is still trusted if
+    # the words on its other side match, or if the quote is long.
+    if len(hits) == 1 and (len(key) >= LONG_QUOTE or one_side_fits(hits[0])):
         return hits[0], hits[0] + len(key)
     raise Refused("context-changed" if len(hits) == 1 else "ambiguous")
 

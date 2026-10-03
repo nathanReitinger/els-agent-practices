@@ -2,11 +2,13 @@
 
 This project is one file, **AGENTS.md**: standing instructions for AI agents working with empirical legal scholars. It's a comment draft, and it changes through proposals that the maintainers approve or disapprove. [GOVERNANCE.md](GOVERNANCE.md) has the rules.
 
-## Comment or propose a change (no GitHub needed)
+## Suggest a change (no GitHub needed)
 
-1. Open the [Drafter](https://nathanreitinger.github.io/els-agent-practices/draft/).
-2. Select the words you want to comment on or change, and choose **Annotate**. Comments use [Hypothesis](https://web.hypothes.is/start), which asks for a free account.
-3. For a comment, write anything. For a proposal, start your note with `Delete`, `Replace with:`, `Add after:`, or `Add rule:` (the Drafter shows examples), and add a line that starts with `Why:` to explain.
+1. Open the [Drafter](https://nathanreitinger.github.io/els-agent-practices/draft/) and choose **Suggest edits**.
+2. Edit the text directly, with track changes on: deleted words are struck out, and new words appear in blue under your name. Press Enter at the end of a rule to add a new one.
+3. Choose **Submit for review**. The first time, connect your free [Hypothesis](https://web.hypothes.is/start) account: on your [developer page](https://hypothes.is/account/developer), choose *Create API token* and paste it in.
+
+To comment instead, select words and choose **Annotate**. A comment that starts with `Delete`, `Replace with:`, `Add after:`, or `Add rule:` is also a proposal.
 
 When a maintainer approves your proposal, it's published as a new version automatically. You can follow it in the Drafter's list of proposals; if it's disapproved, it moves to the [Declined](https://nathanreitinger.github.io/els-agent-practices/declined/) page.
 

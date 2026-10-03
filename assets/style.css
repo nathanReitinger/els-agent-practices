@@ -32,6 +32,10 @@
   --warn-soft: #fff8ec;
   --bad: #a3222a;
   --bad-soft: #fdf3f3;
+  --mine: #1f55c7;
+  --mine-soft: rgba(31, 85, 199, 0.09);
+  --others: #b25600;
+  --others-soft: rgba(230, 126, 34, 0.11);
   --shadow: 0 1px 2px rgba(29, 27, 32, 0.04), 0 10px 30px rgba(29, 27, 32, 0.06);
   --serif: "Playfair", "Playfair Display", Georgia, "Times New Roman", serif;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -67,6 +71,10 @@
   --warn-soft: #231e14;
   --bad: #f19a9f;
   --bad-soft: #251718;
+  --mine: #8fb4ff;
+  --mine-soft: rgba(143, 180, 255, 0.15);
+  --others: #f2a35e;
+  --others-soft: rgba(242, 163, 94, 0.15);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 @media (prefers-color-scheme: dark) {
@@ -98,6 +106,10 @@
     --warn-soft: #231e14;
     --bad: #f19a9f;
     --bad-soft: #251718;
+    --mine: #8fb4ff;
+    --mine-soft: rgba(143, 180, 255, 0.15);
+    --others: #f2a35e;
+    --others-soft: rgba(242, 163, 94, 0.15);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
   }
 }
@@ -587,6 +599,94 @@ table.fingerprints td:first-child { font-weight: 600; white-space: nowrap; }
 .vote-status.pending { color: var(--muted); }
 .vote-status.done { color: var(--good); font-weight: 600; }
 .vote-status.failed { color: var(--bad); }
+
+/* Suggesting: track changes, always on */
+.mode-switch { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); }
+.mode-switch button { padding: 0.3rem 0.75rem; border: 0; border-radius: 7px; background: none; color: var(--muted); font: 500 0.86rem var(--sans); cursor: pointer; }
+.mode-switch button[aria-pressed="true"] { background: var(--accent); color: var(--accent-contrast); }
+.mode-switch button:not([aria-pressed="true"]):hover { color: var(--text); background: var(--accent-soft); }
+#suggest-slot { position: sticky; top: 4.6rem; z-index: 5; }
+@media (max-width: 760px) {
+  #suggest-slot { top: 0; }
+  .suggest-help { display: none; }  /* the steps above the text say the same */
+  .suggest-bar { padding: 0.55rem 0.7rem 0.5rem; }
+  .suggest-actions { gap: 0.3rem; }
+  .suggest-actions .button { padding: 0.28rem 0.6rem; font-size: 0.8rem; }
+  .suggest-count { flex-basis: 100%; }
+}
+.suggest-bar { padding: 0.75rem 1rem 0.6rem; border-bottom: 1px solid var(--rule); background: color-mix(in srgb, var(--bg) 90%, var(--mine)); box-shadow: 0 6px 12px -10px rgba(0, 0, 0, 0.25); }
+.suggest-bar p { margin: 0; }
+.suggest-line { font-size: 0.9rem; line-height: 1.5; }
+.suggest-line strong { color: var(--mine); }
+.suggest-who { color: var(--muted); }
+.mine-name { color: var(--mine); }
+.suggest-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.5rem !important; }
+.suggest-count { margin-right: auto; color: var(--muted); font-size: 0.86rem; }
+.suggest-hint { margin-top: 0.35rem !important; color: var(--warn); font-size: 0.85rem; }
+.suggest-hint:empty { display: none; }
+.suggest-panel:empty { display: none; }
+.suggest-panel { margin-top: 0.7rem; padding: 0.8rem 0.9rem; border: 1px solid var(--rule); border-radius: 10px; background: var(--bg); }
+.suggest-panel .signin-steps { margin: 0.4rem 0 0.5rem; }
+.submit-list { margin: 0.4rem 0 0.6rem; padding-left: 1.2rem; font-family: var(--serif); }
+.submit-list li { margin: 0.25rem 0; }
+.linklike { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.doc.suggesting { caret-color: var(--mine); outline: none; }
+.doc.suggesting:focus-visible { outline: none; }
+.suggesting-mode .doc { box-shadow: inset 3px 0 0 var(--mine); }
+.suggesting-mode hypothesis-adder { display: none !important; }
+.suggesting-mode hypothesis-highlight { background: none !important; }
+
+/* Your own changes, while suggesting: struck-out words, and new words in blue with your name. */
+.doc ins.track.mine { color: var(--mine); background: var(--mine-soft); text-decoration: none; border-bottom: 1px solid var(--mine); border-radius: 2px; }
+.doc del.track.mine { color: var(--del); background: var(--del-soft); }
+.doc ins.track.mine::before, .doc .track.others::before {
+  content: attr(data-by);
+  margin: 0 0.15em 0 0.05em;
+  padding: 0 0.3em;
+  border-radius: 4px;
+  font: 600 0.55em/1.6 var(--sans);
+  vertical-align: 0.5em;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.doc ins.track.mine::before { background: var(--mine); color: var(--bg); }
+.doc .track-new.mine { box-shadow: inset 2px 0 0 var(--mine); }
+
+/* Everyone's pending suggestions, while reading: orange, with the suggester's name. */
+.doc del.track.others { color: var(--others); background: var(--others-soft); text-decoration-color: var(--others); cursor: pointer; }
+.doc del.track.others::before { content: none; }
+.doc ins.track.others.added { background: none; text-decoration: none; cursor: pointer; }
+.doc ins.track.others.added::after { content: attr(data-text); color: var(--others); background: var(--others-soft); border-bottom: 1px solid var(--others); border-radius: 2px; }
+.doc ins.track.others::before { background: var(--others); color: var(--bg); }
+.doc .track-rule.others { color: var(--others); cursor: pointer; }
+.doc .track-rule.others::after { content: attr(data-text); background: var(--others-soft); border-bottom: 1px solid var(--others); }
+.doc .track-rule.others::before { background: var(--others); color: var(--bg); }
+.doc [data-proposal]:focus-visible { outline: 2px solid var(--others); outline-offset: 2px; }
+.suggest-legend { margin: 0; padding: 0.55rem 1rem; border-bottom: 1px solid var(--rule); background: var(--panel); color: var(--muted); font-size: 0.86rem; }
+.suggest-legend del.track.others { color: var(--others); background: var(--others-soft); text-decoration-color: var(--others); }
+.suggest-legend ins.track.others.added { text-decoration: none; background: none; }
+.suggest-legend ins.track.others.added::after { content: attr(data-text); color: var(--others); background: var(--others-soft); border-bottom: 1px solid var(--others); }
+.suggest-note { margin: 0; padding: 0.6rem 1rem; border-bottom: 1px solid var(--rule); background: var(--good-soft); color: var(--good); font-size: 0.9rem; }
+.suggestion-pop {
+  position: absolute;
+  z-index: 30;
+  width: min(26rem, calc(100vw - 24px));
+  padding: 0.8rem 0.95rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--others);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+  font-size: 0.9rem;
+}
+.suggestion-pop p { margin: 0.35rem 0 0; }
+.suggestion-pop .pop-head { margin: 0; color: var(--muted); }
+.suggestion-pop .pop-head strong { color: var(--text); }
+details.commands > summary { list-style: none; cursor: pointer; }
+details.commands > summary::-webkit-details-marker { display: none; }
+details.commands > summary h2 { display: inline; }
+details.commands > summary::after { content: " ▸"; color: var(--muted); }
+details.commands[open] > summary::after { content: " ▾"; }
 
 /* Join the community */
 .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; margin-top: 1.4rem; }

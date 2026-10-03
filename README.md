@@ -13,7 +13,7 @@ It's a comment draft (version 0.0.x): nothing is final, and it grows out of prop
 
 ## How it works
 
-- **Anyone can propose a change** in the Drafter, with no GitHub account: select words, choose Annotate (Hypothesis; free account), and start the note with `Delete`, `Replace with:`, `Add after:`, or `Add rule:`.
+- **Anyone can suggest a change** in the Drafter, with no GitHub account: choose Suggest edits and edit the text with track changes on (struck-out deletions, new words in blue under your name), then submit. Each change becomes a proposal under the reader's Hypothesis account. Pending suggestions are shown in the text for everyone.
 - **Maintainers decide.** They sign in on the Maintainers page and approve or disapprove each proposal. One maintainer's approval adopts a proposal, unless at least as many maintainers disapprove it. Disapproved proposals move to the Declined page.
 - **Approved changes are published automatically.** A robot (`scripts/proposals.py`, run every 15 minutes by `.github/workflows/proposals.yml`) applies each approved proposal, publishes it as the next version, and records who proposed and approved it.
 - **Every version has a fingerprint**, the Argon2id hash of its file without line 3, so anyone can check that a copy is exact.

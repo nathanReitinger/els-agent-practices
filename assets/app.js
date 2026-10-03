@@ -254,6 +254,7 @@
       showRaw(!showing);
       control.textContent = showing ? "Raw" : "Rendered";
     });
+    control.classList.add("raw-toggle");
     return control;
   }
 
@@ -614,6 +615,794 @@
       h("p", {}, secondary("How it works, and the maintainers", at("maintainers/"))));
   }
 
+  // ---------- Suggesting: edit the text directly, with every change tracked ----------
+  // Like a word processor's suggesting mode: deleted words stay, struck through; new words appear in blue, under
+  // your name. Submitting turns each change into one proposal, posted under your Hypothesis account, and the
+  // maintainers approve or disapprove each one. While reading, everyone's pending suggestions are drawn into the
+  // text; added words are drawn by CSS, so the page's own text doesn't change and comments keep their places.
+
+  const HYP_KEY_STORE = "els-hypothesis-key";
+  const HYP_DEVELOPER = "https://hypothes.is/account/developer";
+  const HYP_SIGNUP = "https://hypothes.is/signup";
+  const SAVED_WORK = "els-suggesting";
+  const ZWSP = "​";
+  const BLOCKS = "p, li, h1, h2, h3, h4, h5, h6";
+  const suggesting = { on: false, me: null, undo: [], cfg: null, markdown: "", version: "", governance: null, open: [] };
+
+  const elementOf = (node) => (node?.nodeType === 1 ? node : node?.parentElement);
+  const within = (node, selector) => {
+    const found = elementOf(node)?.closest(selector);
+    return found && $("#doc").contains(found) ? found : null;
+  };
+  const mineIns = (node) => within(node, "ins.track.mine");
+  const struck = (node) => within(node, "del.track");
+  const blockOf = (node) => within(node, BLOCKS);
+  const frozen = (node) => within(node, "[contenteditable='false']");
+  const myName = () => suggesting.me?.username || "you";
+
+  function select(range) {
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  function caretAt(node, offset) {
+    const range = document.createRange();
+    range.setStart(node, Math.min(offset, node.nodeType === 3 ? node.length : node.childNodes.length));
+    range.collapse(true);
+    select(range);
+  }
+  function caretBeside(node, after) {
+    const range = document.createRange();
+    if (after) range.setStartAfter(node); else range.setStartBefore(node);
+    range.collapse(true);
+    select(range);
+  }
+
+  function textNodesIn(range) {
+    const root = range.commonAncestorContainer;
+    if (root.nodeType === 3) return [root];
+    const nodes = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) if (range.intersectsNode(walker.currentNode)) nodes.push(walker.currentNode);
+    return nodes;
+  }
+
+  function tidyMarks() {
+    const doc = $("#doc");
+    for (const del of $$("del.track.mine", doc)) {
+      if (!del.isConnected) continue;
+      while (del.nextSibling?.nodeType === 1 && del.nextSibling.matches("del.track.mine")) {
+        const next = del.nextSibling;
+        del.append(...next.childNodes);
+        next.remove();
+      }
+    }
+    for (const ins of $$("ins.track.mine", doc)) {
+      if (!ins.textContent.replaceAll(ZWSP, "") && !ins.closest(".track-new")) ins.remove();
+    }
+  }
+
+  // Strike out what's in `range`: original words are wrapped in <del>; words you added are simply removed.
+  // Returns where the struck text began and ended, for placing the cursor.
+  function strike(range) {
+    let start = null, end = null;
+    for (const node of textNodesIn(range)) {
+      if (frozen(node) || struck(node) || !$("#doc").contains(node)) continue;
+      const from = node === range.startContainer ? range.startOffset : 0;
+      const to = node === range.endContainer ? range.endOffset : node.length;
+      if (to <= from) continue;
+      if (mineIns(node)) {
+        node.deleteData(from, to - from);
+        start ||= { node, offset: from };
+        end = { node, offset: from };
+        continue;
+      }
+      const part = from > 0 ? node.splitText(from) : node;
+      if (to - from < part.length) part.splitText(to - from);
+      const del = h("del", { class: "track mine", "data-by": myName(), title: `Removed by ${myName()}` });
+      part.before(del);
+      del.append(part);
+      start ||= { before: del };
+      end = { after: del };
+    }
+    tidyMarks();
+    return { start, end };
+  }
+  function placeCaret(point) {
+    if (!point) return;
+    if (point.node?.isConnected) caretAt(point.node, point.offset);
+    else if (point.before?.isConnected) caretBeside(point.before, false);
+    else if (point.after?.isConnected) caretBeside(point.after, true);
+  }
+
+  function nodeBeforeCaret(range) {
+    const { startContainer: node, startOffset: offset } = range;
+    if (node.nodeType === 3) return offset === 0 ? node.previousSibling : null;
+    return node.childNodes[offset - 1] || null;
+  }
+
+  function typeText(text) {
+    text = String(text || "").replace(/[\r\n]+/g, " ");
+    const sel = getSelection();
+    if (!text || !sel.rangeCount) return;
+    let range = sel.getRangeAt(0);
+    if (frozen(range.startContainer) || !blockOf(range.startContainer)) return;
+    if (!range.collapsed) {
+      placeCaret(strike(range).end);
+      range = sel.getRangeAt(0);
+    }
+    for (let del = struck(range.startContainer); del; del = struck(range.startContainer)) {  // never type inside struck words
+      caretBeside(del, true);
+      range = sel.getRangeAt(0);
+    }
+    const by = myName();
+    const inside = mineIns(range.startContainer);
+    if (inside && range.startContainer.nodeType === 3) {
+      const node = range.startContainer, offset = range.startOffset;
+      node.insertData(offset, text);
+      return caretAt(node, offset + text.length);
+    }
+    const before = inside || nodeBeforeCaret(range);
+    if (before?.nodeType === 1 && before.matches("ins.track.mine")) {
+      const last = before.lastChild?.nodeType === 3 ? before.lastChild : before.appendChild(document.createTextNode(""));
+      last.appendData(text);
+      return caretAt(last, last.length);
+    }
+    const ins = h("ins", { class: "track mine", "data-by": by, title: `Added by ${by}` }, text);
+    range.insertNode(ins);
+    caretAt(ins.firstChild, text.length);
+  }
+
+  function deleteText(direction, target) {
+    const sel = getSelection();
+    if (target) select(target);
+    if (!sel.rangeCount) return;
+    let range = sel.getRangeAt(0);
+    const block = blockOf(sel.anchorNode);
+    if (range.collapsed) {
+      sel.modify("extend", direction, "character");
+      range = sel.getRangeAt(0);
+    }
+    if (range.collapsed) return;
+    if (blockOf(range.startContainer) !== block || blockOf(range.endContainer) !== block) {
+      // Rules can't be merged. But backing out of an empty new rule removes it.
+      if (direction === "backward" && block?.classList.contains("track-new") && !block.textContent.replaceAll(ZWSP, "").trim()) {
+        const previous = block.previousElementSibling;
+        block.remove();
+        if (previous) caretAt(previous, previous.childNodes.length);
+      } else {
+        range.collapse(direction !== "backward");
+        select(range);
+      }
+      return;
+    }
+    const { start, end } = strike(range);
+    placeCaret(direction === "backward" ? start : end);
+  }
+
+  function visibleText(range) {
+    const box = document.createElement("div");
+    box.append(range.cloneContents());
+    for (const del of box.querySelectorAll("del")) del.remove();
+    return box.textContent.replaceAll(ZWSP, "");
+  }
+
+  function newRule() {
+    const sel = getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const block = blockOf(range.startContainer);
+    if (!block || frozen(block)) return;
+    if (block.classList.contains("track-new")) {
+      return hint("Add one new rule at a time. To add another, put the cursor at the end of an existing rule and press Enter.");
+    }
+    const rest = document.createRange();
+    rest.setStart(range.endContainer, range.endOffset);
+    rest.setEnd(block, block.childNodes.length);
+    if (visibleText(rest).trim()) return hint("To add a new rule, put the cursor at the end of a rule, then press Enter.");
+    const next = block.nextElementSibling;
+    if (next?.classList.contains("track-new")) {
+      const ins = next.querySelector("ins") || next;
+      return caretAt(ins, ins.childNodes.length);
+    }
+    const by = myName();
+    const ins = h("ins", { class: "track mine", "data-by": by, title: `Added by ${by}` }, ZWSP);
+    block.after(h(block.tagName === "LI" ? "li" : "p", { class: "track-new mine", "data-by": by }, ins));
+    caretAt(ins.firstChild, 1);
+  }
+
+  function hint(text) {
+    const box = $("#suggest-hint");
+    if (!box) return;
+    box.textContent = text;
+    clearTimeout(hint.timer);
+    hint.timer = setTimeout(() => (box.textContent = ""), 6000);
+  }
+
+  function rememberForUndo() {
+    suggesting.undo.push($("#doc").innerHTML);
+    if (suggesting.undo.length > 200) suggesting.undo.shift();
+  }
+  function undo() {
+    const html = suggesting.undo.pop();
+    if (html == null) return hint("Nothing to undo.");
+    $("#doc").innerHTML = html;
+    freezeStamp();
+    afterChange();
+  }
+
+  function onBeforeInput(event) {
+    if (!suggesting.on) return;
+    const type = event.inputType;
+    if (type === "insertCompositionText") return; // composing (for example, with an accent or Asian-language keyboard)
+    event.preventDefault();
+    const target = event.getTargetRanges?.()[0];
+    const asRange = (r) => { const range = document.createRange(); range.setStart(r.startContainer, r.startOffset); range.setEnd(r.endContainer, r.endOffset); return range; };
+    const pasted = () => event.dataTransfer?.getData("text/plain") ?? event.data ?? "";
+    const actions = {
+      insertText: () => typeText(event.data),
+      insertReplacementText: () => { if (target) select(asRange(target)); typeText(pasted()); },
+      insertFromPaste: () => typeText(pasted()),
+      insertParagraph: newRule,
+      deleteContentBackward: () => deleteText("backward", target && asRange(target)),
+      deleteContentForward: () => deleteText("forward", target && asRange(target)),
+      deleteWordBackward: () => deleteText("backward", target && asRange(target)),
+      deleteWordForward: () => deleteText("forward", target && asRange(target)),
+      deleteSoftLineBackward: () => deleteText("backward", target && asRange(target)),
+      deleteHardLineBackward: () => deleteText("backward", target && asRange(target)),
+      deleteByCut: () => deleteText("forward", target && asRange(target)),
+      historyUndo: undo,
+    };
+    if (!actions[type]) return;
+    if (type !== "historyUndo") rememberForUndo();
+    actions[type]();
+    if (type !== "historyUndo") afterChange();
+  }
+
+  function onCompositionStart() {
+    const sel = getSelection();
+    if (!suggesting.on || !sel.rangeCount) return;
+    rememberForUndo();
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed) placeCaret(strike(range).end);
+    if (!mineIns(sel.anchorNode)) {
+      const ins = h("ins", { class: "track mine", "data-by": myName(), title: `Added by ${myName()}` }, ZWSP);
+      sel.getRangeAt(0).insertNode(ins);
+      caretAt(ins.firstChild, 1);
+    }
+  }
+
+  // ---- The safety net ----
+  // Some keyboards (and some tools) change the text without warning first, so the edit can't be tracked as it
+  // happens. Then the page compares the text with its last tracked state, word by word, and turns the
+  // difference into tracked changes: removed words are struck out, new words are marked as yours.
+
+  const leafBlocks = (root) => [...root.querySelectorAll(BLOCKS)].filter((block) => !block.querySelector(BLOCKS));
+  function typedChars(block) {
+    const chars = [];
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode, el = node.parentElement;
+      const type = el.closest("ins.track.mine") ? "ins" : el.closest("del.track") ? "del" : "orig";
+      for (const ch of node.data) chars.push({ ch, type });
+    }
+    return chars;
+  }
+  function rebuildBlock(block, chars) {
+    const by = myName();
+    const pieces = [];
+    for (const { ch, type } of chars) {
+      const last = pieces[pieces.length - 1];
+      if (last && last.type === type) last.text += ch; else pieces.push({ type, text: ch });
+    }
+    block.replaceChildren(...pieces.map(({ type, text }) => type === "orig" ? document.createTextNode(text)
+      : h(type, { class: "track mine", "data-by": by, title: `${type === "ins" ? "Added" : "Removed"} by ${by}` }, text)));
+  }
+  function reconcile() {
+    const doc = $("#doc");
+    const before = document.createElement("div");
+    before.innerHTML = suggesting.lastGood;
+    const oldBlocks = leafBlocks(before), newBlocks = leafBlocks(doc);
+    if (oldBlocks.length !== newBlocks.length) {
+      doc.innerHTML = suggesting.lastGood;
+      freezeStamp();
+      return hint("That change couldn't be tracked, so it was undone. Click in the text, then type or delete.");
+    }
+    let lastAdded = null;
+    newBlocks.forEach((block, i) => {
+      const oldChars = typedChars(oldBlocks[i]);
+      const newText = block.textContent;
+      if (oldChars.map((c) => c.ch).join("") === newText) return;
+      // Word by word: which old pieces stayed, which went, and what's new.
+      const oldTokens = [];
+      let k = 0;
+      for (const token of tokens(oldChars.map((c) => c.ch).join(""))) { oldTokens.push(oldChars.slice(k, k + token.length)); k += token.length; }
+      const ops = diffLists(oldTokens.map((t) => t.map((c) => c.ch).join("")), tokens(newText));
+      if (!ops) return;
+      const result = [];
+      let o = 0;
+      for (const [op, piece] of ops) {
+        if (op === "ins") { for (const ch of piece) result.push({ ch, type: "ins" }); continue; }
+        const old = oldTokens[o++];
+        for (const c of old) {
+          if (op === "same") result.push(c);
+          else if (c.type === "orig") result.push({ ch: c.ch, type: "del" });
+          else if (c.type === "del") result.push(c);  // struck words stay struck; new words you remove are dropped
+        }
+      }
+      rebuildBlock(block, result);
+      lastAdded = [...block.querySelectorAll("ins.track.mine")].pop() || lastAdded;
+    });
+    if (lastAdded) caretAt(lastAdded, lastAdded.childNodes.length);
+  }
+
+  // ---- From tracked marks to proposals ----
+
+  const commandFor = (change) => ({ delete: "Delete", replace: `Replace with: ${change.new}`,
+    insert: `Add after: ${change.new}`, rule: `Add rule: ${change.new}` })[change.kind];
+
+  function describe(change) {
+    const quote = (text) => `“${short(text, 70)}”`;
+    return { delete: `Delete ${quote(change.exact)}`, replace: `Replace ${quote(change.exact)} with ${quote(change.new)}`,
+      insert: `Add ${quote(change.new)} after ${quote(change.exact)}`, rule: `Add a new rule: ${quote(change.new)}` }[change.kind];
+  }
+  const short = (text, limit) => (text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text);
+
+  const isWordChar = (ch) => /[\p{L}\p{N}_'’-]/u.test(ch);
+
+  // Every change in the document, widened to whole words, with the words around it (as everyone else sees
+  // the text) so the robot can find the one place it belongs.
+  function collectChanges() {
+    const doc = $("#doc");
+    const parts = $$(BLOCKS, doc).filter((block) => !frozen(block) && !block.querySelector(BLOCKS)).map((block) => {
+      const chars = [];
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (within(node, "button")) continue;
+        const type = mineIns(node) ? "ins" : struck(node) ? "del" : "orig";
+        for (const ch of node.data) if (ch !== ZWSP) chars.push({ ch, type });
+      }
+      return { chars, isNew: block.classList.contains("track-new") };
+    });
+    let source = "";
+    for (const part of parts) {
+      if (part.isNew) continue;
+      if (source) source += "\n";
+      part.at = source.length;
+      source += part.chars.filter((c) => c.type !== "ins").map((c) => c.ch).join("");
+    }
+    const context = (start, end) => ({ prefix: source.slice(Math.max(0, start - 32), start), suffix: source.slice(end, end + 32) });
+    const sourceOf = (chars) => chars.filter((c) => c.type !== "ins").map((c) => c.ch).join("");
+    const changes = [];
+    parts.forEach((part, index) => {
+      if (part.isNew) {
+        const text = squash(part.chars.map((c) => c.ch).join(""));
+        const previous = parts.slice(0, index).reverse().find((other) => !other.isNew);
+        if (!text || !previous) return;
+        // Anchor it on the last words of the rule above that no other change touches, so the changes can be
+        // approved in any order.
+        const prevText = sourceOf(previous.chars);
+        let untouched = previous.chars.length;
+        while (untouched > 0 && previous.chars[untouched - 1].type === "orig") untouched -= 1;
+        const tailStart = sourceOf(previous.chars.slice(0, untouched)).length;
+        let words = [...prevText.matchAll(/\S+/g)].filter((w) => w.index >= tailStart).slice(-6);
+        if (!words.length) words = [...prevText.matchAll(/\S+/g)].slice(-6);
+        if (!words.length) return;
+        const start = previous.at + words[0].index, end = previous.at + words.at(-1).index + words.at(-1)[0].length;
+        changes.push({ kind: "rule", exact: squash(source.slice(start, end)), new: text, ...context(start, end) });
+        return;
+      }
+      const chars = part.chars;
+      const at = [];  // each character's place in the source text (added words sit between places)
+      let place = part.at;
+      for (const c of chars) { at.push(place); if (c.type !== "ins") place += 1; }
+      const placeOf = (i) => (i < chars.length ? at[i] : place);
+      for (let i = 0; i < chars.length;) {
+        if (chars[i].type === "orig") { i += 1; continue; }
+        let a = i, b = i;
+        while (b < chars.length && chars[b].type !== "orig") b += 1;
+        // A change that cuts into a word takes in the whole word ("thier" -> "their"); punctuation and
+        // spaces around it stay out, so deleting "(git)" stays a plain deletion.
+        while (a > 0 && isWordChar(chars[a - 1].ch) && isWordChar(chars[a].ch)) a -= 1;
+        while (b < chars.length && isWordChar(chars[b].ch) && isWordChar(chars[b - 1].ch)) b += 1;
+        const window = chars.slice(a, b);
+        const oldText = squash(sourceOf(window));
+        const newText = squash(window.filter((c) => c.type !== "del").map((c) => c.ch).join(""));
+        i = b;
+        if (oldText === newText) continue;
+        if (!newText) { changes.push({ kind: "delete", exact: oldText, new: "", ...context(placeOf(a), placeOf(b)) }); continue; }
+        if (oldText) { changes.push({ kind: "replace", exact: oldText, new: newText, ...context(placeOf(a), placeOf(b)) }); continue; }
+        // New words between spaces: add them after the word before (or put them in front of the word after).
+        let e = a - 1;
+        while (e >= 0 && /\s/.test(chars[e].ch)) e -= 1;
+        if (e >= 0) {
+          let s2 = e;
+          while (s2 > 0 && !/\s/.test(chars[s2 - 1].ch)) s2 -= 1;
+          changes.push({ kind: "insert", exact: squash(sourceOf(chars.slice(s2, e + 1))), new: newText, ...context(placeOf(s2), placeOf(e + 1)) });
+        } else {
+          let f = b;
+          while (f < chars.length && /\s/.test(chars[f].ch)) f += 1;
+          let g = f;
+          while (g < chars.length && !/\s/.test(chars[g].ch)) g += 1;
+          const next = squash(sourceOf(chars.slice(f, g)));
+          if (next) changes.push({ kind: "replace", exact: next, new: `${newText} ${next}`, ...context(placeOf(f), placeOf(g)) });
+        }
+      }
+    });
+    return changes;
+  }
+
+  // ---- Hypothesis account ----
+
+  function storedHypothesisKey() {
+    try { return localStorage.getItem(HYP_KEY_STORE); } catch { return null; }
+  }
+  function storeHypothesisKey(key) {
+    try { if (key) localStorage.setItem(HYP_KEY_STORE, key); else localStorage.removeItem(HYP_KEY_STORE); } catch { /* blocked */ }
+  }
+  async function hypothesisAs(key, method, path, body) {
+    const res = await fetch(`https://api.hypothes.is/api${path}`, {
+      method, body: body ? JSON.stringify(body) : undefined,
+      headers: { Authorization: `Bearer ${key}`, Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(detail.reason || detail.message || `Hypothesis answered ${res.status}`), { status: res.status });
+    }
+    return res.json();
+  }
+  async function connectHypothesis(key) {
+    const profile = await hypothesisAs(key, "GET", "/profile");
+    if (!profile.userid) throw new Error("Hypothesis didn't recognize that token. Copy it again from your developer page.");
+    const username = profile.userid.replace(/^acct:|@hypothes\.is$/g, "");
+    suggesting.me = { username, name: profile.user_info?.display_name || username, key };
+    storeHypothesisKey(key);
+    for (const mark of $$("#doc [data-by='you']")) {  // changes made before connecting get your name too
+      mark.dataset.by = username;
+      if (mark.title) mark.title = mark.title.replace(/you$/, username);
+    }
+    return suggesting.me;
+  }
+
+  // Post one change as a public proposal on the Drafter, under the reader's account.
+  function postChange(key, change, reason) {
+    const uri = `${suggesting.cfg.site}draft/`;
+    return hypothesisAs(key, "POST", "/annotations", {
+      uri,
+      document: { title: [document.title] },
+      text: [commandFor(change), reason ? `Why: ${reason}` : ""].filter(Boolean).join("\n"),
+      tags: ["suggestion"],
+      group: "__world__",
+      permissions: { read: ["group:__world__"] },  // public: without this, Hypothesis keeps it private
+      target: [{ source: uri, selector: [{ type: "TextQuoteSelector", exact: change.exact, prefix: change.prefix, suffix: change.suffix }] }],
+    });
+  }
+
+  // ---- The suggesting bar ----
+
+  function saveWork() {
+    try {
+      localStorage.setItem(SAVED_WORK, JSON.stringify({ version: suggesting.version, html: $("#doc").innerHTML }));
+    } catch { /* storage blocked: the work lasts until the page closes */ }
+  }
+  function savedWork() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SAVED_WORK) || "null");
+      return saved && saved.version === suggesting.version ? saved.html : null;
+    } catch { return null; }
+  }
+  function clearWork() {
+    try { localStorage.removeItem(SAVED_WORK); } catch { /* blocked */ }
+  }
+
+  function afterChange(save = true) {
+    tidyMarks();
+    suggesting.lastGood = $("#doc").innerHTML;
+    if (save) saveWork();
+    updateSuggestBar();
+  }
+
+  function freezeStamp() {
+    const stamp = $("#doc h1 + p");
+    if (stamp) stamp.setAttribute("contenteditable", "false");
+  }
+
+  function updateSuggestBar() {
+    const count = $("#suggest-count");
+    if (!count) return;
+    const n = collectChanges().length;
+    count.textContent = n ? `${plural(n, "change")} so far` : "No changes yet";
+    $("#suggest-submit").disabled = !n;
+    $("#suggest-discard").disabled = !n;
+  }
+
+  function suggestBar() {
+    const who = h("span", { class: "suggest-who" });
+    const showWho = () => who.replaceChildren(suggesting.me
+      ? h("span", {}, "Suggesting as ", h("strong", { class: "mine-name", text: suggesting.me.username }), " · ",
+        h("button", { type: "button", class: "linklike", text: "Disconnect", onclick: () => { storeHypothesisKey(null); suggesting.me = null; showWho(); } }))
+      : h("span", { text: "Your changes are tracked. You'll add your Hypothesis name when you submit." }));
+    showWho();
+    suggestBar.showWho = showWho;
+    return h("div", { class: "suggest-bar", id: "suggest-bar", role: "region", "aria-label": "Suggesting" },
+      h("p", { class: "suggest-line" },
+        h("strong", { text: "Suggesting. " }),
+        h("span", { class: "suggest-help", text: "Select words and press Delete to strike them out, or type to add words. To add a rule, press Enter at the end of a rule. " }),
+        who),
+      h("p", { class: "suggest-actions" },
+        h("span", { class: "suggest-count", id: "suggest-count" }),
+        action("Submit for review", openSubmit, "button"),
+        action("Undo", () => undo(), "button secondary"),
+        action("Discard all", discardAll, "button secondary"),
+        action("Stop suggesting", () => setMode(false), "button secondary")),
+      h("p", { class: "suggest-hint", id: "suggest-hint", "aria-live": "polite" }),
+      h("div", { class: "suggest-panel", id: "suggest-panel" }));
+  }
+
+  function discardAll() {
+    if (!collectChanges().length || !confirm("Discard all of your changes?")) return;
+    clearWork();
+    suggesting.undo = [];
+    startEditing(suggesting.markdown, null);
+  }
+
+  function connectForm(onDone) {
+    const input = h("input", { type: "password", class: "key-input", autocomplete: "off", spellcheck: "false",
+      placeholder: "Paste your Hypothesis API token", "aria-label": "Your Hypothesis API token" });
+    const problem = h("p", { class: "error" });
+    const go = async () => {
+      const key = input.value.trim();
+      if (!key) return input.focus();
+      problem.textContent = "";
+      try {
+        await connectHypothesis(key);
+        suggestBar.showWho?.();
+        onDone();
+      } catch (error) {
+        problem.textContent = error.status === 401 ? "Hypothesis didn't accept that token. Copy it again from your developer page." : error.message;
+      }
+    };
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") go(); });
+    return h("div", { class: "connect" },
+      h("p", {}, h("strong", { text: "Your suggestions go out under your Hypothesis name, " }),
+        "so everyone can see who suggested what. Connect your account once:"),
+      h("ol", { class: "signin-steps" },
+        h("li", {}, "Sign in to Hypothesis, or ", external("make a free account", HYP_SIGNUP), "."),
+        h("li", {}, "Open your ", external("Hypothesis developer page", HYP_DEVELOPER), ", choose ", h("em", { text: "Create API token" }),
+          ", and copy the token."),
+        h("li", {}, "Paste it here: ", h("span", { class: "key-row" }, input, action("Connect", go, "button")))),
+      problem,
+      h("p", { class: "muted", text: "The token stays in this browser and is sent only to Hypothesis. It lets this page post your suggestions for you; don't share it." }));
+  }
+
+  function openSubmit() {
+    const panel = $("#suggest-panel");
+    const changes = collectChanges();
+    if (!changes.length) return hint("There's nothing to submit yet.");
+    if (!suggesting.me) return panel.replaceChildren(connectForm(openSubmit));
+    const reason = h("textarea", { class: "check-text", rows: "2", placeholder: "Why? (optional; everyone sees it)", "aria-label": "Why you suggest these changes" });
+    const status = h("p", { class: "vote-status", "aria-live": "polite" });
+    const send = action(`Submit ${plural(changes.length, "change")}`, async () => {
+      send.disabled = true;
+      const failed = [];
+      for (const [i, change] of changes.entries()) {
+        status.textContent = `Sending ${i + 1} of ${changes.length}…`;
+        try { await postChange(suggesting.me.key, change, squash(reason.value)); } catch (error) { failed.push([change, error]); }
+      }
+      if (failed.length) {
+        status.className = "vote-status failed";
+        status.textContent = `${plural(failed.length, "change")} couldn't be sent: ${failed[0][1].message}`;
+        send.disabled = false;
+        return;
+      }
+      clearWork();
+      suggesting.undo = [];
+      await setMode(false, false);
+      announce(`Thanks, ${suggesting.me.name}. Your ${plural(changes.length, "suggestion")} now wait for a maintainer, and you can see them marked in the text.`);
+    }, "button");
+    panel.replaceChildren(h("div", { class: "submit" },
+      h("p", { text: "These go to the maintainers, who approve or disapprove each one:" }),
+      h("ul", { class: "submit-list" }, ...changes.map((change) => h("li", { text: describe(change) }))),
+      reason,
+      h("p", { class: "vote-buttons" }, send, " ", action("Keep editing", () => panel.replaceChildren(), "button secondary")),
+      status));
+  }
+
+  function announce(text) {
+    const box = $("#suggest-note");
+    if (box) { box.textContent = text; box.hidden = false; }
+  }
+
+  function startEditing(markdown, savedHtml) {
+    renderMarkdown(markdown);
+    const doc = $("#doc");
+    if (savedHtml) doc.innerHTML = DOMPurify.sanitize(savedHtml);
+    freezeStamp();
+    doc.setAttribute("contenteditable", "true");
+    doc.setAttribute("spellcheck", "true");
+    doc.classList.add("suggesting");
+    suggesting.lastGood = doc.innerHTML;
+    updateSuggestBar();
+  }
+
+  async function setMode(on, keep = true) {
+    suggesting.on = on;
+    html.classList.toggle("suggesting-mode", on);
+    for (const control of $$(".mode-switch button")) control.setAttribute("aria-pressed", String(control.dataset.mode === (on ? "suggest" : "read")));
+    const raw = $(".raw-toggle");
+    if (raw) raw.disabled = on;
+    $(".suggestion-pop")?.remove();
+    const doc = $("#doc");
+    if (on) {
+      $("#suggest-note").hidden = true;
+      $("#suggest-legend").hidden = true;
+      $("#suggest-slot").replaceChildren(suggestBar());
+      startEditing(suggesting.markdown, savedWork());
+      doc.focus();
+      return;
+    }
+    if (keep && collectChanges().length) saveWork();  // kept for when you come back
+    doc.removeAttribute("contenteditable");
+    doc.classList.remove("suggesting");
+    $("#suggest-slot").replaceChildren();
+    renderMarkdown(suggesting.markdown);
+    await refreshSuggestions();
+  }
+
+  // ---- Everyone's pending suggestions, drawn into the text ----
+
+  // Each visible (non-space) character of the document, with the text node and offset it comes from.
+  function docTextIndex() {
+    const chars = [];
+    const walker = document.createTreeWalker($("#doc"), NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (within(node, ".track, button")) continue;
+      for (let i = 0; i < node.data.length; i++) if (!/\s/.test(node.data[i])) chars.push({ node, offset: i });
+    }
+    return { chars, text: chars.map(({ node, offset }) => node.data[offset]).join("") };
+  }
+
+  // The same rule the robot uses (scripts/edits.py, locate): the quote, chosen among repeats by the words around it.
+  function locateQuote(index, exact, prefix, suffix) {
+    const key = squash(exact).replace(/\s/g, ""), before = squash(prefix).replace(/\s/g, ""), after = squash(suffix).replace(/\s/g, "");
+    if (!key) return null;
+    const hits = [];
+    for (let i = index.text.indexOf(key); i >= 0; i = index.text.indexOf(key, i + 1)) hits.push(i);
+    const fits = (i) => {
+      const seenBefore = index.text.slice(0, i), seenAfter = index.text.slice(i + key.length);
+      const n = Math.min(before.length, seenBefore.length), m = Math.min(after.length, seenAfter.length);
+      return (n === 0 || seenBefore.slice(-n) === before.slice(-n)) && seenAfter.slice(0, m) === after.slice(0, m);
+    };
+    const good = hits.filter(fits);
+    if (good.length === 1) return [good[0], good[0] + key.length];
+    if (!good.length && hits.length === 1 && key.length >= 25) return [hits[0], hits[0] + key.length];
+    return null;
+  }
+
+  function markSuggestion(index, p, taken) {
+    const found = locateQuote(index, p.old || "", p.before || "", p.after || "");
+    if (!found) return false;
+    const [a, b] = found;
+    if (taken.some(([x, y]) => a < y && x < b)) return false;
+    taken.push([a, b]);
+    const who = p.proposer?.hypothesis || p.proposer?.name || "someone";
+    const start = index.chars[a], end = index.chars[b - 1];
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset + 1);
+    const label = { "data-by": who, "data-proposal": p.id, title: `Suggested by ${who} · click for details`, tabindex: "0" };
+    let last = null;
+    if (p.kind === "delete" || p.kind === "replace") {
+      for (const node of textNodesIn(range)) {
+        const from = node === range.startContainer ? range.startOffset : 0;
+        const to = node === range.endContainer ? range.endOffset : node.length;
+        if (to <= from) continue;
+        const part = from > 0 ? node.splitText(from) : node;
+        if (to - from < part.length) part.splitText(to - from);
+        const del = h("del", { class: "track others", ...label });
+        part.before(del);
+        del.append(part);
+        last = del;
+      }
+    }
+    if (p.kind === "replace" || p.kind === "insert") {
+      const ins = h("ins", { class: "track others added", "data-text": p.kind === "insert" ? ` ${p.new}` : ` ${p.new}`, ...label });
+      if (last) last.after(ins);
+      else { const r = document.createRange(); r.setStart(end.node, end.offset + 1); r.collapse(true); r.insertNode(ins); }
+    }
+    if (p.kind === "rule") {
+      const block = blockOf(end.node);
+      if (block) block.after(h(block.tagName === "LI" ? "li" : "p", { class: "track-rule others", "data-text": p.new, ...label }));
+    }
+    return true;
+  }
+
+  async function refreshSuggestions() {
+    const cfg = suggesting.cfg;
+    const ledger = await loadRecord(cfg, LEDGER_PATH);
+    const { open } = await loadProposals(cfg, suggesting.governance, ledger);
+    suggesting.open = open;
+    const index = docTextIndex();
+    const taken = [];
+    let shown = 0;
+    for (const p of [...open].sort((x, y) => (x.created || "").localeCompare(y.created || ""))) {
+      if (p.status === "needs-fix" && !p.new && p.kind !== "delete") continue;
+      if (markSuggestion(index, p, taken)) shown += 1;
+    }
+    const legend = $("#suggest-legend");
+    if (legend) {
+      legend.hidden = !shown;
+      legend.replaceChildren(h("span", { class: "legend-marks" }, h("del", { class: "track others", text: "struck" }), " would be removed, ",
+        h("ins", { class: "track others added", "data-text": "orange" }), " would be added"),
+        ` · ${plural(shown, "suggestion")} waiting for a maintainer. Click one for details.`);
+    }
+  }
+
+  function suggestionCard(p) {
+    const box = h("div", { class: "suggestion-pop", role: "dialog", "aria-label": "Suggestion" });
+    const key = storedKey();
+    const status = h("p", { class: "vote-status", "aria-live": "polite" });
+    const say = (text, kind = "") => { status.className = `vote-status ${kind}`; status.textContent = text; };
+    const vote = (which) => async () => {
+      for (const b of box.querySelectorAll("button.vote-action")) b.disabled = true;
+      try { await castVote(suggesting.cfg, key, p, which, say); } catch (error) { say(`That didn't work: ${error.message}`, "failed"); }
+    };
+    box.append(
+      h("p", { class: "pop-head" }, h("strong", { text: KIND_LABELS[p.kind] || "Change" }), ` · suggested by ${p.proposer?.name || "someone"}, ${formatDate(p.created)}`),
+      changeView(p),
+      p.reason ? h("p", { class: "proposal-reason", text: `“${p.reason}”` }) : "",
+      h("p", { class: "proposal-links" }, external("Comment on it", p.link), " · ", h("a", { href: `#proposal-${p.id}`, text: "See it in the list" })),
+      key ? h("p", { class: "vote-buttons" }, action("Approve", vote("approve"), "button vote-action"), " ",
+        action("Disapprove", vote("reject"), "button secondary vote-action")) : "",
+      status);
+    return box;
+  }
+
+  function onSuggestionClick(event) {
+    const mark = event.target.closest?.("[data-proposal]");
+    $(".suggestion-pop")?.remove();
+    if (!mark || suggesting.on || !$("#doc").contains(mark)) return;
+    const p = suggesting.open.find((x) => x.id === mark.dataset.proposal);
+    if (!p) return;
+    event.preventDefault();
+    const card = suggestionCard(p);
+    document.body.append(card);
+    const box = mark.getBoundingClientRect();
+    card.style.top = `${scrollY + box.bottom + 8}px`;
+    card.style.left = `${Math.max(12, Math.min(scrollX + box.left, scrollX + innerWidth - card.offsetWidth - 12))}px`;
+  }
+
+  function modeSwitch() {
+    return h("span", { class: "mode-switch", role: "group", "aria-label": "Mode" },
+      h("button", { type: "button", "data-mode": "read", "aria-pressed": "true", text: "Read & comment", onclick: () => suggesting.on && setMode(false) }),
+      h("button", { type: "button", "data-mode": "suggest", "aria-pressed": "false", text: "Suggest edits", onclick: () => !suggesting.on && setMode(true) }));
+  }
+
+  function setupSuggesting(cfg, governance, markdown) {
+    Object.assign(suggesting, { cfg, governance, markdown, version: stampedVersion(markdown) || cfg.latest });
+    const key = storedHypothesisKey();
+    if (key) connectHypothesis(key).then(() => suggestBar.showWho?.()).catch(() => storeHypothesisKey(null));
+    const doc = $("#doc");
+    doc.addEventListener("beforeinput", onBeforeInput);
+    doc.addEventListener("compositionstart", onCompositionStart);
+    doc.addEventListener("compositionend", () => { if (suggesting.on) { reconcile(); afterChange(); } });
+    // Every change this page makes cancels the browser's own; so any input event means one got past.
+    doc.addEventListener("input", (event) => { if (suggesting.on && !event.isComposing) { reconcile(); afterChange(); } });
+    doc.addEventListener("dragstart", (event) => suggesting.on && event.preventDefault());
+    doc.addEventListener("drop", (event) => suggesting.on && event.preventDefault());
+    doc.addEventListener("keydown", (event) => {
+      if (suggesting.on && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); undo(); }
+    });
+    document.addEventListener("click", onSuggestionClick);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") $(".suggestion-pop")?.remove();
+      if (event.key === "Enter" && event.target.matches?.("[data-proposal]")) onSuggestionClick(event);
+    });
+    if (savedWork()) announce("You have unsent changes. Choose “Suggest edits” to keep working on them.");
+  }
+
   // ---------- Pages ----------
 
   function draftNote() {
@@ -664,10 +1453,10 @@
       h("p", { class: "command-name" }, h("code", { text: command })),
       h("p", { class: "command-effect", text: effect }),
       h("p", { class: "command-example" }, ...example));
-    return h("section", { class: "commands", id: "propose", "aria-labelledby": "propose-title" },
-      h("h2", { id: "propose-title", text: "How to write a proposal" }),
-      h("p", {}, "Select the words you want to change in the text below, choose ", h("em", { text: "Annotate" }),
-        ", and start your note with one of these:"),
+    return h("details", { class: "commands", id: "propose" },
+      h("summary", {}, h("h2", { id: "propose-title", text: "Or propose a change in a comment" })),
+      h("p", {}, "You can also select words in the text, choose ", h("em", { text: "Annotate" }),
+        ", and start your comment with one of these:"),
       h("div", { class: "command-grid" },
         card("Delete", "Strikes out the words you selected. Select a whole rule to remove it.", h("del", { text: "quickly" })),
         card("Replace with: new words", "Puts your words in place of the ones you selected.", h("del", { text: "look at" }), " ", h("ins", { text: "read" })),
@@ -680,11 +1469,11 @@
   function drafterIntro(governance) {
     return h("section", { class: "intro" },
       h("h1", { text: "Drafter" }),
-      h("p", { class: "lede", text: "Anyone can comment on AGENTS.md here, and propose changes. The maintainers approve or disapprove each proposal, and every approved change is published right away as a new version." }),
+      h("p", { class: "lede", text: "Anyone can comment on AGENTS.md here, and suggest changes. The maintainers approve or disapprove each suggestion, and every approved change is published right away as a new version." }),
       h("ol", { class: "steps" },
-        h("li", {}, h("strong", { text: "Propose. " }), "Select words in the text, choose ", h("em", { text: "Annotate" }),
-          ", and write one of the commands below. It uses ", external("Hypothesis", "https://web.hypothes.is/start"),
-          ", which asks for a free account. You don't need GitHub."),
+        h("li", {}, h("strong", { text: "Suggest. " }), "Choose ", h("em", { text: "Suggest edits" }),
+          " above the text and edit it directly, as in a word processor with track changes on: words you delete are struck out, and words you type appear in blue under your name. Then submit. Your suggestions go out under your free ",
+          external("Hypothesis", "https://web.hypothes.is/start"), " account; you don't need GitHub."),
         h("li", {}, h("strong", { text: "A maintainer decides. " }), "The ", h("a", { href: at("maintainers/"), text: "maintainers" }),
           " approve or disapprove each proposal. ", ruleSentence(governance?.rules)),
         h("li", {}, h("strong", { text: "It's published, or set aside. " }), "An approved change is published within a minute or two as a new version, with its own number and fingerprint. A disapproved one moves to the ",
@@ -703,13 +1492,16 @@
       ? ` Last changed ${formatDate(commit.commit.author.date)} by ${commit.author?.login ?? commit.commit.author.name} · ` : " ";
     fileBar(
       [h("span", { class: "badge", text: versionLabel(version) }), `${changed}${fileStats(markdown)}`],
-      [button("Propose a change", "#propose"), secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton(), rawToggle()]);
+      [modeSwitch(), secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton(), rawToggle()]);
+    $(".file-bar").after(h("div", { id: "suggest-slot" }), h("p", { class: "suggest-legend", id: "suggest-legend", hidden: true }),
+      h("p", { class: "suggest-note", id: "suggest-note", hidden: true, "aria-live": "polite" }));
     renderMarkdown(markdown);
     const proposals = h("section", { class: "versions proposals", id: "proposals" }, h("h2", { text: "Proposals" }), h("p", { class: "loading", text: "Loading proposals…" }));
     $("#after").replaceChildren(proposals, maintainersNote(governance), communityNote(cfg) || "");
     setCanonical(at("draft/"));
+    setupSuggesting(cfg, governance, markdown);
     loadHypothesis();
-    await Promise.all([showProposals(cfg, governance, ledger, proposals), showEveryVersion(cfg)]);
+    await Promise.all([showProposals(cfg, governance, ledger, proposals), showEveryVersion(cfg), refreshSuggestions()]);
     highlightTarget(true);
     updateProgress();
   }
@@ -949,6 +1741,20 @@
     return null;
   }
 
+  // Post a maintainer's vote on the proposal's GitHub issue, then wait for the robot to act on it.
+  async function castVote(cfg, key, p, vote, say) {
+    say(vote === "approve" ? "Approving…" : "Disapproving…");
+    const number = await issueFor(cfg, key, p);
+    await githubAs(key, "POST", `/repos/${cfg.repo}/issues/${number}/comments`,
+      { body: `/${vote}\n\n${vote === "approve" ? "Approved" : "Disapproved"} on the site.` });
+    say(vote === "approve" ? "Approved. The robot is publishing it as a new version (usually a minute or two)…"
+      : "Disapproved. The robot is moving it to the Declined page (usually a minute or two)…", "pending");
+    const outcome = await outcomeOf(cfg, key, number);
+    if (outcome === "adopted") say("Done: it's published as a new version. Reload the page to see it.", "done");
+    else if (outcome === "declined") say("Done: it's on the Declined page.", "done");
+    else say("Your vote is in. The robot hasn't finished yet; reload in a few minutes to see the result.", "pending");
+  }
+
   function voteButtons(cfg, key, p) {
     const status = h("p", { class: "vote-status", "aria-live": "polite" });
     const say = (text, kind = "") => { status.className = `vote-status ${kind}`; status.textContent = text; };
@@ -958,16 +1764,7 @@
     async function cast(vote) {
       approve.disabled = disapprove.disabled = true;
       try {
-        say(vote === "approve" ? "Approving…" : "Disapproving…");
-        const number = await issueFor(cfg, key, p);
-        await githubAs(key, "POST", `/repos/${cfg.repo}/issues/${number}/comments`,
-          { body: `/${vote}\n\n${vote === "approve" ? "Approved" : "Disapproved"} on the Maintainers page.` });
-        say(vote === "approve" ? "Approved. The robot is publishing it as a new version (usually a minute or two)…"
-          : "Disapproved. The robot is moving it to the Declined page (usually a minute or two)…", "pending");
-        const outcome = await outcomeOf(cfg, key, number);
-        if (outcome === "adopted") say("Done: it's published as a new version. Reload the Drafter to see it.", "done");
-        else if (outcome === "declined") say("Done: it's on the Declined page.", "done");
-        else say("Your vote is in. The robot hasn't finished yet; reload this page in a few minutes to see the result.", "pending");
+        await castVote(cfg, key, p, vote, say);
       } catch (error) {
         say(`That didn't work: ${error.message}`, "failed");
         approve.disabled = p.status === "needs-fix";
@@ -1034,8 +1831,9 @@
       h("h1", { text: "Maintainers" }),
       h("p", { class: "lede", text: "Anyone can comment on AGENTS.md. The maintainers decide which proposed changes go in: they approve or disapprove each one, and every approved change is published as a new version." }),
       h("ol", { class: "steps" },
-        h("li", {}, h("strong", { text: "Anyone comments. " }), "Readers comment in the ", h("a", { href: at("draft/"), text: "Drafter" }),
-          ". A comment that starts with Delete, Replace with:, Add after:, or Add rule: proposes a change. Readers can't change the text themselves."),
+        h("li", {}, h("strong", { text: "Anyone suggests. " }), "In the ", h("a", { href: at("draft/"), text: "Drafter" }),
+          ", readers comment, and suggest changes by editing the text with track changes on (", h("em", { text: "Suggest edits" }),
+          "). Each change they submit becomes one proposal under their name. Readers can't change the text themselves."),
         h("li", {}, h("strong", { text: "A maintainer decides. " }), `Each proposal waits for a maintainer to approve or disapprove it, here on this page. ${ruleSentence(rules)}`),
         h("li", {}, h("strong", { text: "Approved: a new version. " }), "Within a minute or two, the change is made and published as a new version, with its own number and fingerprint. The record says who proposed it and who approved it."),
         h("li", {}, h("strong", { text: "Disapproved: set aside. " }), "It leaves the Drafter's list and moves to the ",

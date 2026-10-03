@@ -273,6 +273,34 @@ class RunTest(unittest.TestCase):
         self.assertIn("Changes to the text, by Maintainer:\n\n- Reword rule 3\n- Reword the seed rule\n", changelog)
         self.assertNotIn("Touch only the version line", changelog)
 
+    def suggestion_rows(self, approved):
+        """The editor's four suggestions as Hypothesis returns them, with a maintainer's approval of some."""
+        posted = json.loads((ROOT / "scripts" / "tests" / "suggestions.json").read_text())["posted"]
+        rows = []
+        for i, body in enumerate(posted):
+            created = f"2026-10-03T10:0{i}:00+00:00"
+            rows.append({"id": f"s{i}", "user": "acct:testreader@hypothes.is", "user_info": {"display_name": "Test Reader"},
+                         "created": created, "updated": created, "text": body["text"], "target": body["target"],
+                         "links": {"incontext": f"https://hyp.is/s{i}/draft"}})
+            if i in approved:
+                rows.append(reply(f"a{i}", "nathanReitinger", "Approve", f"s{i}"))
+        return rows
+
+    def test_suggestions_from_the_editor_apply_in_any_order(self):
+        for first in ([3], [2]):  # the new rule first, or the word change in the rule it follows first
+            with self.subTest(first=first):
+                self.tearDown()
+                self.setUp()
+                self.robot(self.suggestion_rows(first))
+                self.robot(self.suggestion_rows([0, 1, 2, 3]), now="2026-10-03T13:00:00Z")
+                self.assertEqual({r["id"]: r["status"] for r in self.ledger().values()},
+                                 {"s0": "adopted", "s1": "adopted", "s2": "adopted", "s3": "adopted"})
+                draft = (self.repo / "draft" / "AGENTS.md").read_text()
+                self.assertIn("- If the project isn't under version control, offer to set it up", draft)
+                self.assertIn("- Keep plans and drafts, decisions, and the codebook in files", draft)
+                self.assertIn("- Set and record a random seed in each script that samples or simulates.\n"
+                              "- Name the model and its version in every log.\n", draft)
+
     def test_a_changed_frozen_version_stops_the_robot(self):
         frozen = self.repo / "versions" / "v0.0.1" / "AGENTS.md"
         frozen.write_text(frozen.read_text().replace("Never", "Always", 1))

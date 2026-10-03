@@ -8,9 +8,21 @@
 - **Maintainers** approve or disapprove proposals on the site's [Maintainers](https://nathanreitinger.github.io/els-agent-practices/maintainers/) page, and can make changes themselves by proposing and approving them. They're listed there and in [governance/maintainers.json](governance/maintainers.json).
 - **The lead maintainer** keeps the list of maintainers and the rules, looks after the site, and can also edit the text directly. Today that's Nathan Reitinger.
 
-## Proposing a change
+## Suggesting a change
 
-Select the words you want to change in the Drafter, choose **Annotate**, and start your note with one of these:
+In the Drafter, choose **Suggest edits** above the text and edit it directly, as in a word processor with track changes on:
+
+- Select words and press Delete to strike them out; they stay visible, struck through, until a maintainer decides.
+- Type to add words; they appear in blue, labeled with your username.
+- To add a new rule, put the cursor at the end of a rule and press Enter.
+
+Then choose **Submit for review**. Each change becomes one proposal under your Hypothesis username, so maintainers can approve some and disapprove others. Connecting your Hypothesis account takes one step the first time: on your [Hypothesis developer page](https://hypothes.is/account/developer), choose *Create API token* and paste the token into the Drafter. It stays in your browser. Your unsent changes are kept in your browser, too, so you can come back to them.
+
+While anyone reads the Drafter, every suggestion waiting for a maintainer is shown in the text: struck-through words would be removed, and orange words would be added, with the suggester's name. Clicking one shows the details; a signed-in maintainer can approve or disapprove it right there.
+
+### Or, in a comment
+
+Select the words you want to change, choose **Annotate**, and start your comment with one of these:
 
 | Start your note with | What happens |
 |---|---|
