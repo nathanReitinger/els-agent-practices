@@ -16,7 +16,7 @@
     "about": "The Supabase project behind Suggest Edits (supabase/README.md). The address and key are public: the key only lets visitors do what supabase/schema.sql allows. starts_robot is true once Supabase starts the robot (supabase/robot.sql); the robot then opens an issue if those starts stop.",
     "url": "https://weoeyuweajqsrjzfmjvl.supabase.co",
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
-    "starts_robot": false
+    "starts_robot": true
   },
   "latest": "0.0.6",
   "fingerprint": {
