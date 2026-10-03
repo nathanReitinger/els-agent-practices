@@ -69,9 +69,13 @@
   }
   const fetchJSON = async (url) => JSON.parse(await fetchText(url));
 
+  // A time as milliseconds. Supabase writes times with six decimal places, which some browsers can't read, so
+  // they're cut to three first.
+  const toTime = (value) => Date.parse(String(value ?? "").replace(/(\.\d{3})\d+/, "$1"));
+
   function formatDate(value) {
     if (!value) return "";
-    const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00` : value);
+    const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00` : toTime(value));
     return date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
   }
 
@@ -1212,6 +1216,7 @@
     editing: true, backend: null, watcher: null, me: null, ready: false,
     remote: null,  // everyone's suggestions, from the database (null until it answers)
     votes: [],  // everyone's votes, from the database
+    pendingVotes: [],  // votes cast here that the database hasn't sent back yet
     proposals: { replies: new Map(), records: [], fresh: [] },  // the robot's record, and new proposals in comments
     others: [], saved: new Map(), undrawable: new Set(), undo: [], redo: [], lastGood: "",
     dirty: false, edits: 0, lastEdit: 0, busy: false, syncing: Promise.resolve(), timer: null,
@@ -1395,6 +1400,12 @@
     suggest.redo = [];
     suggest.dirty = false;
     updateBar();
+  }
+
+  async function redrawNow() {
+    if (suggest.dirty || suggest.busy) await sync();
+    drawEverything();
+    renderProposals();
   }
 
   // Whether your suggestions in the database differ from the ones in the text (say, after you changed them in
@@ -1670,14 +1681,14 @@
     const rules = suggest.governance?.rules || {};
     const maintainers = (suggest.governance?.maintainers || []).filter((m) => m.email);
     const proposer = p.proposer?.email || p.author?.email;
-    const since = Date.parse(p.updated || p.created || 0);
+    const since = toTime(p.updated || p.created) || 0;
     const latest = new Map();
     for (const v of suggest.votes) {
-      if (v.suggestion !== p.id || !(Date.parse(v.at) >= since)) continue;
+      if (v.suggestion !== p.id || !(toTime(v.at) >= since)) continue;
       const m = maintainers.find((x) => sameEmail(x.email, v.voter_email));
       if (!m || (v.vote === "approve" && rules.maintainers_may_approve_their_own_proposals === false && sameEmail(m.email, proposer))) continue;
       const known = latest.get(m.email.toLowerCase());
-      if (!known || Date.parse(v.at) > Date.parse(known.at)) latest.set(m.email.toLowerCase(), v);
+      if (!known || toTime(v.at) > toTime(known.at)) latest.set(m.email.toLowerCase(), v);
     }
     const votes = [...latest.values()];
     const approvals = votes.filter((v) => v.vote === "approve"), rejections = votes.filter((v) => v.vote === "reject");
@@ -1776,39 +1787,38 @@
     const step = h("select", { class: "step-select", "aria-label": "The new version's number" },
       ...STEPS.map((value) => h("option", { value, selected: (mine?.version_step || "patch") === value,
         text: `as version ${nextVersion(base, value)}${labels[value]}` })));
+    // A vote counts at once: the box closes, an approved change joins the text and the "being published" list,
+    // and the vote is saved in the background. If saving fails, the vote is taken back and the page says so.
     const cast = async (vote) => {
-      approve.disabled = disapprove.disabled = true;
-      say(vote === "approve" ? "Approving…" : "Disapproving…", "pending");
       const chosen = vote === "approve" ? step.value : "patch";
-      try {
-        await suggest.backend.vote(p.id, vote, chosen);
-      } catch (error) {
-        say(/version_step/.test(error.message)
-          ? "The database needs one more step first: run supabase/schema.sql again in Supabase's SQL Editor."
-          : `That didn't work: ${error.message}`, "failed");
-        approve.disabled = p.status === "needs-fix";
-        disapprove.disabled = false;
-        return;
-      }
-      // Count the vote here at once, rather than waiting for the database to send it back.
-      const me = suggest.me, at = new Date(Math.max(Date.now(), Date.parse(p.updated || 0))).toISOString();
-      suggest.votes = [...suggest.votes.filter((v) => !(v.suggestion === p.id && v.voter_id === me.id)),
-        { suggestion: p.id, voter_id: me.id, voter_email: me.email, vote, version_step: chosen, at }];
+      const me = suggest.me, at = new Date(Math.max(Date.now(), toTime(p.updated) || 0)).toISOString();
+      const mine = { suggestion: p.id, voter_id: me.id, voter_email: me.email, vote, version_step: chosen, at };
+      const others = (list) => list.filter((v) => !(v.suggestion === p.id && v.voter_id === me.id));
+      suggest.pendingVotes = [...others(suggest.pendingVotes), mine];
+      suggest.votes = [...others(suggest.votes), mine];
       $(".suggestion-pop")?.remove();
-      await sync();
-      drawEverything();
-      renderProposals();
+      await redrawNow();
       const decided = pendingDecisions().get(p.id);
       hint(decided?.kind === "adopt" ? `Approved. The text shows the change now; it's being published as version ${decided.version}.`
         : decided?.kind === "decline" ? "Disapproved. It's gone from the text, and it's moving to the Declined page."
           : `${vote === "approve" ? "Approved" : "Disapproved"}. It needs more maintainers' votes to be decided.`);
-      watchForPublication(true);
-      suggest.watcher?.refresh();
+      try {
+        await suggest.backend.vote(p.id, vote, chosen);
+        watchForPublication(true);
+        suggest.watcher?.refresh();
+      } catch (error) {
+        suggest.pendingVotes = others(suggest.pendingVotes);
+        suggest.votes = others(suggest.votes);
+        await redrawNow();
+        hint(/version_step/.test(error.message)
+          ? "Your vote wasn't saved: the database needs one more step first (run supabase/schema.sql again in Supabase's SQL Editor)."
+          : `Your vote wasn't saved (${error.message}). Please try again.`);
+      }
     };
     const approve = action("Approve", () => cast("approve"), "button small");
     const disapprove = action("Disapprove", () => cast("reject"), "button secondary small");
     if (p.status === "needs-fix") { approve.disabled = true; approve.title = "It needs a fix before it can be approved"; }
-    if (mine && Date.parse(mine.at) >= Date.parse(p.updated || 0)) {
+    if (mine && toTime(mine.at) >= (toTime(p.updated) || 0)) {
       say(mine.vote === "approve" ? "You approved it." : "You disapproved it.", "done");
     }
     return h("div", { class: "vote" }, h("p", { class: "vote-buttons" }, approve, " ", step, " ", disapprove), status);
@@ -1839,7 +1849,7 @@
     const record = { ...s, old: s.old ?? s.exact, before: s.before ?? s.prefix, after: s.after ?? s.suffix,
       proposer: s.proposer || { name: s.author?.email } };
     const known = recordOf(s.id);
-    const p = known && Date.parse(known.updated) === Date.parse(s.updated) ? { ...record, ...known } : { ...record, status: known?.status || "new" };
+    const p = known && toTime(known.updated) === toTime(s.updated) ? { ...record, ...known } : { ...record, status: known?.status || "new" };
     return h("div", { class: "suggestion-pop", role: "dialog", "aria-label": "Suggestion" },
       h("p", { class: "pop-head" }, h("strong", { text: KIND_LABELS[s.kind] || "Change" }),
         ` · suggested by ${record.proposer?.name || "someone"}, ${formatDate(s.created)}`),
@@ -1867,7 +1877,7 @@
   // A suggestion from the database as a proposal: the robot's record of it if that's up to date, or what's known
   // until the robot looks (within a few minutes).
   function asProposal(s, known) {
-    if (known && (FINAL_STATUS.has(known.status) || Date.parse(known.updated) === Date.parse(s.updated))) return known;
+    if (known && (FINAL_STATUS.has(known.status) || toTime(known.updated) === toTime(s.updated))) return known;
     return { id: s.id, status: "new", kind: s.kind, old: s.exact, new: s.new, before: s.prefix, after: s.suffix, reason: s.reason,
       created: s.created, updated: s.updated, proposer: { name: s.author.email, email: s.author.email }, issue: known?.issue };
   }
@@ -1991,7 +2001,10 @@
     if (backend.kind === "none") { gotUser = gotData = true; return start(); }
     suggest.watcher = backend.watch(({ suggestions, votes }) => {
       suggest.remote = suggestions;
-      suggest.votes = votes;
+      const saved = (mine) => votes.some((v) => v.suggestion === mine.suggestion && v.voter_id === mine.voter_id && v.vote === mine.vote);
+      suggest.pendingVotes = suggest.pendingVotes.filter((mine) => !saved(mine) && Date.now() - toTime(mine.at) < 120000);
+      suggest.votes = [...votes.filter((v) => !suggest.pendingVotes.some((mine) => mine.suggestion === v.suggestion && mine.voter_id === v.voter_id)),
+        ...suggest.pendingVotes];
       if (!gotData) { gotData = true; return start(); }
       refresh();
     }, (error) => {
