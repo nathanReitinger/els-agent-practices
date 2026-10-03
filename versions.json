@@ -14,8 +14,8 @@
   },
   "supabase": {
     "about": "The Supabase project behind Suggest Edits (supabase/README.md). Both values are public: the key only lets visitors do what supabase/schema.sql allows.",
-    "url": "",
-    "key": ""
+    "url": "https://weoeyuweajqsrjzfmjvl.supabase.co",
+    "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW"
   },
   "latest": "0.0.3",
   "fingerprint": {
