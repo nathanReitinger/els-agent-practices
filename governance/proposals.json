@@ -182,6 +182,138 @@
       "version": "0.0.6",
       "fingerprint": "cdf4bc4413ab6647eede39c548c0a1c1f36609518b1dc1dde9f8ad5306e6a00a",
       "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -24 +24 @@\n-- Find out which language I use for code (e.g., Stata, Python, R) and how well I know it (e.g., can I run it or write it). Write all code in that language. If a step needs another one (for example, to download files or call a model), say why and hand the result back in a form I can use.\n+- Find out which language I use for code (e.g., Stata, Python, R) and how well I know it (e.g., can I run it or write it). Write all code in that language. If a step needs another programming language, say why and hand the result back in a form I can use."
+    },
+    {
+      "id": "sb-71f929b6-b518-429e-8ed8-61f03c8e267e",
+      "status": "adopted",
+      "based_on": "0.0.7",
+      "issue": null,
+      "kind": "delete",
+      "old": "Commercial databases (Westlaw, Lexis, Bloomberg) often restrict bulk downloading and use with AI tools, and some data archives treat uploading their files to an AI tool as prohibited redistribution. Confirm the terms before using them.",
+      "new": "",
+      "before": " yes before any PACER download.\n",
+      "after": "\nIf the project uses federal cou",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-03T05:06:37.805336+00:00",
+      "updated": "2026-10-03T05:06:37.805336+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Legal data cautions",
+      "preview": {
+        "before": [
+          "Commercial databases (Westlaw, Lexis, Bloomberg) often restrict bulk downloading and use with AI tools, and some data archives treat uploading their files to an AI tool as prohibited redistribution. Confirm the terms before using them."
+        ],
+        "after": [],
+        "context": "PACER charges per page, and a retry loop can run up a bill. Estimate the cost and get my yes before any PACER download."
+      },
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-03T05:07:50.455070+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
+      "support": 0,
+      "stale_votes": 0,
+      "decided": "2026-10-03T05:08:39.841142+00:00",
+      "version": "0.0.8",
+      "fingerprint": "73366070f6c4b26114a586179d7a785a7f0bd5055180e8c2d4fb15590affb0b1",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -160 +159,0 @@\n-- Commercial databases (Westlaw, Lexis, Bloomberg) often restrict bulk downloading and use with AI tools, and some data archives treat uploading their files to an AI tool as prohibited redistribution. Confirm the terms before using them."
+    },
+    {
+      "id": "sb-6e135e39-d561-4f8f-a159-0fa209c7b909",
+      "status": "adopted",
+      "based_on": "0.0.7",
+      "issue": null,
+      "kind": "delete",
+      "old": "If the project uses federal court administrative data (from the Administrative Office or the FJC's Integrated Database), award amounts were recorded in thousands and capped at 9999, a value also used for missing amounts. Records can change between pulls, so save a dated copy of each, and the criminal data count defendants, not cases.",
+      "new": "",
+      "before": "rm the terms before using them.\n",
+      "after": "\nIf the project uses the Songer ",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-03T05:06:50.800447+00:00",
+      "updated": "2026-10-03T05:06:50.800447+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Legal data cautions",
+      "preview": {
+        "before": [
+          "If the project uses federal court administrative data (from the Administrative Office or the FJC's Integrated Database), award amounts were recorded in thousands and capped at 9999, a value also used for missing amounts. Records can change between pulls, so save a dated copy of each, and the criminal data count defendants, not cases."
+        ],
+        "after": [],
+        "context": "PACER charges per page, and a retry loop can run up a bill. Estimate the cost and get my yes before any PACER download."
+      },
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-03T05:07:47.893347+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
+      "support": 0,
+      "stale_votes": 0,
+      "decided": "2026-10-03T05:08:39.841142+00:00",
+      "version": "0.0.9",
+      "fingerprint": "4ec06e23c260ea75849ae13ed73b6755d30f5b4a3a5297a627d7402d17bec3b7",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -160 +159,0 @@\n-- If the project uses federal court administrative data (from the Administrative Office or the FJC's Integrated Database), award amounts were recorded in thousands and capped at 9999, a value also used for missing amounts. Records can change between pulls, so save a dated copy of each, and the criminal data count defendants, not cases."
+    },
+    {
+      "id": "sb-0620eaa7-ac48-4e2f-b157-3a455096ed69",
+      "status": "adopted",
+      "based_on": "0.0.7",
+      "issue": null,
+      "kind": "delete",
+      "old": "If the project uses the Songer appeals database, it samples only published opinions and needs weights. If it uses the Supreme Court Database, its issue codes were assigned conditional on the disposition and the Court's known preferences, which skews the \"direction\" variables, and it should be cited by release.",
+      "new": "",
+      "before": "ta count defendants, not cases.\n",
+      "after": "",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-03T05:06:59.684594+00:00",
+      "updated": "2026-10-03T05:06:59.684594+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Legal data cautions",
+      "preview": {
+        "before": [
+          "If the project uses the Songer appeals database, it samples only published opinions and needs weights. If it uses the Supreme Court Database, its issue codes were assigned conditional on the disposition and the Court's known preferences, which skews the \"direction\" variables, and it should be cited by release."
+        ],
+        "after": [],
+        "context": "PACER charges per page, and a retry loop can run up a bill. Estimate the cost and get my yes before any PACER download."
+      },
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-03T05:07:46.374112+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
+      "support": 0,
+      "stale_votes": 0,
+      "decided": "2026-10-03T05:08:39.841142+00:00",
+      "version": "0.0.10",
+      "fingerprint": "66b2fdcdebc9491c6fd807b7f4a60a1e6318389a773435fcad13d61d514843ae",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -160 +159,0 @@\n-- If the project uses the Songer appeals database, it samples only published opinions and needs weights. If it uses the Supreme Court Database, its issue codes were assigned conditional on the disposition and the Court's known preferences, which skews the \"direction\" variables, and it should be cited by release."
     }
   ]
 }
