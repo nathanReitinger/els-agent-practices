@@ -90,6 +90,11 @@ The robot watches for two problems it can't fix itself. For each, it opens a Git
 - **"The Suggest Edits database isn't answering."** Usually Supabase paused the project. Restore it from the dashboard.
 - **"Supabase isn't starting the robot."** Usually the token was deleted. The issue says how to make a new one.
 
+One problem the robot can't see, because it never sends email: if Suggest Edits says **"The email couldn't be sent,"** open the project's [Auth logs](https://supabase.com/dashboard/project/_/logs/auth-logs) and find the error at that time.
+
+- **"535 5.7.8 Username and Password not accepted"** means Gmail refused the login in the [SMTP settings](https://supabase.com/dashboard/project/_/auth/smtp). The username, password, and sender email must all belong to one Gmail account, and the password must be a current [app password](https://myaccount.google.com/apppasswords) for it, typed without spaces. Changing that account's password, or turning off its 2-Step Verification, cancels its app passwords: make a new one, and save it in Supabase again. (Supabase hides the saved password, so retype it whenever you save that form.)
+- **An email with a link instead of a code** means the template for that email (first-time addresses get **Confirm sign up**; returning ones get **Magic link or OTP**) is missing `{{ .Token }}`.
+
 The robot also keeps GitHub from switching off its schedule: GitHub does that after 60 days with no activity in a public repository, so after a month with no commits, the robot makes an empty one ("Robot: still running").
 
 ## Good to know
