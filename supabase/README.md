@@ -38,7 +38,7 @@ By default Supabase emails a sign-in link. The site asks for the code instead.
 2. In **Magic link or OTP**, set the subject to `Your sign-in code for AGENTS.md for Empirical Legal Scholars` and replace the message with:
 
    ```html
-   <p>Type this code on the Suggest Edits page to sign in:</p>
+   <p>Enter this code on the Suggest Edits page to verify your email address and start editing:</p>
    <p style="font-size: 28px; font-weight: bold; letter-spacing: 4px">{{ .Token }}</p>
    <p>It works once, within an hour. If you didn't ask for it, you can ignore this email.</p>
    ```

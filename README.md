@@ -13,7 +13,7 @@ It's a comment draft (version 0.0.x): nothing is final, and it grows out of sugg
 
 ## How it works
 
-- **Anyone can suggest a change** on Suggest Edits, with no GitHub account: edit the text with track changes on (struck-out deletions, new words in blue), and sign in with your email address, which is your name there. Each change is saved as one suggestion as you make it, and everyone sees everyone's suggestions in the text. Suggestions and votes are kept in a free Supabase database (`supabase/`).
+- **Anyone can suggest a change** on Suggest Edits, with no GitHub account: verify an email address (a code is emailed to it), then edit the text with track changes on (struck-out deletions, new words in blue). The verified address is your name there. Each change is saved as one suggestion as you make it, and everyone sees everyone's suggestions in the text. Suggestions and votes are kept in a free Supabase database (`supabase/`).
 - **Maintainers decide.** Signed in on Suggest Edits, they approve or disapprove each suggestion. One maintainer's approval adopts a suggestion, unless at least as many maintainers disapprove it. Disapproved suggestions move to the Declined page.
 - **Approved changes are published automatically.** A robot (`scripts/proposals.py`, run every five minutes by `.github/workflows/proposals.yml`) applies each approved suggestion, publishes it as the next version, and records who suggested and approved it.
 - **Every version has a fingerprint**, the Argon2id hash of its file without line 3, so anyone can check that a copy is exact.

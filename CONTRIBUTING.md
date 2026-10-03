@@ -5,10 +5,10 @@ This project is one file, **AGENTS.md**: standing instructions for AI agents wor
 ## Suggest a change (no GitHub needed)
 
 1. Open [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/).
-2. Edit the text directly, with track changes on: deleted words are struck out, and new words appear in blue under your name. Press Enter at the end of a rule to add a new one.
-3. Sign in with your email address: the site emails you a 6-digit code. Your changes are saved as suggestions as you make them, labeled with your email address, which everyone can see.
+2. Verify an email address: enter any address you can check, then the 6-digit code the site emails to it. That address is your name on the site, and everyone can see it.
+3. Edit the text as in Word with track changes on: deleted words are struck out, and new words appear in blue under your name. Press Enter at the end of a rule to add a new one. Every change is saved automatically as a suggestion.
 
-To comment instead, choose **Commenting**, select words, and choose **Annotate** (comments use a free [Hypothesis](https://web.hypothes.is/start) account). A comment that starts with `Delete`, `Replace with:`, `Add after:`, or `Add rule:` is also a proposal.
+To comment instead, choose **Comment instead** above the text, select words, and choose **Annotate** (comments use a free [Hypothesis](https://web.hypothes.is/start) account). A comment that starts with `Delete`, `Replace with:`, `Add after:`, or `Add rule:` is also a proposal.
 
 When a maintainer approves your suggestion, it's published as a new version automatically. You can follow it in the list below the text on Suggest Edits; if it's disapproved, it moves to the [Declined](https://nathanreitinger.github.io/els-agent-practices/declined/) page.
 
@@ -18,7 +18,7 @@ People who use and shape AGENTS.md talk with each other in a Google group, agent
 
 ## Approve or disapprove (maintainers)
 
-Sign in on [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/) with the email address listed for you in `governance/maintainers.json`. Then click a suggestion in the text, or use the list below it, and choose **Approve** or **Disapprove**. You can also comment `/approve` or `/reject` on a suggestion's GitHub issue (replying to GitHub's notification email works too), or reply **Approve** or **Reject** to a proposal made in a comment.
+Verify the email address listed for you in `governance/maintainers.json` on [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/). Then click a suggestion in the text, or use the list below it, and choose **Approve** or **Disapprove**. You can also comment `/approve` or `/reject` on a suggestion's GitHub issue (replying to GitHub's notification email works too), or reply **Approve** or **Reject** to a proposal made in a comment.
 
 ## Check a copy
 

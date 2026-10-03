@@ -2,7 +2,7 @@ blank_issues_enabled: true
 contact_links:
   - name: Propose a change to AGENTS.md
     url: https://nathanreitinger.github.io/els-agent-practices/draft/
-    about: On Suggest Edits, edit the text with track changes on and sign in with your email to save your suggestions. The maintainers approve or disapprove each one, and approved changes are published automatically.
+    about: On Suggest Edits, verify an email address, then edit the text with track changes on; every change is saved as a suggestion. The maintainers approve or disapprove each one, and approved changes are published automatically.
   - name: Check whether a copy is exact
     url: https://nathanreitinger.github.io/els-agent-practices/check/
     about: Compare a copy of AGENTS.md with every published version's fingerprint.

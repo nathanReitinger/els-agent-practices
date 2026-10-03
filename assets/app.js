@@ -835,11 +835,23 @@
   function rememberForUndo() {
     suggest.undo.push($("#doc").innerHTML);
     if (suggest.undo.length > 200) suggest.undo.shift();
+    suggest.redo = [];
   }
   function undo() {
+    if (!suggest.editing || !suggest.me) return;
     const saved = suggest.undo.pop();
     if (saved == null) return hint("Nothing to undo.");
+    suggest.redo.push($("#doc").innerHTML);
     $("#doc").innerHTML = saved;
+    freezeStamp();
+    afterChange();
+  }
+  function redo() {
+    if (!suggest.editing || !suggest.me) return;
+    const next = suggest.redo.pop();
+    if (next == null) return hint("Nothing to redo.");
+    suggest.undo.push($("#doc").innerHTML);
+    $("#doc").innerHTML = next;
     freezeStamp();
     afterChange();
   }
@@ -865,11 +877,13 @@
       deleteHardLineBackward: () => deleteText("backward", target && asRange(target)),
       deleteByCut: () => deleteText("forward", target && asRange(target)),
       historyUndo: undo,
+      historyRedo: redo,
     };
     if (!actions[type]) return;
-    if (type !== "historyUndo") rememberForUndo();
+    const history = type === "historyUndo" || type === "historyRedo";
+    if (!history) rememberForUndo();
     actions[type]();
-    if (type !== "historyUndo") afterChange();
+    if (!history) afterChange();
   }
 
   function onCompositionStart() {
@@ -1184,14 +1198,13 @@
 
   // ---- The page's state ----
 
-  const SAVED_WORK = "els-suggesting";  // changes made before signing in, kept in this browser
   const suggest = {
     cfg: null, governance: null, markdown: "", version: "",
     editing: true, backend: null, watcher: null, me: null, ready: false,
     remote: null,  // everyone's suggestions, from the database (null until it answers)
     votes: [],  // everyone's votes, from the database
     proposals: { replies: new Map(), records: [], fresh: [] },  // the robot's record, and new proposals in comments
-    others: [], saved: new Map(), undrawable: new Set(), undo: [], lastGood: "",
+    others: [], saved: new Map(), undrawable: new Set(), undo: [], redo: [], lastGood: "",
     dirty: false, edits: 0, lastEdit: 0, busy: false, syncing: Promise.resolve(), timer: null,
     status: { text: "All changes saved", problem: false },
     signin: { step: "email", email: "", note: "" },
@@ -1348,32 +1361,23 @@
     select(restored);
   }
 
-  // Draw the whole text: your suggestions (or, before you sign in, your unsaved changes), and everyone else's.
+  // Draw the whole text: your suggestions, and everyone else's.
   function drawEverything() {
     const doc = $("#doc");
     fillDoc(doc, suggest.markdown);
     freezeStamp();
     suggest.saved = new Map();
     suggest.undrawable = new Set();
-    if (suggest.me) {
-      const taken = [];
-      for (const s of mineOpen()) {
-        if (drawSuggestion(s, true, taken)) suggest.saved.set(s.docId, pickChange(s));
-        else suggest.undrawable.add(s.docId);  // it no longer fits the text; it's kept, and the robot reports it
-      }
-    } else {
-      const saved = savedWork();
-      if (saved) {
-        doc.innerHTML = DOMPurify.sanitize(saved);
-        for (const copy of $$("button.copy", doc)) copy.remove();
-        addCopyButtons(doc);
-        freezeStamp();
-      }
+    const taken = [];
+    for (const s of mineOpen()) {
+      if (drawSuggestion(s, true, taken)) suggest.saved.set(s.docId, pickChange(s));
+      else suggest.undrawable.add(s.docId);  // it no longer fits the text; it's kept, and the robot reports it
     }
     drawOthers();
     setEditable(suggest.editing);
     suggest.lastGood = doc.innerHTML;
     suggest.undo = [];
+    suggest.redo = [];
     suggest.dirty = false;
     updateBar();
   }
@@ -1402,17 +1406,18 @@
     updateBar();
   }
 
-  // The text can be edited once the page knows whether you're signed in, so nothing typed is lost.
+  // Only a reader who has verified their email address can edit the text; everyone else reads it (and can comment).
   function setEditable(on) {
     const doc = $("#doc");
-    if (on && suggest.ready) {
+    const editable = on && suggest.ready && !!suggest.me;
+    if (editable) {
       doc.setAttribute("contenteditable", "true");
       doc.setAttribute("spellcheck", "true");
     } else {
       doc.removeAttribute("contenteditable");
     }
-    doc.classList.toggle("suggesting", on);
-    html.classList.toggle("suggesting-mode", on);
+    doc.classList.toggle("suggesting", editable);
+    html.classList.toggle("suggesting-mode", editable);
   }
 
   function freezeStamp() {
@@ -1422,28 +1427,13 @@
 
   // ---- Saving your changes as you go ----
 
-  function saveWork() {
-    try { localStorage.setItem(SAVED_WORK, JSON.stringify({ version: suggest.version, html: $("#doc").innerHTML })); } catch { /* blocked */ }
-  }
-  function savedWork() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(SAVED_WORK) || "null");
-      return saved && saved.version === suggest.version ? saved.html : null;
-    } catch { return null; }
-  }
-  function clearWork() {
-    try { localStorage.removeItem(SAVED_WORK); } catch { /* blocked */ }
-  }
-
   function afterChange() {
     tidyMarks();
     suggest.lastGood = $("#doc").innerHTML;
     suggest.lastEdit = Date.now();
     suggest.edits += 1;
     suggest.dirty = true;
-    if (suggest.me) setSaveStatus("Saving…");
-    else saveWork();
-    updateBar();
+    setSaveStatus("Saving…");
     clearTimeout(suggest.timer);
     suggest.timer = setTimeout(sync, 1200);
   }
@@ -1478,7 +1468,6 @@
         await backend.remove(id);
         suggest.saved.delete(id);
       }
-      clearWork();
       if (suggest.edits === edits) suggest.dirty = false;
       suggest.lastGood = $("#doc").innerHTML;
       setSaveStatus(suggest.dirty ? "Saving…" : "All changes saved");
@@ -1492,7 +1481,93 @@
     }
   }
 
-  // ---- The bar above the text ----
+  // ---- Verifying an email address, to edit ----
+  // Until a reader verifies an email address (any address they can check), Suggest Edits shows only a popup that
+  // asks them to: the text itself is on the main page. They enter the address, then the 6-digit code it's sent,
+  // and the page appears with the text ready to edit. They stay signed in on that computer.
+
+  function gateBox() {
+    const { backend, signin: step } = suggest;
+    const readInstead = h("p", { class: "gate-fine" }, "Just want to read it? The current version is on the ",
+      h("a", { href: at(""), text: "main page" }), ".");
+    if (!suggest.ready) return [h("p", { class: "loading", text: "Loading…" })];
+    if (!backend || backend.kind === "none") {
+      return [h("h2", { text: "Editing isn't open yet" }),
+        h("p", { text: "Verifying an email address to edit this document isn't switched on yet. Please check back soon." }), readInstead];
+    }
+    const note = h("p", { class: "gate-note", "aria-live": "polite", text: step.note });
+    const say = (text) => { step.note = text; note.textContent = text; };
+    if (step.step === "code") {
+      const code = h("input", { type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "10", spellcheck: "false",
+        class: "key-input code-input", placeholder: "123456", "aria-label": "The 6-digit code from the email" });
+      const verify = async () => {
+        const value = code.value.replace(/\D/g, "");
+        if (value.length < 6) { say("Enter the 6-digit code from the email."); return code.focus(); }
+        say("Checking…");
+        try {
+          await backend.verifyCode(step.email, value);
+          Object.assign(step, { step: "email", note: "" });
+        } catch (error) {
+          say(`That code didn't work (${error.message}). Check it, or send a new one.`);
+        }
+      };
+      const again = async () => {
+        say("Sending…");
+        try { await backend.sendCode(step.email); say("We sent a new code. Use the newest one."); } catch (error) { say(`That didn't work: ${error.message}`); }
+      };
+      code.addEventListener("keydown", (event) => { if (event.key === "Enter") verify(); });
+      setTimeout(() => code.focus(), 0);
+      return [
+        h("h2", { text: "Check your email" }),
+        h("p", {}, "We sent a 6-digit code to ", h("strong", { text: step.email }), ". Enter it here to start editing."),
+        h("div", { class: "gate-row" }, code, action("Verify", verify, "button")),
+        h("p", { class: "gate-links" },
+          h("button", { type: "button", class: "linklike", text: "Send a new code", onclick: again }), " · ",
+          h("button", { type: "button", class: "linklike", text: "Use a different email address",
+            onclick: () => { Object.assign(step, { step: "email", note: "" }); updateGate(true); } })),
+        note];
+    }
+    const email = h("input", { type: "email", class: "key-input email-input", value: step.email, placeholder: "you@example.edu",
+      autocomplete: "email", spellcheck: "false", "aria-label": "An email address" });
+    const send = async () => {
+      const address = email.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) { say("Enter an email address first."); return email.focus(); }
+      say("Sending…");
+      try {
+        await backend.sendCode(address);
+        Object.assign(step, { step: "code", email: address, note: backend.kind === "local" ? "(Local test: any six digits work.)" : "" });
+        updateGate(true);
+      } catch (error) {
+        say(`That didn't work: ${error.message}`);
+      }
+    };
+    email.addEventListener("keydown", (event) => { if (event.key === "Enter") send(); });
+    setTimeout(() => email.focus(), 0);
+    return [
+      h("h2", { text: "Verify an email address to edit" }),
+      h("p", { text: "You need to verify an email address in order to edit this document. Enter any email address you can check, and we'll send it a 6-digit code." }),
+      h("div", { class: "gate-row" }, email, action("Send code", send, "button")),
+      note,
+      h("p", { class: "gate-fine", text: "The address you verify is your name here: it's shown with your suggestions." }),
+      readInstead];
+  }
+
+  // The popup, and the page behind it: hidden until you've verified an email address. Rebuilt only when its step
+  // changes, so typing the address or the code isn't interrupted.
+  function updateGate(rebuild = false) {
+    const gate = $("#gate");
+    if (!gate) return;
+    const gated = !suggest.ready || !suggest.me;
+    html.classList.toggle("gated", gated);
+    const key = !suggest.ready ? "loading" : suggest.me ? "in"
+      : `out ${suggest.backend?.kind} ${suggest.signin.step} ${suggest.signin.email}`;
+    if (!rebuild && gate.dataset.key === key) return;
+    gate.dataset.key = key;
+    gate.hidden = !gated;
+    if (gated) gate.replaceChildren(...gateBox());
+  }
+
+  // ---- The bar above the text, while you edit ----
 
   function setSaveStatus(text, problem = false) {
     suggest.status = { text, problem };
@@ -1500,83 +1575,21 @@
     if (box) { box.textContent = text; box.classList.toggle("problem", problem); }
   }
 
-  function signInBox() {
-    const { backend, signin: step } = suggest;
-    if (!backend || backend.kind === "none") {
-      return h("span", { class: "muted" }, "Saving suggestions isn't switched on yet. To propose a change now, choose ",
-        h("strong", { text: "Commenting" }), " and start a comment with a command (", h("a", { href: "#propose", text: "how" }), ").");
-    }
-    const note = h("span", { class: "signin-note", "aria-live": "polite", text: step.note });
-    const say = (text) => { step.note = text; note.textContent = text; };
-    if (step.step === "code") {
-      const code = h("input", { type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "10", spellcheck: "false",
-        class: "key-input code-input", placeholder: "123456", "aria-label": "The code from the email" });
-      const go = async () => {
-        const value = code.value.replace(/\D/g, "");
-        if (value.length < 6) { say("Type the 6-digit code from the email."); return code.focus(); }
-        say("Signing in…");
-        try {
-          await backend.verifyCode(step.email, value);
-          Object.assign(step, { step: "email", note: "" });
-        } catch (error) {
-          say(`That didn't work: ${error.message}.`);
-        }
-      };
-      code.addEventListener("keydown", (event) => { if (event.key === "Enter") go(); });
-      setTimeout(() => code.focus(), 0);
-      return h("span", { class: "signin" },
-        h("span", {}, "We emailed a code to ", h("strong", { text: step.email }), ". Type it here: "),
-        code, action("Sign in", go, "button small"), " ",
-        h("button", { type: "button", class: "linklike", text: "Use a different email",
-          onclick: () => { Object.assign(step, { step: "email", note: "" }); updateBar(true); } }),
-        note);
-    }
-    const email = h("input", { type: "email", class: "key-input email-input", value: step.email, placeholder: "you@example.edu",
-      autocomplete: "email", spellcheck: "false", "aria-label": "Your email address" });
-    const send = async () => {
-      const address = email.value.trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) { say("Type your email address first."); return email.focus(); }
-      say("Sending…");
-      try {
-        await backend.sendCode(address);
-        Object.assign(step, { step: "code", email: address, note: backend.kind === "local" ? "(Local test: any six digits work.)" : "" });
-        updateBar(true);
-      } catch (error) {
-        say(`That didn't work: ${error.message}.`);
-      }
-    };
-    email.addEventListener("keydown", (event) => { if (event.key === "Enter") send(); });
-    return h("span", { class: "signin" },
-      h("strong", { text: "Sign in to save your suggestions: " }), email, action("Email me a code", send, "button small"), note,
-      h("span", { class: "signin-fine", text: "Your email address is your name here: it's shown with your suggestions and in the record of changes." }));
-  }
-
-  // The line at the top of the bar: who you are, and whether your changes are saved. Rebuilt only when that
-  // changes, so typing your email address or code isn't interrupted.
-  function updateBar(rebuild = false) {
-    const who = $("#suggest-who");
-    if (!who) return;
-    const key = !suggest.ready ? "loading" : suggest.me ? `in ${suggest.me.email} ${isMaintainer()}`
-      : `out ${suggest.backend?.kind} ${suggest.signin.step} ${suggest.signin.email}`;
-    if (rebuild || who.dataset.key !== key) {
-      who.dataset.key = key;
-      if (!suggest.ready) {
-        who.replaceChildren(h("span", { class: "muted", text: "Loading…" }));
-      } else if (suggest.me) {
-        who.replaceChildren(
-          h("span", {}, "Suggesting as ", h("strong", { class: "mine-name", text: suggest.me.email }),
-            isMaintainer() ? h("span", { class: "badge badge-soft", text: "maintainer" }) : ""),
-          h("span", { class: `save-status${suggest.status.problem ? " problem" : ""}`, id: "save-status", "aria-live": "polite", text: suggest.status.text }),
-          h("button", { type: "button", class: "linklike", text: "Sign out", onclick: signOut }));
-      } else {
-        who.replaceChildren(signInBox(), h("span", { class: "save-status problem", id: "unsaved" }));
-      }
-    }
-    const unsaved = $("#unsaved");
-    if (unsaved) {
-      const n = suggest.ready && !suggest.me ? collectChanges().length : 0;
-      unsaved.textContent = n ? `${plural(n, "change")} not saved yet: sign in to save ${n === 1 ? "it" : "them"}.` : "";
-    }
+  // Who you are, and whether your changes are saved. Shown only once you've verified your email address.
+  function updateBar() {
+    updateGate();
+    const slot = $("#suggest-slot"), who = $("#suggest-who");
+    if (!slot || !who) return;
+    slot.hidden = !suggest.ready || !suggest.me;
+    if (slot.hidden) return;
+    const key = `${suggest.me.email} ${isMaintainer()}`;
+    if (who.dataset.key === key) return;
+    who.dataset.key = key;
+    who.replaceChildren(
+      h("span", {}, "Editing as ", h("strong", { class: "mine-name", text: suggest.me.email }),
+        isMaintainer() ? h("span", { class: "badge badge-soft", text: "maintainer" }) : ""),
+      h("span", { class: `save-status${suggest.status.problem ? " problem" : ""}`, id: "save-status", "aria-live": "polite", text: suggest.status.text }),
+      h("button", { type: "button", class: "linklike", text: "Sign out", onclick: signOut }));
   }
 
   async function signOut() {
@@ -1585,33 +1598,31 @@
   }
 
   const HELP = {
-    suggest: "Select words and press Delete to strike them out; type to add words; press Enter at the end of a rule to add one. Your changes are saved as you go. Yours are blue; other people's are orange (click one to see it).",
-    comment: "Select words, then choose Annotate to comment on them. To change the text, switch to Suggesting.",
+    edit: "Edit as in Word with track changes on: words you delete are struck out, and words you type are added in blue. Press Enter at the end of a rule to add a new one. Everything is saved as you go. Other people's suggestions are orange; click one to see it.",
+    comment: "Commenting: select words, then choose Annotate to comment on them. The text can't be edited until you go back to editing.",
   };
 
   function suggestBar() {
-    return h("div", { class: "suggest-bar", id: "suggest-bar", role: "region", "aria-label": "Suggesting" },
+    return h("div", { class: "suggest-bar", id: "suggest-bar", role: "region", "aria-label": "Editing" },
       h("div", { class: "suggest-line", id: "suggest-who" }),
       h("p", { class: "suggest-tools" },
-        h("span", { class: "suggest-help", id: "suggest-help", text: HELP.suggest }),
-        action("Undo", () => undo(), "button secondary small suggest-undo")),
+        h("span", { class: "suggest-help", id: "suggest-help", text: HELP.edit }),
+        h("span", { class: "suggest-buttons" },
+          action("Undo", () => undo(), "button secondary small suggest-undo"),
+          action("Redo", () => redo(), "button secondary small suggest-undo"),
+          h("button", { type: "button", class: "linklike", id: "mode-toggle", text: "Comment instead", onclick: () => setMode(!suggest.editing) }))),
       h("p", { class: "suggest-hint", id: "suggest-hint", "aria-live": "polite" }));
   }
 
+  // Editing, or commenting (selecting words to annotate them, without changing the text).
   function setMode(editing) {
     suggest.editing = editing;
-    for (const control of $$(".mode-switch button")) control.setAttribute("aria-pressed", String(control.dataset.mode === (editing ? "suggest" : "comment")));
     $(".suggestion-pop")?.remove();
     setEditable(editing);
     $("#suggest-bar")?.classList.toggle("commenting", !editing);
-    const help = $("#suggest-help");
-    if (help) help.textContent = editing ? HELP.suggest : HELP.comment;
-  }
-
-  function modeSwitch() {
-    return h("span", { class: "mode-switch", role: "group", "aria-label": "Mode" },
-      h("button", { type: "button", "data-mode": "suggest", "aria-pressed": "true", text: "Suggesting", onclick: () => setMode(true) }),
-      h("button", { type: "button", "data-mode": "comment", "aria-pressed": "false", text: "Commenting", onclick: () => setMode(false) }));
+    const help = $("#suggest-help"), toggle = $("#mode-toggle");
+    if (help) help.textContent = editing ? HELP.edit : HELP.comment;
+    if (toggle) toggle.textContent = editing ? "Comment instead" : "Back to editing";
   }
 
   // ---- Approving and disapproving ----
@@ -1760,7 +1771,6 @@
   async function setupSuggesting(cfg, governance, ledger, markdown) {
     Object.assign(suggest, { cfg, governance, markdown, version: stampedVersion(markdown) || cfg.latest,
       proposals: { replies: new Map(), records: ledger?.proposals || [], fresh: [] } });
-    $("#suggest-slot").replaceChildren(suggestBar());
     const doc = $("#doc");
     doc.addEventListener("beforeinput", onBeforeInput);
     doc.addEventListener("compositionstart", onCompositionStart);
@@ -1769,8 +1779,12 @@
     doc.addEventListener("dragstart", (event) => suggest.editing && event.preventDefault());
     doc.addEventListener("drop", (event) => suggest.editing && event.preventDefault());
     doc.addEventListener("keydown", (event) => {
-      if (suggest.editing && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); undo(); }
+      if (!suggest.editing || !suggest.me || !(event.metaKey || event.ctrlKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
+      if (key === "y" && event.ctrlKey) { event.preventDefault(); redo(); }
     });
+
     document.addEventListener("click", onSuggestionClick);
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") $(".suggestion-pop")?.remove();
@@ -1780,7 +1794,6 @@
       if (suggest.me && suggest.dirty) { sync(); event.preventDefault(); }
     });
     drawEverything();
-    setMode(true);
     loadProposals(cfg, governance, ledger).then((data) => { suggest.proposals = data; refresh(); }).catch(() => {});
 
     const useLocal = isLocal && new URLSearchParams(location.search).get("backend") === "local";
@@ -1795,17 +1808,9 @@
     const start = () => {
       if (suggest.ready || !gotUser || !gotData) return;
       suggest.ready = true;
-      const me = suggest.me;
-      if (me && savedWork()) {  // changes made in this browser before you signed in
-        suggest.me = null;
-        drawEverything();
-        suggest.me = me;
-        saveUnsavedAs(me);
-      } else {
-        drawEverything();
-      }
+      drawEverything();
       renderProposals();
-      loadHypothesis();  // after the text is drawn, so comments' highlights stay put
+      if (suggest.me) loadHypothesis();  // after the text is drawn, so comments' highlights stay put
     };
     const backend = suggest.backend;
     if (backend.kind === "none") { gotUser = gotData = true; return start(); }
@@ -1823,27 +1828,17 @@
       suggest.me = user;
       if (!gotUser) { gotUser = true; return start(); }
       if (!suggest.ready || (before?.id ?? null) === (user?.id ?? null)) return updateBar();
-      if (user && !before && collectChanges().length) return saveUnsavedAs(user);
+      setSaveStatus("All changes saved");
+      setMode(true);
       drawEverything();
       renderProposals();
+      if (user) {
+        scrollTo({ top: 0, behavior: "instant" });
+        loadHypothesis();
+        hint("You're verified. Click anywhere in the text to start editing.");
+      }
     });
     setTimeout(() => { gotUser = gotData = true; start(); }, 10000);  // don't wait forever for a slow connection
-  }
-
-  // Changes made before signing in are saved under your name. Your earlier suggestions are drawn in once the
-  // database has the new ones.
-  function saveUnsavedAs(user) {
-    for (const mark of $$("#doc .mine")) {
-      mark.dataset.by = user.email;
-      if (mark.title) mark.title = mark.title.replace(/ by .*$/, ` by ${user.email}`);
-    }
-    suggest.saved = new Map();
-    suggest.undrawable = new Set();
-    suggest.dirty = true;
-    suggest.edits += 1;
-    setSaveStatus("Saving…");
-    updateBar();
-    sync();
   }
 
   // ---------- Pages ----------
@@ -1897,30 +1892,32 @@
       h("p", { class: "command-effect", text: effect }),
       h("p", { class: "command-example" }, ...example));
     return h("details", { class: "how", id: "propose" },
-      h("summary", {}, h("h2", { id: "propose-title", text: "Or propose a change in a comment" })),
-      h("p", {}, "Choose ", h("em", { text: "Commenting" }), " above the text, select words, choose ", h("em", { text: "Annotate" }),
-        ", and start your comment with one of these. Comments use a free ", external("Hypothesis", "https://web.hypothes.is/start"), " account."),
+      h("summary", {}, h("h2", { id: "propose-title", text: "Or comment instead" })),
+      h("p", {}, "To comment without editing, select words in the text and choose ", h("em", { text: "Annotate" }),
+        " (while editing, choose ", h("em", { text: "Comment instead" }), " first). Comments use a free ",
+        external("Hypothesis", "https://web.hypothes.is/start"), " account. A comment that starts with one of these is also a proposed change:"),
       h("div", { class: "command-grid" },
         card("Delete", "Strikes out the words you selected. Select a whole rule to remove it.", h("del", { text: "quickly" })),
         card("Replace with: new words", "Puts your words in place of the ones you selected.", h("del", { text: "look at" }), " ", h("ins", { text: "read" })),
         card("Add after: new words", "Adds your words right after the ones you selected.", "the source ", h("ins", { text: "and its date" })),
         card("Add rule: a new rule", "Adds a new rule below the one you selected in.", h("ins", { text: "Say when you're unsure." }))),
       h("p", { class: "muted" }, "To give a reason, add a line that starts with ", h("code", { text: "Why:" }),
-        ". A note that doesn't start with one of these is an ordinary comment. One change per note works best; select words within one rule, or whole rules."));
+        ". A note that doesn't start with one of these is an ordinary comment."));
   }
 
   function drafterIntro(governance) {
     return h("section", { class: "intro" },
       h("h1", { text: "Suggest Edits" }),
-      h("p", { class: "lede", text: "Change AGENTS.md right here, as in a shared document with track changes on. Sign in with your email, and your changes are saved as suggestions under your name. The maintainers approve or disapprove each one, and every approved change is published as a new version." }),
+      h("p", { class: "lede", text: "Edit AGENTS.md as you would a Word document with track changes on. Your changes are saved automatically as suggestions under your name, and the maintainers approve or disapprove each one." }),
       h("details", { class: "how" },
         h("summary", {}, h("h2", { text: "How it works" })),
         h("ol", { class: "steps" },
-          h("li", {}, h("strong", { text: "Suggest. " }), "Edit the text below: words you delete are struck out, and words you type appear in blue, labeled with your email address. Press Enter at the end of a rule to add a new one. Sign in with your email (we send you a code), and each change is saved as one suggestion as you make it. You don't need GitHub."),
+          h("li", {}, h("strong", { text: "Verify your email. " }), "Enter your email address and the 6-digit code we send you. You stay signed in on this computer. You don't need GitHub."),
+          h("li", {}, h("strong", { text: "Edit. " }), "Words you delete are struck out, and words you type appear in blue, labeled with your email address. Press Enter at the end of a rule to add a new one. Every change is saved automatically, as its own suggestion; Undo and Redo work as usual."),
           h("li", {}, h("strong", { text: "A maintainer decides. " }), "The ", h("a", { href: at("maintainers/"), text: "maintainers" }),
             " approve or disapprove each suggestion. ", ruleSentence(governance?.rules)),
           h("li", {}, h("strong", { text: "It's published, or set aside. " }), `An approved change is published within ${CHECK_EVERY} or so as a new version, with its own number and fingerprint. A disapproved one moves to the `,
-            h("a", { href: at("declined/"), text: "Declined page" }), ". Every suggestion, decision, and version is kept, so nothing is ever lost."))),
+            h("a", { href: at("declined/"), text: "Declined page" }), ". Every suggestion, decision, and version is kept."))),
       commandGuide(),
       h("p", { class: "proposal-count", id: "proposal-count" }));
   }
@@ -1929,14 +1926,17 @@
     if (rev) return showRevision(cfg, rev);
     const [governance, ledger, { markdown, commit }] = await Promise.all([
       loadRecord(cfg, MAINTAINERS_PATH), loadRecord(cfg, LEDGER_PATH), loadDraft(cfg)]);
+    html.classList.add("gated");
+    $("#main").prepend(h("section", { class: "gate", id: "gate", role: "dialog", "aria-label": "Verify an email address to edit" },
+      h("p", { class: "loading", text: "Loading…" })));
     $("#intro").replaceChildren(drafterIntro(governance));
     const version = stampedVersion(markdown) || cfg.latest;
     const changed = commit
       ? ` Last changed ${formatDate(commit.commit.author.date)} by ${commit.author?.login ?? commit.commit.author.name} · ` : " ";
     fileBar(
       [h("span", { class: "badge", text: versionLabel(version) }), `${changed}${fileStats(markdown)}`],
-      [modeSwitch(), secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton()]);
-    $(".file-bar").after(h("div", { id: "suggest-slot" }));
+      [secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton()]);
+    $(".file-bar").after(h("div", { id: "suggest-slot", hidden: true }, suggestBar()));
     renderMarkdown(markdown);
     const proposals = h("section", { class: "versions proposals", id: "proposals" }, h("h2", { text: "Suggestions" }), h("p", { class: "loading", text: "Loading suggestions…" }));
     $("#after").replaceChildren(proposals, maintainersNote(governance), communityNote(cfg) || "");

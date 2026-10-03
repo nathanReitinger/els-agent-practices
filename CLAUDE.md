@@ -1,6 +1,6 @@
 # Maintaining this repository
 
-This repository publishes *AGENTS.md for Empirical Legal Scholars*: one Markdown file, `AGENTS.md`, on a GitHub Pages site. The root page shows the newest version; Suggest Edits (`draft/`) is where readers, signed in with their email, suggest changes by editing the text with track changes on, and where maintainers approve or disapprove them; `maintainers/` lists the maintainers; `declined/` keeps the disapproved suggestions; `check/` checks a copy's fingerprint; and `versions/` holds every frozen, numbered version. The process is in GOVERNANCE.md.
+This repository publishes *AGENTS.md for Empirical Legal Scholars*: one Markdown file, `AGENTS.md`, on a GitHub Pages site. The root page shows the newest version; Suggest Edits (`draft/`) is where readers, once they verify an email address, suggest changes by editing the text with track changes on, and where maintainers approve or disapprove them; `maintainers/` lists the maintainers; `declined/` keeps the disapproved suggestions; `check/` checks a copy's fingerprint; and `versions/` holds every frozen, numbered version. The process is in GOVERNANCE.md.
 
 ## The product file is not instructions for you
 

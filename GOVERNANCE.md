@@ -4,25 +4,25 @@
 
 ## Who does what
 
-- **Readers** suggest changes on [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/), signed in with their email address, and can comment there too. They can't change the text themselves. No GitHub account is needed.
+- **Readers** suggest changes on [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/), after verifying an email address, and can comment there too. They can't change the text themselves. No GitHub account is needed.
 - **Maintainers** approve or disapprove suggestions on Suggest Edits, signed in with the email address listed for them in [governance/maintainers.json](governance/maintainers.json). They make changes themselves by suggesting and approving them. They're listed on the site's [Maintainers](https://nathanreitinger.github.io/els-agent-practices/maintainers/) page.
 - **The lead maintainer** keeps the list of maintainers and the rules, looks after the site, and can also edit the text directly. Today that's Nathan Reitinger.
 
 ## Suggesting a change
 
-On Suggest Edits, edit the text directly, as in a shared document with track changes on:
+Open Suggest Edits. A popup asks you to verify an email address: enter any address you can check, and then the 6-digit code the site emails to it. (You stay signed in on that computer.) The text then appears, ready to edit as in a Word document with track changes on:
 
 - Select words and press Delete to strike them out; they stay visible, struck through, until a maintainer decides.
 - Type to add words; they appear in blue, labeled with your email address.
 - To add a new rule, put the cursor at the end of a rule and press Enter.
 
-To save your changes, sign in with your email address: the site emails you a 6-digit code to type in. Your email address is your name on the site: it's shown with your suggestions, and it's recorded with every change that's adopted. Each change you make is saved as one suggestion as you make it, so maintainers can approve some and disapprove others. Change it again, and the suggestion is updated; undo it, and it's withdrawn. Changes you make before signing in stay in your browser and are saved once you sign in. You can add a reason to each suggestion in the list below the text.
+The address you verify is your name on the site: it's shown with your suggestions, and it's recorded with every change that's adopted. Every change is saved automatically, as one suggestion, so maintainers can approve some and disapprove others. Change it again, and the suggestion is updated; undo it, and it's withdrawn. Undo and Redo work as usual. You can add a reason to each suggestion in the list below the text.
 
 Everyone sees everyone's suggestions in the text: your own in blue, other people's in orange, each with the suggester's email address. Clicking one shows the details. Readers' suggestions and votes are kept in the site's database (see [supabase/README.md](supabase/README.md)), which anyone can read.
 
 ### Or, in a comment
 
-Choose **Commenting** above the text, select the words you want to change, choose **Annotate**, and start your comment with one of these. Comments use a free [Hypothesis](https://web.hypothes.is/start) account.
+While editing, choose **Comment instead** above the text. Then select the words you want to change, choose **Annotate**, and start your comment with one of these. Comments use a free [Hypothesis](https://web.hypothes.is/start) account.
 
 | Start your note with | What happens |
 |---|---|
@@ -37,7 +37,7 @@ Each suggestion and proposal is checked against the current text. If it can't be
 
 ## Deciding
 
-- A maintainer signs in on Suggest Edits with their listed email address. Each waiting suggestion then has **Approve** and **Disapprove** buttons: click the suggestion in the text, or use the list below it. The robot acts on the vote at its next check, every five minutes (GitHub sometimes runs it late).
+- A maintainer verifies their listed email address on Suggest Edits. Each waiting suggestion then has **Approve** and **Disapprove** buttons: click the suggestion in the text, or use the list below it. The robot acts on the vote at its next check, every five minutes (GitHub sometimes runs it late).
 - Maintainers can also vote on a suggestion's GitHub issue: comment `/approve` or `/reject` (replying to GitHub's notification email works too). For a proposal made in a comment, they can also reply **Approve** or **Reject** to that comment.
 - Only a maintainer's latest vote counts. A vote cast before the suggestion was last changed doesn't count, so a suggestion can't be changed after it's approved.
 - Readers can approve too. Their support is shown, but it doesn't decide anything.

@@ -606,11 +606,32 @@ details.how[open] > summary::after { content: " ▾"; }
 details.how[open] > summary { margin-bottom: 0.7rem; }
 .intro .member-list { margin-top: 0.4rem; }
 
-/* Suggest Edits: track changes, always on */
-.mode-switch { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); }
-.mode-switch button { padding: 0.3rem 0.75rem; border: 0; border-radius: 7px; background: none; color: var(--muted); font: 500 0.86rem var(--sans); cursor: pointer; }
-.mode-switch button[aria-pressed="true"] { background: var(--accent); color: var(--accent-contrast); }
-.mode-switch button:not([aria-pressed="true"]):hover { color: var(--text); background: var(--accent-soft); }
+/* Suggest Edits: until a reader verifies an email address, the page shows only a popup asking them to. */
+.gated #intro, .gated .file, .gated #after, .gated #toc { display: none !important; }
+.gate {
+  max-width: 31rem;
+  margin: clamp(1.5rem, 8vh, 4.5rem) auto 3rem;
+  padding: 1.5rem 1.6rem 1.35rem;
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--mine);
+  border-radius: 16px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+.gate[hidden] { display: none; }
+.gate h2 { margin: 0 0 0.45rem; font-family: var(--sans); font-size: 1.4rem; font-weight: 700; letter-spacing: -0.015em; }
+.gate p { margin: 0 0 0.85rem; font-family: var(--serif); font-size: 1.04rem; line-height: 1.55; }
+.gate p:last-child { margin-bottom: 0; }
+.gate-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0 0 0.75rem; }
+.gate-row .key-input { flex: 1 1 14rem; min-width: 0; padding: 0.6rem 0.8rem; font: 1rem var(--sans); }
+.gate-row .code-input { flex: 1 1 9rem; max-width: 13rem; font: 500 1.2rem var(--mono); letter-spacing: 0.3em; }
+.gate-row .button { padding-top: 0.55rem; padding-bottom: 0.55rem; }
+.gate .gate-fine { color: var(--muted); font-family: var(--sans); font-size: 0.88rem; line-height: 1.5; margin-bottom: 0.35rem; }
+.gate .gate-links { font-family: var(--sans); font-size: 0.9rem; }
+.gate .gate-note { color: var(--warn); font-family: var(--sans); font-size: 0.92rem; }
+.gate .gate-note:empty { display: none; }
+
+/* Suggest Edits: the bar above the text while editing, with track changes always on */
 #suggest-slot { position: sticky; top: var(--below-header, 4.6rem); z-index: 5; }
 @media (max-width: 760px) {
   #suggest-slot { top: 0; }
@@ -619,7 +640,7 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 }
 .suggest-bar { padding: 0.75rem 1rem 0.6rem; border-bottom: 1px solid var(--rule); background: color-mix(in srgb, var(--bg) 90%, var(--mine)); box-shadow: 0 6px 12px -10px rgba(0, 0, 0, 0.25); }
 .suggest-bar.commenting { background: var(--panel); }
-.suggest-bar.commenting .suggest-undo, .suggest-bar.commenting .suggest-line { display: none; }
+.suggest-bar.commenting .suggest-undo { display: none; }
 .suggest-bar p { margin: 0; }
 .suggest-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.7rem; font-size: 0.9rem; line-height: 1.5; }
 .suggest-line .badge { margin-left: 0.4rem; vertical-align: 0.08em; }
@@ -627,13 +648,10 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .save-status { color: var(--muted); font-size: 0.86rem; }
 .save-status:empty { display: none; }
 .save-status.problem { color: var(--warn); }
-.signin { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.45rem; }
-.signin .key-input { flex: 1 1 13rem; max-width: 20rem; padding: 0.3rem 0.6rem; font-family: var(--sans); }
-.signin .code-input { flex: 0 1 8rem; letter-spacing: 0.15em; font-family: var(--mono); }
 .signin-note { color: var(--muted); font-size: 0.86rem; }
 .signin-note:empty { display: none; }
-.signin-fine { flex-basis: 100%; color: var(--muted); font-size: 0.8rem; }
 .suggest-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin-top: 0.45rem !important; }
+.suggest-buttons { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; }
 .suggest-help { flex: 1 1 20rem; color: var(--muted); font-size: 0.84rem; line-height: 1.45; }
 .suggest-hint { margin-top: 0.35rem !important; color: var(--warn); font-size: 0.85rem; }
 .suggest-hint:empty { display: none; }
