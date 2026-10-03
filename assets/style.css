@@ -38,6 +38,12 @@
   --others-soft: rgba(230, 126, 34, 0.11);
   --pending: #6a46c2;
   --pending-soft: rgba(106, 70, 194, 0.09);
+  --old: #6e5332;
+  --old-contrast: #ffffff;
+  --old-soft: #f9f4ea;
+  --old-bar: #f1e9da;
+  --old-line: rgba(110, 83, 50, 0.3);
+  --old-tint: rgba(110, 83, 50, 0.09);
   --shadow: 0 1px 2px rgba(29, 27, 32, 0.04), 0 10px 30px rgba(29, 27, 32, 0.06);
   --serif: "Playfair", "Playfair Display", Georgia, "Times New Roman", serif;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -79,6 +85,12 @@
   --others-soft: rgba(242, 163, 94, 0.15);
   --pending: #b9a3f5;
   --pending-soft: rgba(185, 163, 245, 0.15);
+  --old: #d8bb8e;
+  --old-contrast: #1b1408;
+  --old-soft: #1c1a16;
+  --old-bar: #24211b;
+  --old-line: rgba(216, 187, 142, 0.3);
+  --old-tint: rgba(216, 187, 142, 0.1);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 @media (prefers-color-scheme: dark) {
@@ -116,6 +128,12 @@
     --others-soft: rgba(242, 163, 94, 0.15);
     --pending: #b9a3f5;
     --pending-soft: rgba(185, 163, 245, 0.15);
+    --old: #d8bb8e;
+    --old-contrast: #1b1408;
+    --old-soft: #1c1a16;
+    --old-bar: #24211b;
+    --old-line: rgba(216, 187, 142, 0.3);
+    --old-tint: rgba(216, 187, 142, 0.1);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
   }
 }
@@ -189,6 +207,12 @@ body[data-mode="join"] [data-nav="join"],
 body[data-mode="maintainers"] [data-nav="maintainers"],
 body[data-mode="declined"] [data-nav="maintainers"],
 body[data-mode="check"] [data-nav="check"] { color: var(--accent-contrast); background: var(--accent); }
+body[data-old] [data-nav="file"],
+body[data-old] [data-nav="drafter"] { color: var(--muted); background: none; }
+body[data-mode="history"] [data-nav="history"],
+body[data-old] [data-nav="history"] { color: var(--old-contrast); background: var(--old); }
+body[data-mode="history"] [data-nav="history"]:hover,
+body[data-old] [data-nav="history"]:hover { color: var(--old-contrast); background: var(--old); }
 
 /* Reading controls: text size and light or dark. */
 .reader-controls { display: flex; align-items: center; gap: 0.2rem; padding-left: 0.6rem; border-left: 1px solid var(--rule); }
@@ -469,11 +493,6 @@ button.button { appearance: none; }
 .versions { margin-top: 2.5rem; }
 .versions h2 { margin: 0 0 0.4rem; font-size: 1.3rem; font-weight: 700; letter-spacing: -0.01em; }
 .versions > p { margin: 0 0 0.9rem; font-family: var(--serif); }
-.version-list { margin: 0; padding: 0; list-style: none; }
-.version-list li { padding: 0.85rem 0; border-bottom: 1px solid var(--rule); }
-.version-list .badge { margin-left: 0.45rem; vertical-align: 0.08em; }
-.version-name { font-weight: 600; }
-.version-summary { margin: 0.25rem 0; font-family: var(--serif); line-height: 1.55; }
 .table-wrap { overflow-x: auto; }
 table.log { width: 100%; border-collapse: collapse; font-size: 0.9rem; line-height: 1.45; font-variant-numeric: lining-nums tabular-nums; }
 table.log th, table.log td { padding: 0.6rem; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
@@ -521,7 +540,6 @@ ins { color: var(--ins); background: var(--ins-soft); text-decoration: underline
 .proposal-meta, .votes, .proposal-links { color: var(--muted); font-size: 0.88rem; }
 .votes strong { color: var(--text); font-weight: 600; }
 .proposals .empty { font-family: var(--serif); }
-details.more summary { margin: 0.4rem 0 0.8rem; color: var(--accent); font-weight: 500; cursor: pointer; }
 
 /* Members */
 .member-list { margin: 0 0 0.9rem; padding: 0; list-style: none; }
@@ -617,14 +635,13 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .gate .gate-note { color: var(--warn); font-family: var(--sans); font-size: 0.92rem; }
 .gate .gate-note:empty { display: none; }
 
-/* Suggest Edits: the bar above the text while editing, with track changes always on */
-#suggest-slot { position: sticky; top: var(--below-header, 4.6rem); z-index: 5; }
+/* Suggest Edits: the bar at the top of the text while editing, with track changes always on. It stays there: it
+   doesn't follow the reader down the page. */
 @media (max-width: 760px) {
-  #suggest-slot { top: 0; }
   .suggest-help { display: none; }  /* the steps above the text say the same */
   .suggest-bar { padding: 0.55rem 0.7rem 0.5rem; }
 }
-.suggest-bar { padding: 0.75rem 1rem 0.6rem; border-bottom: 1px solid var(--rule); background: color-mix(in srgb, var(--bg) 90%, var(--mine)); box-shadow: 0 6px 12px -10px rgba(0, 0, 0, 0.25); }
+.suggest-bar { padding: 0.75rem 1rem 0.6rem; border-bottom: 1px solid var(--rule); background: color-mix(in srgb, var(--bg) 90%, var(--mine)); }
 .suggest-bar p { margin: 0; }
 .suggest-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.7rem; font-size: 0.9rem; line-height: 1.5; }
 .suggest-line .badge { margin-left: 0.4rem; vertical-align: 0.08em; }
@@ -637,8 +654,22 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .suggest-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin-top: 0.45rem !important; }
 .suggest-buttons { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; }
 .suggest-help { flex: 1 1 20rem; color: var(--muted); font-size: 0.84rem; line-height: 1.45; }
-.suggest-hint { margin-top: 0.35rem !important; color: var(--warn); font-size: 0.85rem; }
-.suggest-hint:empty { display: none; }
+/* A short message at the bottom of the screen, seen wherever the reader is on the page. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  z-index: 40;
+  max-width: min(34rem, calc(100vw - 2rem));
+  padding: 0.65rem 1rem;
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: var(--shadow);
+  font: 0.9rem/1.45 var(--sans);
+  transform: translateX(-50%);
+}
+.toast[hidden] { display: none; }
 .linklike { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 0.86rem; text-decoration: underline; cursor: pointer; }
 .doc.suggesting { caret-color: var(--mine); outline: none; }
 .doc.suggesting:focus-visible { outline: none; }
@@ -720,6 +751,86 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .site-footer p { margin: 0.25rem 0; }
 .site-footer a { color: var(--muted); }
 .site-footer .made-by a { color: var(--text); }
+
+/* History: every version, with the changes from the one before it marked. The past is in sepia: the sheet of an
+   old text, the History tab, and the labels on what changed. */
+.is-history .file { border-color: var(--old-line); background: var(--old-soft); }
+.is-history .file-bar { border-bottom-color: var(--old-line); background: var(--old-bar); }
+.is-history .file-icon { color: var(--old); }
+.badge-old { background: var(--old); color: var(--old-contrast); }
+.old-note { border-color: var(--old-line); background: var(--old-soft); }
+.old-note strong { color: var(--old); }
+.history-link { margin: 0.2rem 0 0; font-family: var(--sans); font-size: 0.92rem; font-weight: 500; }
+.history-link a { color: var(--old); }
+
+/* The versions: beside the text on wide screens, above it (folded) on narrow ones. */
+.history-panel { margin-bottom: 1.25rem; font-family: var(--sans); font-size: 0.86rem; line-height: 1.35; }
+.history-versions { padding: 0.7rem 0.95rem; border: 1px solid var(--old-line); border-radius: 12px; background: var(--old-soft); }
+.history-versions > summary { color: var(--old); font-size: 0.78rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; cursor: pointer; }
+.history-list { margin: 0.6rem 0 0; padding: 0; list-style: none; }
+.history-list li + li { margin-top: 0.15rem; }
+.history-list a { display: grid; gap: 0.12rem; padding: 0.5rem 0.6rem; border-left: 3px solid transparent; border-radius: 0 8px 8px 0; color: var(--text); text-decoration: none; }
+.history-list a:hover { background: var(--old-tint); }
+.history-list a[aria-current="page"] { border-left-color: var(--old); background: var(--old-tint); }
+.history-version { font-weight: 700; }
+.history-now { margin-left: 0.45rem; color: var(--old); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.history-date, .history-who { color: var(--muted); font-size: 0.78rem; }
+.history-who { overflow-wrap: anywhere; }
+.history-line { display: -webkit-box; overflow: hidden; color: var(--muted); -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+@media (min-width: 1100px) {
+  body[data-mode="history"] .layout { grid-template-columns: 12rem minmax(0, 50rem) 15rem; }
+  .layout > .history-panel { position: sticky; top: 6rem; grid-column: 3; grid-row: 1; max-height: calc(100vh - 8rem); margin: 0; overflow: auto; }
+  .history-versions { padding: 0.2rem 0 0; border: 0; background: none; }
+  .history-versions > summary { pointer-events: none; list-style: none; }
+  .history-versions > summary::-webkit-details-marker { display: none; }
+}
+
+/* The chosen version: what changed, who suggested and approved it, and links to each change in the text. */
+.history-summary { margin: 0 0 1.25rem; padding: 0.95rem 1.1rem; border: 1px solid var(--old-line); border-left: 4px solid var(--old); border-radius: 12px; background: var(--old-soft); font-family: var(--sans); scroll-margin-top: 6rem; }
+.history-summary p { margin: 0; }
+.history-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 1rem; }
+.history-eyebrow { color: var(--old); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.history-eyebrow .badge { margin-left: 0.3rem; letter-spacing: 0.02em; vertical-align: 0.06em; }
+.history-steps { display: inline-flex; gap: 0.4rem; }
+.history-what { margin-top: 0.45rem !important; font-family: var(--serif); font-size: 1.12rem; line-height: 1.5; }
+.history-people { margin-top: 0.3rem !important; color: var(--muted); font-size: 0.88rem; overflow-wrap: anywhere; }
+.history-count { margin-top: 0.7rem !important; font-size: 0.9rem; font-weight: 600; }
+.history-changes ul { margin: 0.45rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.35rem; font-size: 0.9rem; line-height: 1.45; }
+.history-changes a { color: var(--text); }
+.history-changes .muted { margin-top: 0.45rem; font-size: 0.86rem; }
+.history-key { margin: 0; color: var(--muted); font-family: var(--sans); font-size: 0.9rem; line-height: 1.9; }
+.edit-log { margin-top: 2.5rem; }
+.edit-log > p { font-family: var(--serif); }
+
+/* In the text: each changed, added, or removed rule is tinted and labeled with the version that changed it; old words
+   are struck out and new ones underlined. Removed rules are put back where they were. */
+.doc .h-mark { border-radius: 6px; scroll-margin-top: 7rem; }
+.doc .h-changed, .doc .h-formatted { background: var(--old-tint); box-shadow: 0 0 0 0.35em var(--old-tint); }
+.doc .h-added { background: var(--ins-soft); box-shadow: 0 0 0 0.35em var(--ins-soft); }
+.doc .h-removed { background: var(--del-soft); box-shadow: 0 0 0 0.35em var(--del-soft); }
+.doc .h-removed::marker { color: var(--del); }
+.doc .h-mark.targeted { box-shadow: 0 0 0 0.35em var(--mark); }
+.doc .h-added > ins, .doc .h-removed > del { padding: 0; background: none; }
+.h-label, .h-key {
+  display: inline-block;
+  padding: 0.1em 0.55em;
+  border-radius: 999px;
+  font: 600 0.62rem/1.5 var(--sans);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.doc .h-label { margin-right: 0.5em; font-size: 0.6em; text-align: left; text-indent: 0; vertical-align: 0.2em; }
+.h-key { margin-right: 0.15rem; font-size: 0.7rem; vertical-align: 0.1em; }
+/* On a phone the label gets a line of its own, so justified text doesn't stretch around it. */
+@media (max-width: 760px) { .doc .h-label { display: block; width: fit-content; margin: 0 0 0.3em; } }
+.h-changed > .h-label, .h-formatted > .h-label, .h-key-changed, .h-key-formatted { background: var(--old); color: var(--old-contrast); }
+.h-added > .h-label, .h-key-added { background: var(--ins); color: var(--bg); }
+.h-removed > .h-label, .h-key-removed { background: var(--del); color: var(--bg); }
+/* "Hide the changes": the chosen version's text alone. */
+.doc.hide-changes .h-removed, .doc.hide-changes .h-old, .doc.hide-changes .h-label { display: none; }
+.doc.hide-changes .h-mark { background: none; box-shadow: none; }
+.doc.hide-changes ins { padding: 0; background: none; color: inherit; text-decoration: none; }
 
 @media print {
   .progress, .site-header, .toc, .file-actions, .copy, .copy-inline, .site-footer, #after, #intro { display: none !important; }

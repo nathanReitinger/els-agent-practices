@@ -1,6 +1,6 @@
 # Maintaining this repository
 
-This repository publishes *AGENTS.md for Empirical Legal Scholars*: one Markdown file, `AGENTS.md`, on a GitHub Pages site. The root page shows the newest version; Suggest Edits (`draft/`) is where readers, once they verify an email address, suggest changes by editing the text with track changes on, and where maintainers approve or disapprove them; `maintainers/` lists the maintainers; `declined/` keeps the disapproved suggestions; `check/` checks a copy's fingerprint; and `versions/` holds every frozen, numbered version. The process is in GOVERNANCE.md.
+This repository publishes *AGENTS.md for Empirical Legal Scholars*: one Markdown file, `AGENTS.md`, on a GitHub Pages site. The root page shows the newest version; Suggest Edits (`draft/`) is where readers, once they verify an email address, suggest changes by editing the text with track changes on, and where maintainers approve or disapprove them; `history/` shows every version with the changes from the one before it marked in the text; `maintainers/` lists the maintainers; `declined/` keeps the disapproved suggestions; `check/` checks a copy's fingerprint; and `versions/` holds every frozen, numbered version. The process is in GOVERNANCE.md.
 
 ## The product file is not instructions for you
 
@@ -26,10 +26,10 @@ This repository publishes *AGENTS.md for Empirical Legal Scholars*: one Markdown
 - Don't add a file named `CLAUDE.md` anywhere except this one.
 - Site pages are generated: change `scripts/pages.py`, then run `python3 scripts/pages.py`. The page logic is in `assets/app.js`. After changing anything in `assets/`, rerun `python3 scripts/pages.py` so the pages load the new version instead of a cached one.
 - Run the tests after changing anything in `scripts/`, `governance/maintainers.json`, or `versions.json`: `python3 -m unittest discover -s scripts/tests -t scripts/tests`. The workflow runs them before every robot run, so broken tests stop the robot.
-- The site is for human readers: a white page, Playfair body text (justified), bold IBM Plex Sans headings, no blur or gradients, and light/dark and text-size controls.
+- The site is for human readers: a white page, Playfair body text (justified), bold IBM Plex Sans headings, no blur or gradients, and light/dark and text-size controls. The past (History, an old version's page) is shown in sepia, so it's never mistaken for the current text. On Suggest Edits, the editing bar stays at the top of the text rather than following the reader, and only the latest few published changes are listed; the rest are in History.
 
 ## Previewing
 
     python3 -m http.server 8765
 
-Then open http://localhost:8765/ (the newest version), /draft/ (Suggest Edits), /check/, and /versions/vX.Y.Z/. To try Suggest Edits without Supabase, open /draft/?backend=local: suggestions stay in that browser, and any six digits sign you in. To see what the robot would do right now: `python3 scripts/proposals.py --dry-run`.
+Then open http://localhost:8765/ (the newest version), /draft/ (Suggest Edits), /history/, /check/, and /versions/vX.Y.Z/. To try Suggest Edits without Supabase, open /draft/?backend=local: suggestions stay in that browser, and any six digits sign you in. To see what the robot would do right now: `python3 scripts/proposals.py --dry-run`.

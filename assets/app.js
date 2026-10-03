@@ -1,10 +1,11 @@
 /* AGENTS.md for Empirical Legal Scholars: shows one Markdown file, AGENTS.md, rendered for reading;
    Suggest Edits, where readers who verify an email address suggest changes by editing the text with track
-   changes on; the Maintainers page; the Declined page; a page for joining the community's
-   group; and a page that checks whether a copy is exactly a published version.
+   changes on; History, every version with the changes from the one before it marked in the text; the
+   Maintainers page; the Declined page; a page for joining the community's group; and a page that checks
+   whether a copy is exactly a published version.
    Each page says what to show with attributes on <body>:
-     data-mode     published (latest version) | drafter (Suggest Edits) | archive (one version) | check | join |
-                   maintainers | declined
+     data-mode     published (latest version) | drafter (Suggest Edits) | history | archive (one version) | check |
+                   join | maintainers | declined
      data-root     path from the page to the site root: ".", "..", or "../.."
      data-version  archive pages only, e.g. "0.0.2"
    There is no build step: GitHub Pages serves these files as they are. Suggestions and votes are kept in a
@@ -144,17 +145,6 @@
     label();
   }
 
-  // Things that stick to the top of the screen (the bar above the text on Suggest Edits) sit just below the
-  // header, however tall it is at this width.
-  function trackHeader() {
-    const header = $(".site-header");
-    if (!header || !("ResizeObserver" in window)) return;
-    const place = () => html.style.setProperty("--below-header",
-      `${(parseFloat(getComputedStyle(header).top) || 0) + header.offsetHeight + 6}px`);
-    new ResizeObserver(place).observe(header);
-    place();
-  }
-
   // A hairline across the top shows how far through the page you are.
   const bar = $(".progress span");
   function updateProgress() {
@@ -227,13 +217,13 @@
   function buildOutline(article) {
     const toc = $("#toc");
     if (!toc) return;
-    const headings = $$("h2", article);
+    const headings = $$("h2", article).filter((heading) => heading.id);  // not History's removed headings
     if (headings.length < 3) { toc.hidden = true; return; }
     const links = new Map();
     toc.replaceChildren(h("details", { open: matchMedia("(min-width: 1100px)").matches },
       h("summary", { text: "Outline" }),
       h("ol", {}, ...headings.map((heading) => {
-        const link = h("a", { href: `#${heading.id}`, text: heading.textContent });
+        const link = h("a", { href: `#${heading.id}`, text: plainText(heading) });
         links.set(heading.id, link);
         return h("li", {}, link);
       }))));
@@ -247,6 +237,13 @@
       }
     }, { rootMargin: "-10% 0px -75% 0px" });
     headings.forEach((heading) => observer.observe(heading));
+  }
+
+  // A block's own words, without History's labels and the old words shown beside new ones.
+  function plainText(block) {
+    const copy = block.cloneNode(true);
+    for (const extra of $$(".h-label, .h-old", copy)) extra.remove();
+    return squash(copy.textContent);
   }
 
   // The ids are added after the page loads, so CSS :target can miss them; mark the target ourselves.
@@ -364,7 +361,8 @@
   const tokens = (text) => text.match(/\s+|[\p{L}\p{N}_'’-]+|[^\s\p{L}\p{N}_]/gu) || [];
 
   // A line's changes as segments: unchanged text, or a change from old words to new words. Changes
-  // separated only by a space are joined, so "null, weak, and" -> "null and" is one change.
+  // separated only by a space, or by a punctuation mark or two, are joined, so "null, weak, and" -> "null and" is
+  // one change, and so is "read it." -> "know it (e.g., can I run it).".
   function changeSegments(before, after) {
     const ops = diffLists(tokens(before), tokens(after)) || [["del", before], ["ins", after]];
     const segments = [];
@@ -380,7 +378,8 @@
     }
     for (let i = segments.length - 2; i > 0; i--) {
       const [a, gap, b] = [segments[i - 1], segments[i], segments[i + 1]];
-      if (gap.same !== undefined && !gap.same.trim() && a.same === undefined && b && b.same === undefined) {
+      const slight = gap.same !== undefined && (!gap.same.trim() || (gap.same.length <= 3 && !/[\p{L}\p{N}]/u.test(gap.same)));
+      if (slight && a.same === undefined && b && b.same === undefined) {
         segments.splice(i - 1, 3, { old: a.old + gap.same + b.old, new: a.new + gap.same + b.new });
       }
     }
@@ -514,7 +513,8 @@
       h("div", { class: "proposal-head" },
         h("span", { class: `kind kind-${p.kind}`, text: KIND_LABELS[p.kind] || p.kind }),
         h("span", { class: "proposal-status" }, h("strong", { text: label }), detail && !note ? ` · ${detail}` : ""),
-        p.status === "adopted" ? h("a", { class: "proposal-version", href: at(`versions/v${p.version}/`), text: `Version ${p.version}` }) : null),
+        p.status === "adopted" ? h("a", { class: "proposal-version", href: at(`history/?v=${p.version}`), text: `Version ${p.version}`,
+          title: "See this change in History" }) : null),
       note ? h("p", { class: "proposal-note", text: note }) : null,
       changeView(p),
       p.reason ? h("p", { class: "proposal-reason", text: `“${p.reason}”` }) : null,
@@ -533,7 +533,9 @@
 
   function sortProposals(list) {
     const newest = (a, b) => (b.created || "").localeCompare(a.created || "");
-    const latestDecision = (a, b) => (b.decided || b.created || "").localeCompare(a.decided || a.created || "");
+    // Changes published in the same run were decided at the same moment: the one suggested later comes first.
+    const latestDecision = (a, b) => (b.decided || b.created || "").localeCompare(a.decided || a.created || "")
+      || (b.created || "").localeCompare(a.created || "");
     return {
       open: list.filter((p) => !FINAL.includes(p.status)).sort(newest),
       adopted: list.filter((p) => p.status === "adopted").sort(latestDecision),
@@ -771,12 +773,15 @@
     caretAt(ins.firstChild, 1);
   }
 
+  // A short message ("Approved…", "Your vote wasn't saved…") at the bottom of the screen for a few seconds, so it's
+  // seen wherever the reader is on the page.
   function hint(text) {
-    const box = $("#suggest-hint");
-    if (!box) return;
+    let box = $("#toast");
+    if (!box) document.body.append(box = h("div", { class: "toast", id: "toast", role: "status", "aria-live": "polite", hidden: true }));
     box.textContent = text;
+    box.hidden = !text;
     clearTimeout(hint.timer);
-    hint.timer = setTimeout(() => (box.textContent = ""), 8000);
+    hint.timer = setTimeout(() => { box.hidden = true; box.textContent = ""; }, 8000);
   }
 
   function rememberForUndo() {
@@ -1584,8 +1589,7 @@
         h("span", { class: "suggest-help", id: "suggest-help", text: HELP }),
         h("span", { class: "suggest-buttons" },
           action("Undo", () => undo(), "button secondary small suggest-undo"),
-          action("Redo", () => redo(), "button secondary small suggest-undo"))),
-      h("p", { class: "suggest-hint", id: "suggest-hint", "aria-live": "polite" }));
+          action("Redo", () => redo(), "button secondary small suggest-undo"))));
   }
 
   // ---- Approving and disapproving ----
@@ -1843,6 +1847,8 @@
     setTimeout(() => mark.classList.remove("flash"), 1800);
   }
 
+  const DONE_SHOWN = 3;  // published changes listed on Suggest Edits; History has them all
+
   function renderProposals() {
     const section = $("#proposals");
     if (!section) return;
@@ -1878,10 +1884,11 @@
         ...queue.map(card)));
     }
     if (adopted.length) {
-      const shown = adopted.slice(0, 8), rest = adopted.slice(8);
+      // Only the latest few: every version, with its changes marked in the text, is in History.
       const doneCard = (p) => { const el = card(p); if (justDone.has(p.id)) el.classList.add("just-done"); return el; };
-      section.append(h("h3", { text: `Done (${adopted.length})` }), ...shown.map(doneCard));
-      if (rest.length) section.append(h("details", { class: "more" }, h("summary", { text: `Show ${plural(rest.length, "earlier change")}` }), ...rest.map(doneCard)));
+      section.append(h("h3", { text: `Done (${adopted.length})` }), ...adopted.slice(0, DONE_SHOWN).map(doneCard),
+        h("p", { class: "history-link" }, h("a", { href: at("history/"),
+          text: adopted.length > DONE_SHOWN ? `See all ${adopted.length}, and every earlier version, in History` : "See every version in History" })));
     }
     section.append(h("p", { class: "muted" }, "Suggestions that maintainers disapprove, and ones that are withdrawn or can't be applied, move to the ",
       h("a", { href: at("declined/"), text: "Declined page" }), closed.length ? ` (${closed.length} so far)` : "",
@@ -2010,7 +2017,7 @@
     const markdown = await fetchText(at(`versions/v${cfg.latest}/${FILE}`));
     fileBar(
       [h("span", { class: "badge", text: versionLabel(cfg.latest) }), ` Published ${formatDate(release.date)} · ${fileStats(markdown)}`],
-      [button("Download", at(`latest/${FILE}`), { download: FILE }), copyButton(), rawToggle()]);
+      [button("Download", at(`latest/${FILE}`), { download: FILE }), copyButton(), rawToggle(), secondary("History", at("history/"))]);
     renderMarkdown(markdown);
     $("#after").replaceChildren(draftNote(), communityNote(cfg) || "", fingerprintNote(release) || "");
     setCanonical(at(`versions/v${cfg.latest}/`));
@@ -2045,76 +2052,434 @@
       ? ` Last changed ${formatDate(commit.commit.author.date)} by ${commit.author?.login ?? commit.commit.author.name} · ` : " ";
     fileBar(
       [h("span", { class: "badge", text: versionLabel(version) }), `${changed}${fileStats(markdown)}`],
-      [secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton()]);
+      [secondary("Download", at(DRAFT_PATH), { download: FILE }), copyButton(), secondary("History", at("history/"))]);
     $(".file-bar").after(h("div", { id: "suggest-slot", hidden: true }, suggestBar()));
     renderMarkdown(markdown);
     const proposals = h("section", { class: "versions proposals", id: "proposals" }, h("h2", { text: "Suggestions" }), h("p", { class: "loading", text: "Loading suggestions…" }));
     $("#after").replaceChildren(proposals, maintainersNote(governance), communityNote(cfg) || "");
     setCanonical(at("draft/"));
     await setupSuggesting(cfg, governance, ledger, markdown);
-    await showEveryVersion(cfg);
     highlightTarget(true);
     updateProgress();
   }
 
   async function showRevision(cfg, sha) {
     if (!/^[0-9a-f]{7,40}$/i.test(sha)) throw new Error("That revision id doesn't look right.");
+    html.classList.add("is-history");
+    document.body.dataset.old = "";
     const markdown = await fetchText(`https://raw.githubusercontent.com/${cfg.repo}/${sha}/${DRAFT_PATH}`);
     $("#intro").replaceChildren(h("section", { class: "intro" },
       h("h1", { text: "An earlier version of the text" }),
       h("p", { class: "lede" }, `This is how AGENTS.md looked after change ${sha.slice(0, 7)}. Nothing is ever lost: `,
         "to bring back words from it, suggest the change on the Suggest Edits page (strike out the current words and type the earlier ones), or ask a maintainer to restore the whole text."),
-      h("p", {}, button("Back to Suggest Edits", at("draft/")), " ",
+      h("p", {}, button("Back to Suggest Edits", at("draft/")), " ", secondary("History", at("history/")), " ",
         secondary("What changed in this edit", `https://github.com/${cfg.repo}/commit/${sha}`, newTab))));
     fileBar(
-      [h("span", { class: "badge", text: `Change ${sha.slice(0, 7)}` }), ` ${fileStats(markdown)}`],
+      [h("span", { class: "badge badge-old", text: `Change ${sha.slice(0, 7)}` }), ` ${fileStats(markdown)}`],
       [action("Copy this text", (event) => copyText(markdown, event.currentTarget)), rawToggle()]);
     renderMarkdown(markdown);
   }
 
-  async function showEveryVersion(cfg) {
-    const published = h("section", { class: "versions", id: "versions" },
-      h("h2", { text: "Published versions" }),
-      h("p", { class: "muted" }, "Each published version is a frozen snapshot with a permanent link and a fingerprint. Versions before 1.0 are comment drafts; 1.0 will be the first version the contributors recommend as a standard. ",
-        h("a", { href: at("check/"), text: "Check a copy" }), "."),
-      h("ul", { class: "version-list" }, ...cfg.versions.map((r) => h("li", {},
-        h("a", { class: "version-name", href: at(`versions/v${r.version}/`), text: versionLabel(r.version) }),
-        r.version === cfg.latest ? h("span", { class: "badge", text: "latest" }) : null,
-        h("span", { class: "muted", text: ` · ${formatDate(r.date)}` }),
-        h("div", { class: "version-summary", text: r.summary }),
-        fingerprintLine(r.fingerprint),
-        h("div", { class: "muted" }, h("a", { href: at(`versions/v${r.version}/${FILE}`), download: `AGENTS-v${r.version}.md`, text: "Download this version" }))))));
-    const history = h("section", { class: "versions", id: "history" }, h("h2", { text: "Every change to the text" }));
-    $("#after").append(published, history);
-    try {
-      const commits = await draftEdits(cfg, 100);
-      history.append(
-        h("p", { class: "muted", text: `${commits.length === 100 ? "The 100 most recent changes" : plural(commits.length, "change")}, newest first. Open any one to read the text as it was.` }),
-        h("div", { class: "table-wrap" }, h("table", { class: "log" },
-          h("thead", {}, h("tr", {}, ...["When", "Who", "What", ""].map((t) => h("th", { text: t })))),
-          h("tbody", {}, ...commits.map((c) => {
-            const who = c.author?.login ?? c.commit.author.name;
-            return h("tr", {},
-              h("td", { text: new Date(c.commit.author.date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) }),
-              h("td", {}, c.author?.html_url ? external(who, c.author.html_url) : who),
-              h("td", { text: c.commit.message.split("\n")[0] }),
-              h("td", { class: "actions" }, h("a", { href: `./?rev=${c.sha}`, text: "Open" }), " · ", external("Changes", c.html_url)));
-          })))));
-    } catch (error) {
-      history.append(h("p", { class: "muted" }, `The list of changes couldn't be loaded from GitHub (${error.message}). `,
-        isLocal ? "That's expected in a local preview. " : "",
-        "The complete history is always on GitHub: ", external("history of the text", `https://github.com/${cfg.repo}/commits/${cfg.branch}/${DRAFT_PATH}`), "."));
+  // ---------- History ----------
+  // Every published version, and what changed in each: one version's text, with the changes from the version before
+  // it marked where they are (labeled, old words struck out, new words underlined), and the list of versions beside
+  // it. The past is shown in sepia, so it's never mistaken for the current text.
+
+  const versionTexts = new Map();
+  function versionText(version) {
+    if (!versionTexts.has(version)) {
+      versionTexts.set(version, fetchText(at(`versions/v${version}/${FILE}`)).catch((error) => {
+        versionTexts.delete(version);
+        throw error;
+      }));
     }
+    return versionTexts.get(version);
+  }
+
+  // A version's lines that aren't blank; each is one block of the rendered text (CLAUDE.md: one rule or paragraph per
+  // line). Lines are compared without their list numbers, so a renumbered rule isn't a change, and line 3, the
+  // version line, which differs in every version, never is.
+  function textLines(markdown) {
+    return markdown.replace(/\r/g, "").split("\n")
+      .map((text, i) => ({ text, key: i === 2 ? "\0version line" : squash(text.replace(/^\s*\d+\.\s+/, "1. ")) }))
+      .filter((line) => line.text.trim());
+  }
+
+  // How alike two lines are, from 0 to 1: the share of their characters in the words they have in common.
+  function likeness(a, b) {
+    const words = (text) => new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+    const x = words(a), y = words(b);
+    if ([...x].filter((word) => y.has(word)).length * 3 < Math.min(x.size, y.size)) return 0;  // not worth a closer look
+    const ops = diffLists(tokens(a), tokens(b));
+    if (!ops) return 0;
+    const same = ops.reduce((n, [op, piece]) => n + (op === "same" ? piece.replace(/\s/g, "").length : 0), 0);
+    return (2 * same) / ((a.replace(/\s/g, "").length + b.replace(/\s/g, "").length) || 1);
+  }
+
+  // Which lines of the new version are lines of the old one (unchanged, or with some words changed) and which were
+  // added; and which old lines were removed.
+  function lineChanges(oldLines, newLines) {
+    const ops = diffLists(oldLines.map((line) => line.key), newLines.map((line) => line.key));
+    if (!ops) return null;
+    const oldTo = oldLines.map(() => null), newFrom = newLines.map(() => null), changed = new Set();
+    let i = 0, j = 0, removed = [], added = [];
+    // Where lines were removed and others added, a removed line and an added one that are mostly the same words are
+    // one line with some words changed. Pairs keep their order.
+    const pair = () => {
+      let from = 0;
+      for (const d of removed) {
+        let best = -1, score = 0.5;
+        for (let k = from; k < added.length; k++) {
+          const s = likeness(oldLines[d].text, newLines[added[k]].text);
+          if (s > score) { best = k; score = s; }
+        }
+        if (best < 0) continue;
+        oldTo[d] = added[best];
+        newFrom[added[best]] = d;
+        changed.add(added[best]);
+        from = best + 1;
+      }
+      removed = [];
+      added = [];
+    };
+    for (const [op] of ops) {
+      if (op === "same") { pair(); oldTo[i] = j; newFrom[j] = i; i++; j++; }
+      else if (op === "del") removed.push(i++);
+      else added.push(j++);
+    }
+    pair();
+    return { oldTo, newFrom, changed };
+  }
+
+  // One line of Markdown as the block it renders to: a paragraph, a list item (keeping its number), or a heading.
+  function blockFor(line) {
+    const box = h("div");
+    box.innerHTML = DOMPurify.sanitize(marked.parse(line));
+    const block = leafBlocks(box)[0] || h("p", { text: line });
+    const number = line.match(/^\s*(\d+)\.\s/);
+    if (number && block.tagName === "LI") block.value = Number(number[1]);
+    return block;
+  }
+
+  // A block's characters, each as [text node, offset], leaving out old words already put back beside new ones.
+  function charsOf(block) {
+    const chars = [];
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT,
+      { acceptNode: (node) => (node.parentElement.closest(".h-old") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+    while (walker.nextNode()) for (let k = 0; k < walker.currentNode.length; k++) chars.push([walker.currentNode, k]);
+    return chars;
+  }
+
+  // Wraps a block's characters from a up to b in elements made by make(): one for each text node they're in, so bold
+  // words and links keep their formatting.
+  function wrapChars(block, a, b, make) {
+    const chars = charsOf(block);
+    let k = Math.min(b, chars.length);
+    while (k > a) {
+      const [node] = chars[k - 1];
+      let start = k - 1;
+      while (start > a && chars[start - 1][0] === node) start--;
+      const from = chars[start][1], to = chars[k - 1][1] + 1;
+      const piece = from > 0 ? node.splitText(from) : node;
+      if (to - from < piece.length) piece.splitText(to - from);
+      const wrap = make();
+      piece.replaceWith(wrap);
+      wrap.append(piece);
+      k = start;  // the characters before this node are where they were
+    }
+  }
+
+  // Puts nodes into a block just before its character at position p, or at its end.
+  function insertAtChar(block, p, ...nodes) {
+    const chars = charsOf(block);
+    if (!chars.length) return block.append(...nodes);
+    if (p >= chars.length) return chars[chars.length - 1][0].after(...nodes);
+    const [node, offset] = chars[p];
+    (offset > 0 ? node.splitText(offset) : node).before(...nodes);
+  }
+
+  // The words changed in a block since its old line: each old word struck out just before the new words that
+  // replaced it, which are underlined. Returns whether any words changed (not just formatting).
+  function markWords(block, oldLine) {
+    const segments = changeSegments(blockFor(oldLine).textContent, block.textContent);
+    const edits = [];
+    let pos = 0;
+    for (const segment of segments) {
+      if (segment.same !== undefined) { pos += segment.same.length; continue; }
+      edits.push({ pos, old: segment.old, new: segment.new });
+      pos += segment.new.length;
+    }
+    for (const edit of edits.reverse()) {  // from the end, so the positions before each edit stay put
+      const oldCore = edit.old.trim(), newCore = edit.new.trim();
+      const lead = edit.new.length - edit.new.trimStart().length, trail = edit.new.length - edit.new.trimEnd().length;
+      if (newCore) {
+        if (oldCore) insertAtChar(block, edit.pos + lead, h("span", { class: "h-old" }, h("del", { text: oldCore }), " "));
+        wrapChars(block, edit.pos + lead, edit.pos + edit.new.length - trail, () => h("ins"));
+      } else if (oldCore) {
+        const space = (text) => (/\s/.test(text) ? " " : "");
+        insertAtChar(block, edit.pos, h("span", { class: "h-old" },
+          space(edit.old.charAt(0)), h("del", { text: oldCore }), space(edit.old.slice(-1))));
+      }
+    }
+    return edits.length > 0;
+  }
+
+  const topBlock = (node, article) => { while (node.parentElement !== article) node = node.parentElement; return node; };
+
+  // Puts a removed block back where it was: just after the block it followed, in the same list if it was a rule.
+  function putBack(article, block, anchor, numbered) {
+    const list = numbered ? "OL" : "UL";
+    if (anchor?.parentElement?.tagName === "LI") anchor = anchor.parentElement;  // a rule in a list spaced out with blank lines
+    if (block.tagName !== "LI") return anchor ? topBlock(anchor, article).after(block) : article.prepend(block);
+    if (anchor?.tagName === "LI" && anchor.parentElement.tagName === list) return anchor.after(block);
+    const next = anchor ? topBlock(anchor, article).nextElementSibling : article.firstElementChild;
+    if (next?.tagName === list) return next.prepend(block);
+    const wrap = h(list.toLowerCase(), {}, block);
+    return anchor ? topBlock(anchor, article).after(wrap) : article.prepend(wrap);
+  }
+
+  const CHANGE_LABELS = { changed: "Changed", formatted: "Formatting changed", added: "Added", removed: "Removed" };
+
+  // Marks, in a version's rendered text, everything that changed since the version before it: each changed, added,
+  // or removed block is labeled, and removed ones are put back where they were, struck out. Returns the marked
+  // blocks in order, or null if the changes couldn't be worked out.
+  function markChanges(article, oldMarkdown, newMarkdown, version) {
+    const oldLines = textLines(oldMarkdown), newLines = textLines(newMarkdown);
+    let blocks = leafBlocks(article);
+    if (blocks.length !== newLines.length) {
+      // Not one block per line: show each line as its own block, so the changes can still be marked.
+      article.replaceChildren(...newLines.map((line) => blockFor(line.text)));
+      markHeadings(article);
+      blocks = leafBlocks(article);
+    }
+    const diff = lineChanges(oldLines, newLines);
+    if (!diff) return null;
+    // Numbered rules keep their numbers when removed ones are put back among them.
+    for (const list of $$("ol", article)) {
+      [...list.children].forEach((item, n) => { item.value = (Number(list.getAttribute("start")) || 1) + n; });
+    }
+    const wrapAll = (block, tag) => { const wrap = h(tag); wrap.append(...block.childNodes); block.append(wrap); };
+    const mark = (block, kind) => {
+      block.classList.add("h-mark", `h-${kind}`);
+      block.prepend(h("span", { class: "h-label", text: `${CHANGE_LABELS[kind]} in version ${version}` }));
+    };
+    newLines.forEach((line, j) => {
+      if (diff.newFrom[j] === null) { wrapAll(blocks[j], "ins"); mark(blocks[j], "added"); }
+      else if (diff.changed.has(j)) mark(blocks[j], markWords(blocks[j], oldLines[diff.newFrom[j]].text) ? "changed" : "formatted");
+    });
+    let anchor = null;
+    oldLines.forEach((line, i) => {
+      if (diff.oldTo[i] !== null) { anchor = blocks[diff.oldTo[i]]; return; }
+      const block = blockFor(line.text);
+      wrapAll(block, "del");
+      mark(block, "removed");
+      putBack(article, block, anchor, /^\s*\d+\.\s/.test(line.text));
+      anchor = block;
+    });
+    return $$(".h-mark", article);
+  }
+
+  // The section a block is in: the heading before it.
+  function sectionOf(block, article) {
+    if (/^H\d$/.test(block.tagName)) return "";
+    for (let node = topBlock(block, article); node; node = node.previousElementSibling) {
+      if (node.tagName === "H2") return plainText(node);
+    }
+    return "";
+  }
+
+  // What changed in a version, in a few words each, with links to the places in the text.
+  function changeList(marks, older, article) {
+    if (!older) return h("p", { class: "history-count", text: "The first version: there's nothing earlier to compare it with." });
+    if (!marks) return h("p", { class: "history-count", text: `The changes from version ${older.version} couldn't be worked out on this page.` });
+    if (!marks.length) return h("p", { class: "history-count", text: `The same words as version ${older.version}; only the version line differs.` });
+    const kinds = ["changed", "formatted", "added", "removed"];
+    const kindOf = (block) => kinds.find((kind) => block.classList.contains(`h-${kind}`));
+    const counts = kinds.map((kind) => [kind, marks.filter((block) => kindOf(block) === kind).length]).filter(([, n]) => n);
+    const words = (block) => {
+      const all = plainText(block).split(" ");
+      return all.length > 10 ? `${all.slice(0, 10).join(" ")}…` : all.join(" ");
+    };
+    const shown = marks.slice(0, 8);
+    return h("div", { class: "history-changes" },
+      h("p", { class: "history-count" }, `Compared with version ${older.version}: `,
+        counts.map(([kind, n]) => `${n} ${CHANGE_LABELS[kind].toLowerCase()}`).join(", "), "."),
+      h("ul", {}, ...shown.map((block) => {
+        const section = sectionOf(block, article);
+        return h("li", {}, h("span", { class: `h-key h-key-${kindOf(block)}`, text: CHANGE_LABELS[kindOf(block)] }), " ",
+          h("a", { href: `#${block.id}`, text: words(block) }), section ? h("span", { class: "muted", text: ` · ${section}` }) : null);
+      })),
+      marks.length > shown.length ? h("p", { class: "muted", text: `And ${marks.length - shown.length} more, marked in the text below.` }) : null);
+  }
+
+  // Every edit to the text on GitHub, newest first. It's loaded only when opened: GitHub answers 60 such requests an
+  // hour from one computer.
+  function editLog(cfg) {
+    const title = h("summary", {}, h("h2", { text: "Every edit to the file" }));
+    const box = h("details", { class: "how edit-log", id: "edits" }, title, h("p", { class: "loading", text: "Loading the list from GitHub…" }));
+    box.addEventListener("toggle", async () => {
+      if (!box.open || box.dataset.loaded) return;
+      box.dataset.loaded = "yes";
+      try {
+        const commits = await draftEdits(cfg, 100);
+        box.replaceChildren(title,
+          h("p", { class: "muted", text: `${commits.length === 100 ? "The 100 most recent edits" : plural(commits.length, "edit")} to the text, from GitHub, newest first. Open one to read the text as it was after it.` }),
+          h("div", { class: "table-wrap" }, h("table", { class: "log" },
+            h("thead", {}, h("tr", {}, ...["When", "Who", "What", ""].map((t) => h("th", { text: t })))),
+            h("tbody", {}, ...commits.map((c) => {
+              const who = c.author?.login ?? c.commit.author.name;
+              return h("tr", {},
+                h("td", { text: new Date(c.commit.author.date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) }),
+                h("td", {}, c.author?.html_url ? external(who, c.author.html_url) : who),
+                h("td", { text: c.commit.message.split("\n")[0] }),
+                h("td", { class: "actions" }, h("a", { href: at(`draft/?rev=${c.sha}`), text: "Open" }), " · ", external("Changes", c.html_url)));
+            })))));
+      } catch (error) {
+        box.replaceChildren(title, h("p", { class: "muted" }, `The list couldn't be loaded from GitHub (${error.message}). `,
+          isLocal ? "That's expected in a local preview. " : "",
+          "It's always on GitHub: ", external("every edit to the text", `https://github.com/${cfg.repo}/commits/${cfg.branch}/${DRAFT_PATH}`), "."));
+      }
+    });
+    return box;
+  }
+
+  async function showHistory(cfg) {
+    html.classList.add("is-history");
+    const versions = cfg.versions || [];  // newest first
+    if (!versions.length) {
+      $("#doc").replaceChildren(h("p", { text: "Nothing has been published yet." }));
+      return;
+    }
+    const ledger = await loadRecord(cfg, LEDGER_PATH);
+    const adopted = new Map((ledger?.proposals || []).filter((r) => r.status === "adopted" && r.version).map((r) => [r.version, r]));
+    const wanted = () => {
+      const version = new URLSearchParams(location.search).get("v");
+      return versions.some((r) => r.version === version) ? version : versions[0].version;
+    };
+    $("#intro").replaceChildren(h("section", { class: "intro" },
+      h("h1", { text: "History" }),
+      h("p", { class: "lede", text: "Every published version of AGENTS.md, and exactly what changed in each one. Choose a version to read it as it was, with the changes from the version before it marked in the text." }),
+      h("p", { class: "history-key" },
+        h("span", { class: "h-key h-key-changed", text: "Changed" }), " ", h("span", { class: "h-key h-key-added", text: "Added" }), " ",
+        h("span", { class: "h-key h-key-removed", text: "Removed" }), " Old words are ", h("del", { text: "struck out" }),
+        "; new words are ", h("ins", { text: "underlined" }), ".")));
+
+    // The versions, newest first: beside the text on wide screens, and above it on narrow ones.
+    const links = new Map();
+    const list = h("ol", { class: "history-list" }, ...versions.map((r, i) => {
+      const record = adopted.get(r.version);
+      const link = h("a", { href: `?v=${r.version}`,
+        onclick: (event) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;  // a new tab or window
+          event.preventDefault();
+          show(r.version, true);
+        } },
+        h("span", { class: "history-version" }, `Version ${r.version}`, i === 0 ? h("span", { class: "history-now", text: "current" }) : null),
+        h("span", { class: "history-date", text: formatDate(r.date) }),
+        h("span", { class: "history-line", text: r.summary }),
+        record?.proposer ? h("span", { class: "history-who", text: `Suggested by ${record.proposer.email || record.proposer.name}` }) : null);
+      links.set(r.version, link);
+      return h("li", {}, link);
+    }));
+    const wide = matchMedia("(min-width: 1100px)");
+    const panel = h("details", { class: "history-versions", open: wide.matches }, h("summary", { text: `All versions (${versions.length})` }), list);
+    const aside = h("aside", { class: "history-panel", "aria-label": "Versions" }, panel);
+    const summary = h("section", { class: "history-summary", id: "history-summary", "aria-live": "polite" });
+    $(".file").before(summary);
+    // Wide screens: a column beside the text. Narrow ones: folded, just above the chosen version.
+    const place = () => {
+      if (wide.matches) $(".layout").insertBefore(aside, $("#main"));
+      else summary.before(aside);
+      panel.open = wide.matches;
+    };
+    wide.addEventListener?.("change", place);
+    place();
+    const log = editLog(cfg);
+    let showing = null, hideChanges = false;
+
+    async function show(version, chosen = false) {
+      const index = versions.findIndex((r) => r.version === version);
+      const release = versions[index], older = versions[index + 1], newer = versions[index - 1];
+      const ticket = (show.ticket = (show.ticket || 0) + 1);
+      if (chosen) history.pushState(null, "", `?v=${release.version}`);
+      showing = release.version;
+      for (const [v, link] of links) {
+        if (v === release.version) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      }
+      let text, before;
+      try {
+        [text, before] = await Promise.all([versionText(release.version), older ? versionText(older.version) : null]);
+      } catch (error) {
+        if (ticket === show.ticket) showError(error);
+        return;
+      }
+      if (ticket !== show.ticket) return;  // another version was chosen meanwhile
+
+      const article = $("#doc");
+      fillDoc(article, text);
+      const marks = before ? markChanges(article, before, text, release.version) : [];
+      marks?.forEach((block, n) => { block.id = `change-${n + 1}`; });
+      article.classList.toggle("hide-changes", hideChanges);
+      buildOutline(article);
+
+      const toggle = action(hideChanges ? "Show the changes" : "Hide the changes", () => {
+        hideChanges = !hideChanges;
+        article.classList.toggle("hide-changes", hideChanges);
+        toggle.textContent = hideChanges ? "Show the changes" : "Hide the changes";
+      });
+      fileBar(
+        [h("span", { class: "badge badge-old", text: versionLabel(release.version) }),
+          ` Published ${formatDate(release.date)}${older ? ` · changes since ${older.version} marked` : ""}`],
+        [marks?.length ? toggle : null, secondary("Open this version", at(`versions/v${release.version}/`)), copyButton()]);
+
+      const record = adopted.get(release.version);
+      const approvers = (record?.votes || []).filter((v) => v.vote === "approve").map((v) => v.name);
+      const step = (label, target) => h("a", { class: "button secondary small", href: `?v=${target.version}`, text: label,
+        onclick: (event) => { event.preventDefault(); show(target.version, true); } });
+      summary.replaceChildren(
+        h("div", { class: "history-head" },
+          h("p", { class: "history-eyebrow" }, `Version ${release.version} · ${formatDate(release.date)} `,
+            h("span", { class: "badge badge-old", text: index === 0 ? "current version" : "old version" })),
+          h("p", { class: "history-steps" }, older ? step("← Older", older) : null, " ", newer ? step("Newer →", newer) : null)),
+        h("p", { class: "history-what", text: release.summary }),
+        record ? h("p", { class: "history-people" }, ...joined([
+          `Suggested by ${record.proposer?.email || record.proposer?.name || "someone"}${record.created ? `, ${formatDate(record.created)}` : ""}`,
+          approvers.length ? `approved by ${approvers.join(", ")}${record.decided ? `, ${formatDate(record.decided)}` : ""}` : null,
+          record.reason ? `“${record.reason}”` : null,
+        ].filter(Boolean))) : null,
+        changeList(marks, older, article));
+      $("#after").replaceChildren(fingerprintNote(release) || "", log);
+
+      document.title = `Version ${release.version} · History · ${cfg.name}`;
+      setCanonical(`?v=${release.version}`);
+      if (chosen) {
+        if (!wide.matches) panel.open = false;
+        summary.scrollIntoView({ block: "start", behavior: "instant" });
+      }
+      updateProgress();
+    }
+
+    addEventListener("popstate", () => { if (wanted() !== showing) show(wanted()); });
+    await show(wanted());
+    highlightTarget(true);
   }
 
   async function showArchive(cfg) {
     const release = cfg.versions.find((r) => r.version === pageVersion) || {};
     const markdown = await fetchText(`./${FILE}`);
-    const newer = pageVersion !== cfg.latest
-      ? [" · ", h("a", { href: at(""), text: `newer version: ${cfg.latest}` })] : [" · the current version"];
+    const old = pageVersion !== cfg.latest;
+    const newer = old ? [" · ", h("a", { href: at(""), text: `newer version: ${cfg.latest}` })] : [" · the current version"];
+    if (old) {
+      html.classList.add("is-history");
+      document.body.dataset.old = "";
+      $("#intro").replaceChildren(h("aside", { class: "note old-note" },
+        h("p", {}, h("strong", { text: `This is an old version, ${pageVersion}. ` }), `The current version is ${cfg.latest}.`),
+        h("p", {}, button("Read the current version", at("")), " ", secondary("See what changed in this version", at(`history/?v=${pageVersion}`)))));
+    }
     fileBar(
-      [h("span", { class: "badge", text: versionLabel(pageVersion) }), ` Published ${formatDate(release.date)}`, ...newer, ` · ${fileStats(markdown)}`],
-      [button("Download", `./${FILE}`, { download: FILE }), copyButton(), rawToggle()]);
+      [h("span", { class: old ? "badge badge-old" : "badge", text: versionLabel(pageVersion) }), ` Published ${formatDate(release.date)}`, ...newer, ` · ${fileStats(markdown)}`],
+      [button("Download", `./${FILE}`, { download: FILE }), copyButton(), rawToggle(), secondary("History", at(`history/?v=${pageVersion}`))]);
     renderMarkdown(markdown);
     $("#after").replaceChildren(draftNote(), communityNote(cfg) || "", fingerprintNote(release) || "");
   }
@@ -2336,9 +2701,8 @@
 
   async function main() {
     setupReaderControls();
-    trackHeader();
-    const views = { published: showPublished, drafter: showDrafter, archive: showArchive, check: showCheck, join: showJoin,
-      maintainers: showMaintainers, declined: showDeclined };
+    const views = { published: showPublished, drafter: showDrafter, history: showHistory, archive: showArchive, check: showCheck,
+      join: showJoin, maintainers: showMaintainers, declined: showDeclined };
     try {
       const cfg = JSON.parse(await fetchText(at("versions.json")));
       if (cfg.fingerprint) fingerprintSettings = { ...fingerprintSettings, ...cfg.fingerprint };

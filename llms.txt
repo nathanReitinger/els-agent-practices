@@ -4,6 +4,7 @@
 
 - [AGENTS.md, newest version (save in a project folder as AGENTS.md or CLAUDE.md)](latest/AGENTS.md)
 - [Every version, with its fingerprint](versions.json)
+- [Every version, with what changed in each marked in the text](history/)
 - [Suggestions, proposals, and votes](governance/proposals.json)
 - [How decisions are made](GOVERNANCE.md)
 - [Join the community's Google group](join/)

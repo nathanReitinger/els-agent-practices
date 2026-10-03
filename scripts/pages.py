@@ -4,11 +4,12 @@
     python3 scripts/pages.py
 
 The site shows one file, AGENTS.md: the latest published version at the root,
-Suggest Edits (draft/), where anyone can comment and readers who sign in with
-their email suggest changes, each frozen version under versions/vX.Y.Z/, a page
-that checks a copy's fingerprint (check/), how to join the community's Google
-group (join/), the maintainers (maintainers/), and the declined proposals
-(declined/). Addresses from earlier layouts redirect to these pages.
+Suggest Edits (draft/), where readers who verify their email address suggest
+changes, the history of the text with each version's changes marked (history/),
+each frozen version under versions/vX.Y.Z/, a page that checks a copy's
+fingerprint (check/), how to join the community's Google group (join/), the
+maintainers (maintainers/), and the declined proposals (declined/). Addresses
+from earlier layouts redirect to these pages.
 The frozen Markdown files are never touched. scripts/release.py also uses
 archive_pages() for each new version.
 """
@@ -78,6 +79,7 @@ SHELL = """<!doctype html>
     <nav class="site-nav" aria-label="Site">
       <a href="{root}/" data-nav="file">AGENTS.md</a>
       <a href="{root}/draft/" data-nav="drafter">Suggest Edits</a>
+      <a href="{root}/history/" data-nav="history">History</a>
       <a href="{root}/maintainers/" data-nav="maintainers">Maintainers</a>
       <a href="{root}/join/" data-nav="join">Join</a>
       <a href="{root}/check/" data-nav="check">Check a copy</a>
@@ -139,7 +141,7 @@ def render(mode: str, root: str, title: str, description: str, version: str | No
         title=escape(title),
         description=escape(description),
         site_name=escape(SITE_NAME),
-        icon=ICON.format(color={"drafter": "8a5300", "check": "1f6f43", "join": "2f4f8a",
+        icon=ICON.format(color={"drafter": "8a5300", "history": "6e5332", "check": "1f6f43", "join": "2f4f8a",
                                 "maintainers": "4a3a7a", "declined": "6f6a72"}.get(mode, "8a2432")),
         prefs=PREFS,
         fonts=FONTS,
@@ -173,6 +175,8 @@ FIXED = {
                          "AGENTS.md: standing instructions for AI agents working with empirical legal scholars. Download it, or propose a change."),
     "draft/index.html": render("drafter", "..", f"Suggest Edits · {SITE_NAME}",
                                "Edit AGENTS.md directly, with track changes on. Your suggestions carry your name, and the maintainers approve or disapprove each one."),
+    "history/index.html": render("history", "..", f"History · {SITE_NAME}",
+                                 "Every published version of AGENTS.md, with exactly what changed in each one marked in the text."),
     "maintainers/index.html": render("maintainers", "..", f"Maintainers · {SITE_NAME}",
                                      "The maintainers of AGENTS.md for Empirical Legal Scholars, and how they decide which suggested changes go in."),
     "declined/index.html": render("declined", "..", f"Declined proposals · {SITE_NAME}",
@@ -184,8 +188,8 @@ FIXED = {
     # Addresses from earlier layouts.
     "agents/index.html": redirect("../"),
     "draft/agents.html": redirect("./"),
-    "draft/history.html": redirect("./#history"),
-    "versions/index.html": redirect("../draft/#versions"),
+    "draft/history.html": redirect("../history/"),
+    "versions/index.html": redirect("../history/"),
 }
 
 
