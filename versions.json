@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": true
   },
-  "latest": "0.0.11",
+  "latest": "0.0.12",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.12",
+      "date": "2026-10-03",
+      "summary": "Added a rule: “Logs should be in .log format and should be append-only and should include time…” (Non-negotiable rules).",
+      "fingerprint": "504546fd221269121b54fdb6f152feee5f3b8663ed6e33530d489cb4db1be1ab",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.11",
       "date": "2026-10-03",

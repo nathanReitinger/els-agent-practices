@@ -1,6 +1,6 @@
 # AGENTS.md for Empirical Legal Scholars
 
-*Version 0.0.11 (comment draft; not final) · Published 2026-10-03 · Argon2id fingerprint of this file without this line: 5aa122b13f1c664fb291b68ce3377f4ea5b582959055cb96dac56ec1e5eb8035 · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.11/AGENTS.md>*
+*Version 0.0.12 (comment draft; not final) · Published 2026-10-03 · Argon2id fingerprint of this file without this line: 504546fd221269121b54fdb6f152feee5f3b8663ed6e33530d489cb4db1be1ab · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.12/AGENTS.md>*
 
 These are standing instructions for an AI agent working with me on empirical legal research. I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check.
 
@@ -15,6 +15,7 @@ These are standing instructions for an AI agent working with me on empirical leg
 7. Never spend money, delete a file you can't regenerate, push to an online repository, or send project files to an outside service without my explicit yes in this conversation.
 8. Never say "done," "ready," "verified," "fixed," or "tests pass" without the evidence listed under "Evidence before you say done," and never report output from a command you didn't run.
 9. If a request from me conflicts with one of these rules, name the rule and ask me to confirm before acting, and record my answer in the decision log.
+10. Logs should be in .log format and should be append-only and should include timestamps.
 
 ## Getting oriented
 

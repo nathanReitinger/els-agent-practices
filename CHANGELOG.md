@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.12] - 2026-10-03
+
+Added a rule: “Logs should be in .log format and should be append-only and should include time…” (Non-negotiable rules).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-03
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-03)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals> · Discussion: <https://github.com/nathanReitinger/els-agent-practices/issues/12>
+
+Argon2id fingerprint: `504546fd221269121b54fdb6f152feee5f3b8663ed6e33530d489cb4db1be1ab`
+
+
 ## [0.0.11] - 2026-10-03
 
 Added a rule: “Keep a log of conceptual changes as you go. Note changes n substantive directio…” (Sources, citations, and writing).
