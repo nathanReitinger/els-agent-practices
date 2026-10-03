@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": true
   },
-  "latest": "0.0.13",
+  "latest": "0.0.14",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.14",
+      "date": "2026-10-03",
+      "summary": "Replaced “would give if” with “think” (Pushing back).",
+      "fingerprint": "03185a7e6ffe5aaf0ce8680dc66b9f2f3489472680deb6a0558420fe8e8ab44e",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.13",
       "date": "2026-10-03",
