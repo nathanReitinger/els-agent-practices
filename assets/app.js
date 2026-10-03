@@ -1847,8 +1847,25 @@
     setTimeout(() => mark.classList.remove("flash"), 1800);
   }
 
-  const DONE_SHOWN = 3;  // published changes listed on Suggest Edits; History has them all
+  const WEEK = 7 * 24 * 3600 * 1000;
 
+  // Numbers at a glance; each links to where those suggestions are, when there are any.
+  function statsRow(items) {
+    return h("div", { class: "stats" }, ...items.map(({ n, label, href, kind }) => {
+      const body = [h("strong", { text: String(n) }), h("span", { text: label })];
+      return n && href ? h("a", { class: `stat stat-${kind}`, href }, ...body) : h("div", { class: `stat stat-${kind}` }, ...body);
+    }));
+  }
+
+  // A change in a few words: Replaced “every” with “each”.
+  function changeSentence(p) {
+    const cut = (text, n) => { const t = squash(text); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+    return { delete: `Removed “${cut(p.old, 70)}”`, replace: `Replaced “${cut(p.old, 40)}” with “${cut(p.new, 40)}”`,
+      insert: `Added “${cut(p.new, 70)}”`, rule: `Added a rule: “${cut(p.new, 70)}”` }[p.kind] || "Changed the text";
+  }
+
+  // Below the text on Suggest Edits: the suggestions waiting for a maintainer, and the publishing queue. Published
+  // changes aren't listed here, only counted: they're all in History, marked in the text.
   function renderProposals() {
     const section = $("#proposals");
     if (!section) return;
@@ -1867,37 +1884,46 @@
     const open = notFinal.filter((p) => !decided.has(p.id));
     const rank = (p) => p.place || Number.MAX_SAFE_INTEGER;  // disapproved ones (no place) last
     const queue = notFinal.filter((p) => decided.has(p.id)).sort((a, b) => rank(a) - rank(b));
-    // Anything that just left the queue, done, is shown with a brief highlight.
-    const justDone = new Set(adopted.filter((p) => renderProposals.queued?.has(p.id)).map((p) => p.id));
+    // Published while this page is open: a line each, so a maintainer sees an approval go through.
+    const justDone = adopted.filter((p) => renderProposals.queued?.has(p.id));
+    renderProposals.published = [...justDone, ...(renderProposals.published || [])];
     renderProposals.queued = new Set(queue.map((p) => p.id));
     const card = (p) => proposalCard(p, cfg, rules, [reasonField(p), voteControls(p)]);
+    const thisWeek = adopted.filter((p) => Date.now() - (toTime(p.decided) || 0) < WEEK).length;
     section.replaceChildren(
       h("h2", { text: "Suggestions" }),
       h("p", {}, "Each suggestion waits for the ", h("a", { href: at("maintainers/"), text: "maintainers" }),
-        `, who approve or disapprove it. ${ruleSentence(rules)} An approved change is published as a new version within ${CHECK_EVERY} or so.`));
+        `, who approve or disapprove it. ${ruleSentence(rules)} An approved change is published as a new version within ${CHECK_EVERY} or so.`),
+      statsRow([
+        { n: open.length, label: "waiting for approval", href: "#waiting", kind: "waiting" },
+        { n: queue.length, label: "being published now", href: "#queue", kind: "queue" },
+        { n: thisWeek, label: "published in the past week", href: at("history/"), kind: "done" },
+        { n: adopted.length, label: "published in all", href: at("history/"), kind: "done" },
+      ]));
     if (!open.length) section.append(h("p", { class: "empty", text: "No suggestions are waiting right now. Edit the text above to make one." }));
-    else section.append(h("h3", { text: `Waiting for a maintainer (${open.length})` }), ...open.map(card));
+    else section.append(h("h3", { id: "waiting", text: `Waiting for approval (${open.length})` }), ...open.map(card));
     if (queue.length) {
       section.append(h("div", { class: "queue", id: "queue" },
         h("h3", { text: `Publishing queue (${queue.length})` }),
-        h("p", { class: "muted", text: "Decided, and waiting for the robot, which takes them in this order, usually within a minute or two. The text above already shows the approved changes, in purple; each moves to Done once it's published. Disapproved ones move to the Declined page." }),
+        h("p", { class: "muted", text: "Decided, and waiting for the robot, which takes them in this order, usually within a minute or two. The text above already shows the approved changes, in purple; each leaves the queue once it's published, and is then in History. Disapproved ones move to the Declined page." }),
         ...queue.map(card)));
     }
-    if (adopted.length) {
-      // Only the latest few: every version, with its changes marked in the text, is in History.
-      const doneCard = (p) => { const el = card(p); if (justDone.has(p.id)) el.classList.add("just-done"); return el; };
-      section.append(h("h3", { text: `Done (${adopted.length})` }), ...adopted.slice(0, DONE_SHOWN).map(doneCard),
-        h("p", { class: "history-link" }, h("a", { href: at("history/"),
-          text: adopted.length > DONE_SHOWN ? `See all ${adopted.length}, and every earlier version, in History` : "See every version in History" })));
+    if (renderProposals.published.length) {
+      section.append(h("div", { class: "just-published", "aria-live": "polite" }, ...renderProposals.published.map((p) =>
+        h("p", { class: justDone.includes(p) ? "just-done" : null },
+          h("strong", { text: `Published as version ${p.version}: ` }), `${changeSentence(p)}. `,
+          h("a", { href: at(`history/?v=${p.version}`), text: "See it in History" })))));
     }
-    section.append(h("p", { class: "muted" }, "Suggestions that maintainers disapprove, and ones that are withdrawn or can't be applied, move to the ",
-      h("a", { href: at("declined/"), text: "Declined page" }), closed.length ? ` (${closed.length} so far)` : "",
-      ". Every suggestion, vote, and outcome is also recorded in ", external(LEDGER_PATH, repoFile(cfg, LEDGER_PATH)), "."));
+    section.append(
+      h("p", { class: "history-cta" }, h("a", { class: "button button-old", href: at("history/"), text: "See every published change in History" })),
+      h("p", { class: "muted" }, "Suggestions that maintainers disapprove, and ones that are withdrawn or can't be applied, move to the ",
+        h("a", { href: at("declined/"), text: "Declined page" }), closed.length ? ` (${closed.length} so far)` : "",
+        ". Every suggestion, vote, and outcome is also recorded in ", external(LEDGER_PATH, repoFile(cfg, LEDGER_PATH)), "."));
     const count = $("#proposal-count");
     if (count) {
       count.replaceChildren(open.length
-        ? h("a", { href: "#proposals" }, `${plural(open.length, "suggestion is", "suggestions are")} waiting for a maintainer. See ${open.length === 1 ? "it" : "them"} below the text.`)
-        : adopted.length || closed.length ? h("a", { href: "#proposals", text: "No suggestions are waiting right now. See past decisions below the text." })
+        ? h("a", { href: "#waiting" }, `${plural(open.length, "suggestion is", "suggestions are")} waiting for approval. See ${open.length === 1 ? "it" : "them"} below the text.`)
+        : adopted.length || closed.length ? h("span", {}, "No suggestions are waiting right now. ", h("a", { href: at("history/"), text: "See past changes in History" }), ".")
           : h("span", { text: "No suggestions yet. Yours could be the first." }));
     }
   }
@@ -2343,6 +2369,10 @@
     return box;
   }
 
+  const CHANGE_KINDS = { delete: "removed", replace: "changed", insert: "added", rule: "added" };
+
+  // History has two views. Without ?v=, every published change, newest first and by day, each with what changed
+  // marked; with ?v=0.0.9, that version's text with its changes marked in place, and the versions beside it.
   async function showHistory(cfg) {
     html.classList.add("is-history");
     const versions = cfg.versions || [];  // newest first
@@ -2351,29 +2381,72 @@
       return;
     }
     const ledger = await loadRecord(cfg, LEDGER_PATH);
-    const adopted = new Map((ledger?.proposals || []).filter((r) => r.status === "adopted" && r.version).map((r) => [r.version, r]));
-    const wanted = () => {
+    const records = ledger?.proposals || [];
+    const adopted = new Map(records.filter((r) => r.status === "adopted" && r.version).map((r) => [r.version, r]));
+    const requested = () => {
       const version = new URLSearchParams(location.search).get("v");
-      return versions.some((r) => r.version === version) ? version : versions[0].version;
+      return versions.some((r) => r.version === version) ? version : null;
+    };
+    // Choosing a change, a version, or the list: shown at once, unless it's to open in a new tab or window.
+    const choose = (version) => (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      if (version) show(version, true);
+      else showAll(true);
+    };
+    const peopleLine = (record) => {
+      const approvers = (record.votes || []).filter((v) => v.vote === "approve").map((v) => v.name);
+      return [`Suggested by ${record.proposer?.email || record.proposer?.name || "someone"}`,
+        approvers.length ? `approved by ${approvers.join(", ")}` : null];
     };
     $("#intro").replaceChildren(h("section", { class: "intro" },
       h("h1", { text: "History" }),
-      h("p", { class: "lede", text: "Every published version of AGENTS.md, and exactly what changed in each one. Choose a version to read it as it was, with the changes from the version before it marked in the text." }),
+      h("p", { class: "lede", text: "Every change to AGENTS.md, newest first. Choose one to read that version, with what changed marked in the text." }),
       h("p", { class: "history-key" },
         h("span", { class: "h-key h-key-changed", text: "Changed" }), " ", h("span", { class: "h-key h-key-added", text: "Added" }), " ",
         h("span", { class: "h-key h-key-removed", text: "Removed" }), " Old words are ", h("del", { text: "struck out" }),
         "; new words are ", h("ins", { text: "underlined" }), ".")));
 
-    // The versions, newest first: beside the text on wide screens, and above it on narrow ones.
+    // Every change, newest first and by day.
+    const all = h("section", { class: "history-all", id: "all-changes", "aria-label": "Every change" });
+    const changeRow = (r, i) => {
+      const record = adopted.get(r.version);
+      const kind = CHANGE_KINDS[record?.kind];
+      return h("li", {}, h("a", { class: "change-row", href: `?v=${r.version}`, onclick: choose(r.version) },
+        h("span", { class: "change-row-head" },
+          h("span", { class: "badge badge-old", text: `Version ${r.version}` }),
+          kind ? h("span", { class: `h-key h-key-${kind}`, text: CHANGE_LABELS[kind] }) : null,
+          i === 0 ? h("span", { class: "history-now", text: "current" }) : null),
+        h("span", { class: "change-row-what", text: r.summary }),
+        record ? changeView(record) : null,
+        record ? h("span", { class: "change-row-who", text: peopleLine(record).filter(Boolean).join(" · ") }) : null));
+    };
+    const fillAll = (limit = 30) => {
+      const when = (r) => toTime(adopted.get(r.version)?.decided) || toTime(r.date) || 0;
+      const days = new Map();
+      versions.slice(0, limit).forEach((r, i) => {
+        const day = formatDate(r.date);
+        if (!days.has(day)) days.set(day, []);
+        days.get(day).push(changeRow(r, i));
+      });
+      all.replaceChildren(
+        statsRow([
+          { n: versions.length, label: "versions published", kind: "done" },
+          { n: versions.filter((r) => Date.now() - when(r) < WEEK).length, label: "published in the past week", kind: "done" },
+          { n: records.filter((r) => !FINAL.includes(r.status)).length, label: "waiting for approval", href: at("draft/#waiting"), kind: "waiting" },
+          { n: records.filter((r) => FINAL.includes(r.status) && r.status !== "adopted").length, label: "on the Declined page", href: at("declined/"), kind: "declined" },
+        ]),
+        ...[...days].flatMap(([day, rows]) => [h("h3", { text: day }), h("ol", { class: "change-rows" }, ...rows)]),
+        versions.length > limit
+          ? h("p", { class: "history-more" }, action(`Show ${plural(versions.length - limit, "earlier version")}`, () => fillAll(Infinity)))
+          : null);
+    };
+
+    // One version: the versions beside the text on wide screens, and above it, folded, on narrow ones.
     const links = new Map();
     const list = h("ol", { class: "history-list" }, ...versions.map((r, i) => {
       const record = adopted.get(r.version);
-      const link = h("a", { href: `?v=${r.version}`,
-        onclick: (event) => {
-          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;  // a new tab or window
-          event.preventDefault();
-          show(r.version, true);
-        } },
+      const link = h("a", { href: `?v=${r.version}`, onclick: choose(r.version) },
         h("span", { class: "history-version" }, `Version ${r.version}`, i === 0 ? h("span", { class: "history-now", text: "current" }) : null),
         h("span", { class: "history-date", text: formatDate(r.date) }),
         h("span", { class: "history-line", text: r.summary }),
@@ -2385,8 +2458,7 @@
     const panel = h("details", { class: "history-versions", open: wide.matches }, h("summary", { text: `All versions (${versions.length})` }), list);
     const aside = h("aside", { class: "history-panel", "aria-label": "Versions" }, panel);
     const summary = h("section", { class: "history-summary", id: "history-summary", "aria-live": "polite" });
-    $(".file").before(summary);
-    // Wide screens: a column beside the text. Narrow ones: folded, just above the chosen version.
+    $(".file").before(all, summary);
     const place = () => {
       if (wide.matches) $(".layout").insertBefore(aside, $("#main"));
       else summary.before(aside);
@@ -2395,14 +2467,29 @@
     wide.addEventListener?.("change", place);
     place();
     const log = editLog(cfg);
-    let showing = null, hideChanges = false;
+    let current = null, hideChanges = false;  // current: the version shown, or "all"
+
+    function showAll(chosen = false) {
+      show.ticket = (show.ticket || 0) + 1;  // a version still loading isn't shown after all
+      if (chosen) history.pushState(null, "", location.pathname);
+      current = "all";
+      html.classList.add("history-list-mode");
+      if (!all.childElementCount) fillAll();
+      for (const link of links.values()) link.removeAttribute("aria-current");
+      $("#after").replaceChildren(log);
+      document.title = `History · ${cfg.name}`;
+      setCanonical("./");
+      if (chosen) scrollTo({ top: 0, behavior: "instant" });
+      updateProgress();
+    }
 
     async function show(version, chosen = false) {
       const index = versions.findIndex((r) => r.version === version);
       const release = versions[index], older = versions[index + 1], newer = versions[index - 1];
       const ticket = (show.ticket = (show.ticket || 0) + 1);
       if (chosen) history.pushState(null, "", `?v=${release.version}`);
-      showing = release.version;
+      current = release.version;
+      html.classList.remove("history-list-mode");
       for (const [v, link] of links) {
         if (v === release.version) link.setAttribute("aria-current", "page");
         else link.removeAttribute("aria-current");
@@ -2414,7 +2501,7 @@
         if (ticket === show.ticket) showError(error);
         return;
       }
-      if (ticket !== show.ticket) return;  // another version was chosen meanwhile
+      if (ticket !== show.ticket) return;  // something else was chosen meanwhile
 
       const article = $("#doc");
       fillDoc(article, text);
@@ -2434,18 +2521,18 @@
         [marks?.length ? toggle : null, secondary("Open this version", at(`versions/v${release.version}/`)), copyButton()]);
 
       const record = adopted.get(release.version);
-      const approvers = (record?.votes || []).filter((v) => v.vote === "approve").map((v) => v.name);
-      const step = (label, target) => h("a", { class: "button secondary small", href: `?v=${target.version}`, text: label,
-        onclick: (event) => { event.preventDefault(); show(target.version, true); } });
+      const step = (label, target) => h("a", { class: "button secondary small", href: `?v=${target.version}`, text: label, onclick: choose(target.version) });
       summary.replaceChildren(
         h("div", { class: "history-head" },
           h("p", { class: "history-eyebrow" }, `Version ${release.version} · ${formatDate(release.date)} `,
             h("span", { class: "badge badge-old", text: index === 0 ? "current version" : "old version" })),
-          h("p", { class: "history-steps" }, older ? step("← Older", older) : null, " ", newer ? step("Newer →", newer) : null)),
+          h("p", { class: "history-steps" },
+            h("a", { class: "button secondary small", href: "./", text: "All changes", onclick: choose(null) }), " ",
+            older ? step("← Older", older) : null, " ", newer ? step("Newer →", newer) : null)),
         h("p", { class: "history-what", text: release.summary }),
         record ? h("p", { class: "history-people" }, ...joined([
-          `Suggested by ${record.proposer?.email || record.proposer?.name || "someone"}${record.created ? `, ${formatDate(record.created)}` : ""}`,
-          approvers.length ? `approved by ${approvers.join(", ")}${record.decided ? `, ${formatDate(record.decided)}` : ""}` : null,
+          `${peopleLine(record)[0]}${record.created ? `, ${formatDate(record.created)}` : ""}`,
+          peopleLine(record)[1] ? `${peopleLine(record)[1]}${record.decided ? `, ${formatDate(record.decided)}` : ""}` : null,
           record.reason ? `“${record.reason}”` : null,
         ].filter(Boolean))) : null,
         changeList(marks, older, article));
@@ -2460,8 +2547,15 @@
       updateProgress();
     }
 
-    addEventListener("popstate", () => { if (wanted() !== showing) show(wanted()); });
-    await show(wanted());
+    addEventListener("popstate", () => {
+      const next = requested() || "all";
+      if (next === current) return;  // only the #change-N part changed
+      if (next === "all") showAll();
+      else show(next);
+    });
+    const first = requested();
+    if (first) await show(first);
+    else showAll();
     highlightTarget(true);
   }
 

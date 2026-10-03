@@ -26,7 +26,7 @@ This repository publishes *AGENTS.md for Empirical Legal Scholars*: one Markdown
 - Don't add a file named `CLAUDE.md` anywhere except this one.
 - Site pages are generated: change `scripts/pages.py`, then run `python3 scripts/pages.py`. The page logic is in `assets/app.js`. After changing anything in `assets/`, rerun `python3 scripts/pages.py` so the pages load the new version instead of a cached one.
 - Run the tests after changing anything in `scripts/`, `governance/maintainers.json`, or `versions.json`: `python3 -m unittest discover -s scripts/tests -t scripts/tests`. The workflow runs them before every robot run, so broken tests stop the robot.
-- The site is for human readers: a white page, Playfair body text (justified), bold IBM Plex Sans headings, no blur or gradients, and light/dark and text-size controls. The past (History, an old version's page) is shown in sepia, so it's never mistaken for the current text. On Suggest Edits, the editing bar stays at the top of the text rather than following the reader, and only the latest few published changes are listed; the rest are in History.
+- The site is for human readers: a white page, Playfair body text (justified), bold IBM Plex Sans headings, no blur or gradients, and light/dark and text-size controls. The past (History, an old version's page) is shown in sepia, so it's never mistaken for the current text. On Suggest Edits, the editing bar stays at the top of the text rather than following the reader. Below the text it shows only the suggestions waiting for approval and the publishing queue, with counts and a link to History; published changes aren't listed there. History's front page lists every change, and each opens that version with its changes marked.
 
 ## Previewing
 
