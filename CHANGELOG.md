@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.18] - 2026-10-04
+
+Deleted “I am the author, and I answer for every number, quote, citation, and line of co…”.
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-04
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-04)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals> · Discussion: <https://github.com/nathanReitinger/els-agent-practices/issues/14>
+
+Argon2id fingerprint: `5647d791699ca6ad3d8d55509b0766f454d13bcdaaf6be905308fd1b536bbcba`
+
+
 ## [0.0.17] - 2026-10-04
 
 Added a rule: “When you do this orientation, ask me in a click-box survey-style question and a…” (Getting oriented).

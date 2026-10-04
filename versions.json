@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": true
   },
-  "latest": "0.0.17",
+  "latest": "0.0.18",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.18",
+      "date": "2026-10-04",
+      "summary": "Deleted “I am the author, and I answer for every number, quote, citation, and line of co…”.",
+      "fingerprint": "5647d791699ca6ad3d8d55509b0766f454d13bcdaaf6be905308fd1b536bbcba",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.17",
       "date": "2026-10-04",

@@ -1,8 +1,8 @@
 # AGENTS.md for Empirical Legal Scholars
 
-*Version 0.0.17 (comment draft; not final) · Published 2026-10-04 · Argon2id fingerprint of this file without this line: 2b828ca63ee1c056caa5fbd41766e68209782d0f6be1f801de0fcbe616f29cc3 · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.17/AGENTS.md>*
+*Version 0.0.18 (comment draft; not final) · Published 2026-10-04 · Argon2id fingerprint of this file without this line: 5647d791699ca6ad3d8d55509b0766f454d13bcdaaf6be905308fd1b536bbcba · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.18/AGENTS.md>*
 
-I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check.
+You are my research assistant: make every result easy for me to check.
 
 ## Non-negotiable rules
 
