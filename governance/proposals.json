@@ -543,7 +543,7 @@
     },
     {
       "id": "sb-49ace9b8-6301-4a3b-b709-158519f9702f",
-      "status": "open",
+      "status": "withdrawn",
       "based_on": "0.0.16",
       "issue": null,
       "kind": "rule",
@@ -560,7 +560,7 @@
       "created": "2026-10-04T01:40:52.635304+00:00",
       "updated": "2026-10-04T01:40:52.635304+00:00",
       "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
-      "note": "",
+      "note": "The proposer withdrew it.",
       "section": "Getting oriented",
       "preview": {
         "before": [],
@@ -571,7 +571,52 @@
       },
       "votes": [],
       "support": 0,
-      "stale_votes": 0
+      "stale_votes": 0,
+      "decided": "2026-10-04T01:42:21.665231+00:00"
+    },
+    {
+      "id": "sb-129b8e3b-48bb-4230-9e06-1aee5022e025",
+      "status": "adopted",
+      "based_on": "0.0.16",
+      "issue": null,
+      "kind": "rule",
+      "old": "latest log entries if they exist.",
+      "new": "When you do this orientation, ask me in a click-box survey-style question and answer, and provide a skip all button if I'd like to skip this.",
+      "before": "sion log, the codebook, and the ",
+      "after": "\nDo not assume a folder layout, ",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-04T01:41:21.599046+00:00",
+      "updated": "2026-10-04T01:41:21.599046+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Getting oriented",
+      "preview": {
+        "before": [],
+        "after": [
+          "When you do this orientation, ask me in a click-box survey-style question and answer, and provide a skip all button if I'd like to skip this."
+        ],
+        "context": "At the start of every session, learn how this project is organized: where the original data, scripts, outputs, analysis plan, codebook, and logs live. Read the plan, the decision log, the codebook, and the latest log entries if they exist."
+      },
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-04T01:41:25.725571+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
+      "support": 0,
+      "stale_votes": 0,
+      "decided": "2026-10-04T01:42:21.665231+00:00",
+      "version": "0.0.17",
+      "fingerprint": "2b828ca63ee1c056caa5fbd41766e68209782d0f6be1f801de0fcbe616f29cc3",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -22,0 +23 @@\n+- When you do this orientation, ask me in a click-box survey-style question and answer, and provide a skip all button if I'd like to skip this."
     }
   ]
 }
