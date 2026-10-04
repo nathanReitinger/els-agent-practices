@@ -19,10 +19,38 @@
 -- supabase/schema.sql and this file from GitHub and runs whichever changed. So once this file has been run here,
 -- neither file needs pasting again.
 
-create extension if not exists pg_net with schema extensions;
-create extension if not exists pg_cron with schema pg_catalog;
-grant usage on schema cron to postgres;
-grant all privileges on all tables in schema cron to postgres;
+-- pg_net (to call GitHub) and pg_cron (the timer), each created only if it isn't there yet: creating one that's
+-- already there sets off Supabase's own setup for it again, which isn't needed.
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pg_net') then
+    create extension pg_net with schema extensions;
+  end if;
+  if not exists (select 1 from pg_extension where extname = 'pg_cron') then
+    create extension pg_cron with schema pg_catalog;
+  end if;
+end
+$$;
+
+-- An earlier version of this file also granted this role rights on pg_cron's tables that Supabase had already given
+-- it. Those repeated grants stop Supabase's own setup for pg_cron ("dependent privileges exist"), so they're taken
+-- back here. This takes back only grants this role made itself; the rights Supabase gave stay. (A superuser's
+-- revoke would take back the owner's grants as well, so a superuser skips this.)
+do $$
+declare
+  t text;
+begin
+  if (select rolsuper from pg_roles where rolname = current_user) then
+    return;
+  end if;
+  for t in select c.oid::regclass::text from pg_class c join pg_namespace n on n.oid = c.relnamespace
+           where n.nspname = 'cron' and c.relkind in ('r', 'p') and pg_get_userbyid(c.relowner) <> current_user loop
+    execute format('revoke all privileges on table %s from %I', t, current_user);
+  end loop;
+exception when others then
+  null;
+end
+$$;
 
 -- Kept out of the API: nobody but the project's owner can see or run anything here.
 create schema if not exists robot;
