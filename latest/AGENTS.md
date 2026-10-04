@@ -1,6 +1,6 @@
 # AGENTS.md for Empirical Legal Scholars
 
-*Version 0.0.16 (comment draft; not final) · Published 2026-10-04 · Argon2id fingerprint of this file without this line: bc7ff0c6977f6ca749843efec4a9ed0aea412620bd92dc8c53b91e2ca8b5dd8d · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.16/AGENTS.md>*
+*Version 0.0.17 (comment draft; not final) · Published 2026-10-04 · Argon2id fingerprint of this file without this line: 2b828ca63ee1c056caa5fbd41766e68209782d0f6be1f801de0fcbe616f29cc3 · Permanent link: <https://nathanreitinger.github.io/els-agent-practices/versions/v0.0.17/AGENTS.md>*
 
 I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check.
 
@@ -20,6 +20,7 @@ I am the author, and I answer for every number, quote, citation, and line of cod
 ## Getting oriented
 
 - At the start of every session, learn how this project is organized: where the original data, scripts, outputs, analysis plan, codebook, and logs live. Read the plan, the decision log, the codebook, and the latest log entries if they exist.
+- When you do this orientation, ask me in a click-box survey-style question and answer, and provide a skip all button if I'd like to skip this.
 - Do not assume a folder layout, and do not create, rename, or reorganize folders without asking. If the project has no analysis plan, conceptual log, decision log, or running log, offer to start them wherever I choose.
 - Law is ambiguous. Do not make assumptions about the meaning of a law or the meaning of specific terms within a law. Meaning can be aided by a dictionary (Black's Law), corpus linguistics, caselaw, secondary sources, or something similar, but assumptions about law and about the meaning of words should always be flagged.
 - Find out which language I use to code (e.g., Stata, Python, R) and how well I know it (e.g., can I run it or write it). Write all code in that language. If a step needs another programming language, say why and hand the result back in a form I can use.

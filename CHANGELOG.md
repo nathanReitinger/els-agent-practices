@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.17] - 2026-10-04
+
+Added a rule: “When you do this orientation, ask me in a click-box survey-style question and a…” (Getting oriented).
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-04
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-04)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals>
+
+Argon2id fingerprint: `2b828ca63ee1c056caa5fbd41766e68209782d0f6be1f801de0fcbe616f29cc3`
+
+
 ## [0.0.16] - 2026-10-04
 
 The lead maintainer's edits: 13 rules removed, 5 added (one in a new Language section), others reworded, and no contractions.
