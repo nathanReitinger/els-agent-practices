@@ -14,7 +14,7 @@ When a maintainer approves your suggestion, it's published as a new version auto
 
 ## Comment, highlight, or suggest something different
 
-- **Comment or highlight:** select words, then choose **Comment** or **Highlight** in the small bar above them. Comments and highlights carry your email address, everyone sees them, and they never change the text. Click one to read it, reply, or resolve it. Anyone can resolve a comment; only its author can delete it.
+- **Comment or highlight:** select words, then choose **Comment** or **Highlight** in the small bar above them. Comments and highlights carry your email address, everyone sees them, and they never change the text. On a wide screen, comments sit in the right margin beside their words, joined to them by a dotted line; on a narrow one, point at commented words to read the comment. Click a comment (or its words) to read the whole conversation, reply, or resolve it. Anyone can resolve a comment; only its author can delete it.
 - **Respond to someone's suggestion:** click it in the text. Choose **Comment** to discuss it, or **Suggest a different change** to offer your own version of the same change. Yours is saved as your own suggestion, marked as building on theirs, and the maintainers choose between them. When several people change the same words, a "+2" (or more) beside the change opens all of them.
 
 ## Working offline

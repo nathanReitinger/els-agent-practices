@@ -799,6 +799,30 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .lost-changes { margin-top: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--warn); border-radius: 8px; background: var(--warn-soft); font-size: 0.86rem; }
 .lost-changes ul { margin: 0.3rem 0; padding-left: 1.2rem; }
 
+/* Comments in the right margin on wide screens: each beside its words, joined to them by a dotted line. */
+.comment-rail { display: none; }
+@media (min-width: 1100px) {
+  body[data-mode="drafter"] .layout { grid-template-columns: 12rem minmax(0, 50rem) 17rem; }
+  html:not(.gated) body[data-mode="drafter"] .comment-rail { display: block; position: relative; grid-column: 3; grid-row: 1; align-self: start; }
+}
+.rail-card { position: absolute; left: 0; right: 0; padding: 0.55rem 0.75rem 0.6rem; border: 1px solid var(--rule); border-left: 3px solid var(--comment);
+  border-radius: 0 10px 10px 0; background: var(--bg); box-shadow: var(--shadow); font-family: var(--sans); font-size: 0.82rem; line-height: 1.4;
+  cursor: pointer; transition: top 0.15s ease, box-shadow 0.15s ease; }
+.rail-card p { margin: 0; }
+.rail-card .c-body { margin-top: 0.2rem !important; display: -webkit-box; overflow: hidden; -webkit-line-clamp: 4; -webkit-box-orient: vertical; font-size: 0.9rem; }
+.rail-card.open { z-index: 3; cursor: default; }
+.rail-card.open .c-thread { margin: 0; padding: 0; border: 0; }
+.rail-card.open .c-body { display: block; overflow: visible; }
+.rail-card.hot, .rail-card.open { border-color: var(--comment); box-shadow: 0 0 0 2px var(--comment-soft), var(--shadow); }
+.rail-card:focus-visible { outline: 2px solid var(--comment); outline-offset: 2px; }
+.rail-replies { margin-top: 0.25rem !important; color: var(--muted); font-size: 0.78rem; }
+.comment-lines { position: absolute; top: 0; left: 0; z-index: 1; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.comment-lines path { fill: none; stroke: var(--comment); stroke-width: 1.3; stroke-dasharray: 2 4; stroke-linecap: round; opacity: 0.5; }
+.comment-lines circle { fill: var(--comment); opacity: 0.5; }
+.comment-lines .hot { opacity: 1; }
+.comment-lines path.hot { stroke-width: 1.7; }
+.doc mark.c-comment.hot { background: color-mix(in srgb, var(--comment) 28%, transparent); }
+
 /* Open comments, below the suggestions on Suggest Edits. */
 .comments-list { margin: 1.4rem 0 1rem; }
 .comment-card { margin: 0 0 0.6rem; padding: 0.7rem 0.9rem; border: 1px solid var(--rule); border-left: 3px solid var(--comment); border-radius: 0 10px 10px 0; background: var(--bg); }

@@ -1525,6 +1525,7 @@
   // ---- Saving your changes as you go ----
 
   function afterChange() {
+    relayoutRail();
     tidyMarks();
     suggest.lastGood = $("#doc").innerHTML;
     suggest.lastEdit = Date.now();
@@ -2169,9 +2170,130 @@
       range.setStart(index.chars[a].node, index.chars[a].offset);
       range.setEnd(index.chars[b - 1].node, index.chars[b - 1].offset + 1);
       wrapRange(range, () => h("mark", { class: `c-mark c-${c.kind}${c.pending ? " c-pending" : ""}`, "data-cid": c.id,
-        title: c.kind === "highlight" ? `Highlighted by ${c.author.email}` : `Comment by ${c.author.email}. Click to read it.` }));
+        title: c.kind === "highlight" ? `Highlighted by ${c.author.email}` : `${c.author.email}: ${cut(c.body, 240)}` }));
+    }
+    renderRail();
+  }
+
+  // ---- Comments in the margin ----
+  // On wide screens the open comments sit in the right margin, each beside the words (or the suggestion) it's on,
+  // joined to them by a dotted line, as in a word processor. Clicking a comment, or its words, opens the whole
+  // conversation there, with Reply and Resolve. On narrow screens there's no margin: hovering over commented words
+  // shows the comment, and clicking them opens it in a box over the text.
+
+  const railWide = matchMedia("(min-width: 1100px)");
+  const SVG = "http://www.w3.org/2000/svg";
+  let railFrame = 0;
+  const relayoutRail = () => { cancelAnimationFrame(railFrame); railFrame = requestAnimationFrame(layoutRail); };
+
+  function anchorOf(c) {
+    if (c.suggestion) {
+      return $(`#doc [data-proposal="${CSS.escape(c.suggestion)}"]`) || $(`#doc [data-sid="${CSS.escape(c.suggestion.replace(/^sb-/, ""))}"]`);
+    }
+    return $(`#doc mark[data-cid="${CSS.escape(c.id)}"]`);
+  }
+
+  function renderRail() {
+    if (mode !== "drafter") return;
+    let rail = $(".comment-rail");
+    if (!rail) {
+      rail = h("aside", { class: "comment-rail", "aria-label": "Comments" });
+      $(".layout").append(rail);
+      rail.addEventListener("click", (event) => {
+        const card = event.target.closest(".rail-card");
+        if (!card || card.classList.contains("open") || event.target.closest("button, textarea, a")) return;
+        openRailCard(card.dataset.cid);
+      });
+      for (const [type, on] of [["mouseover", true], ["mouseout", false], ["focusin", true], ["focusout", false]]) {
+        rail.addEventListener(type, (event) => { const card = event.target.closest(".rail-card"); if (card) markHot(card.dataset.cid, on); });
+        $("#doc").addEventListener(type, (event) => { const mark = event.target.closest?.("mark.c-comment"); if (mark) markHot(mark.dataset.cid, on); });
+      }
+    }
+    const typing = document.activeElement?.closest?.(".comment-rail") && document.activeElement.matches("textarea") && document.activeElement.value.trim();
+    if (!typing) {
+      const roots = suggest.commentsReady ? allComments().filter((c) => c.kind === "comment" && !c.parent && !c.resolved) : [];
+      rail.replaceChildren(...roots.map((c) => {
+        const replies = allComments().filter((x) => x.parent === c.id);
+        const open = rail.dataset.open === c.id;
+        return h("article", { class: `rail-card${open ? " open" : ""}${c.pending ? " c-pending" : ""}`, "data-cid": c.id, tabindex: "0",
+          "aria-label": `Comment by ${c.author.email}` },
+          ...(open ? [threadView(c), h("p", { class: "c-actions" }, h("button", { type: "button", class: "linklike", text: "Close",
+            onclick: () => { delete rail.dataset.open; renderRail(); } }))]
+            : [h("p", { class: "c-head" }, h("strong", { text: c.author.email }), ` · ${formatDate(c.created)}${c.pending ? " · not sent yet" : ""}`),
+              h("p", { class: "c-body", text: c.body }),
+              replies.length ? h("p", { class: "rail-replies", text: plural(replies.length, "reply", "replies") }) : null]));
+      }));
+    }
+    relayoutRail();
+  }
+
+  function openRailCard(id) {
+    const rail = $(".comment-rail");
+    if (!rail) return;
+    rail.dataset.open = id;  // opened, not focused: clicking commented words to edit them keeps the cursor there
+    renderRail();
+  }
+
+  // Whether the margin is showing comments now (a wide screen, past the sign-in).
+  const railShowing = () => mode === "drafter" && railWide.matches && !html.classList.contains("gated") && !!$(".comment-rail");
+
+  function markHot(id, on) {
+    for (const el of $$(`#doc mark[data-cid="${CSS.escape(id)}"], .rail-card[data-cid="${CSS.escape(id)}"], .comment-lines [data-cid="${CSS.escape(id)}"]`)) {
+      el.classList.toggle("hot", on);
     }
   }
+
+  // Each comment as near its words as it can be without overlapping the one above, and a dotted line from the words'
+  // line, across the margin, to it.
+  function layoutRail() {
+    if (mode !== "drafter") return;
+    const rail = $(".comment-rail");
+    let lines = $(".comment-lines");
+    if (!lines) {
+      lines = document.createElementNS(SVG, "svg");
+      lines.setAttribute("class", "comment-lines");
+      lines.setAttribute("aria-hidden", "true");
+      document.body.append(lines);
+    }
+    lines.replaceChildren();
+    if (!rail || !railShowing()) return;
+    const byId = new Map(allComments().map((c) => [c.id, c]));
+    const railBox = rail.getBoundingClientRect(), railTop = railBox.top + scrollY;
+    const placed = [];
+    for (const card of rail.children) {
+      const c = byId.get(card.dataset.cid);
+      const rect = c && anchorOf(c)?.getClientRects()[0];
+      card.hidden = !rect;
+      if (rect) placed.push({ card, rect, top: rect.top + scrollY - railTop });
+    }
+    placed.sort((a, b) => a.top - b.top);
+    let bottom = -Infinity;
+    for (const p of placed) {
+      p.y = Math.max(p.top - 8, bottom + 10);
+      p.card.style.top = `${p.y}px`;
+      bottom = p.y + p.card.offsetHeight;
+    }
+    rail.style.height = `${Math.max(0, bottom)}px`;
+    const doc = $("#doc").getBoundingClientRect(), file = $(".file").getBoundingClientRect();
+    const textRight = doc.right - parseFloat(getComputedStyle($("#doc")).paddingRight) + scrollX;
+    const bend = (file.right + railBox.left) / 2 + scrollX;
+    for (const p of placed) {
+      const y1 = p.rect.top + scrollY + p.rect.height / 2, y2 = railTop + p.y + 16;
+      const path = document.createElementNS(SVG, "path");
+      path.setAttribute("d", `M${textRight + 6},${y1} H${bend} L${railBox.left + scrollX},${y2}`);
+      path.setAttribute("data-cid", p.card.dataset.cid);
+      const dot = document.createElementNS(SVG, "circle");
+      dot.setAttribute("cx", textRight + 6);
+      dot.setAttribute("cy", y1);
+      dot.setAttribute("r", 2.5);
+      dot.setAttribute("data-cid", p.card.dataset.cid);
+      if (p.card.classList.contains("hot") || p.card.classList.contains("open")) { path.classList.add("hot"); dot.classList.add("hot"); }
+      lines.append(path, dot);
+    }
+  }
+  railWide.addEventListener?.("change", () => { renderRail(); });
+  addEventListener("resize", relayoutRail);
+  document.fonts?.ready.then(relayoutRail);
 
   // The selected words as everyone sees them, with the words around them, so a comment finds its place again
   // (the same way a suggestion does), or null if they can't be told apart from words elsewhere.
@@ -2348,8 +2470,13 @@
       if (!badge.dataset.under.startsWith("mine:")) ids.add(badge.dataset.under);
       badge.dataset.also.split(" ").forEach((id) => ids.add(id));
     }
-    const commentIds = [];
+    let commentIds = [];
     for (let el = target; el && el !== doc; el = el.parentElement) if (el.matches("mark.c-mark")) commentIds.push(el.dataset.cid);
+    if (railShowing()) {  // comments are in the margin: open the innermost one there; highlights still open the box
+      const inMargin = commentIds.filter((id) => $(`.rail-card[data-cid="${CSS.escape(id)}"]`));
+      if (inMargin.length) openRailCard(inMargin[0]);
+      commentIds = commentIds.filter((id) => !inMargin.includes(id));
+    }
     if (!ids.size && !commentIds.length) return;
     openSpot([...ids], commentIds, (badge || mark || target).getBoundingClientRect());
   }
@@ -2360,6 +2487,10 @@
     const on = root.suggestion ? currentProposals().find((p) => p.id === root.suggestion) : null;
     const placed = root.exact && suggest.commentSpots?.get(root.id);
     const show = () => {
+      if (railShowing() && $(`.rail-card[data-cid="${CSS.escape(root.id)}"]:not([hidden])`)) {
+        anchorOf(root)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return openRailCard(root.id);
+      }
       const mark = root.suggestion ? $(`#doc [data-proposal="${CSS.escape(root.suggestion)}"]`) : $(`#doc mark[data-cid="${CSS.escape(root.id)}"]`);
       if (!mark) return openSpot(root.suggestion ? [root.suggestion] : [], [root.id], card.getBoundingClientRect());
       mark.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2715,6 +2846,7 @@
     });
 
     document.addEventListener("click", onDocClick);
+    if ("ResizeObserver" in window) new ResizeObserver(relayoutRail).observe($("#main"));
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") { $(".spot-pop")?.remove(); $(".sel-tools")?.remove(); }
       if (event.key === "Enter" && event.target.matches?.("[data-proposal], .also-here")) onDocClick(event);
