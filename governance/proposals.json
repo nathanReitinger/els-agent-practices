@@ -540,6 +540,38 @@
       "version": "0.0.15",
       "fingerprint": "c99c7c9b5be5d44f0c72e8074892d20f6f7f5ca765cd0258ad48067f81d52239",
       "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -63 +63 @@\n-- When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you think I hoped for the opposite result.\n+- When I ask you to measure, code, or critique, give a neutral answer; do not give an answer you think I hoped for."
+    },
+    {
+      "id": "sb-49ace9b8-6301-4a3b-b709-158519f9702f",
+      "status": "open",
+      "based_on": "0.0.16",
+      "issue": null,
+      "kind": "rule",
+      "old": "latest log entries if they exist.",
+      "new": "When you do this orientation, ask me in a",
+      "before": "sion log, the codebook, and the ",
+      "after": "\nDo not assume a folder layout, ",
+      "reason": "",
+      "problems": [],
+      "proposer": {
+        "name": "nathan.reitinger@gmail.com",
+        "email": "nathan.reitinger@gmail.com"
+      },
+      "created": "2026-10-04T01:40:52.635304+00:00",
+      "updated": "2026-10-04T01:40:52.635304+00:00",
+      "link": "https://nathanreitinger.github.io/els-agent-practices/draft/#proposals",
+      "note": "",
+      "section": "Getting oriented",
+      "preview": {
+        "before": [],
+        "after": [
+          "When you do this orientation, ask me in a"
+        ],
+        "context": "At the start of every session, learn how this project is organized: where the original data, scripts, outputs, analysis plan, codebook, and logs live. Read the plan, the decision log, the codebook, and the latest log entries if they exist."
+      },
+      "votes": [],
+      "support": 0,
+      "stale_votes": 0
     }
   ]
 }
