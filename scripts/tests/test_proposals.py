@@ -95,6 +95,19 @@ class VotesTest(unittest.TestCase):
         votes, _, _ = count_votes(self.record, comments, self.gov, [site_vote("p", LEAD_EMAIL, "approve")])
         self.assertEqual([(v.vote, v.via) for v in votes], [("reject", "GitHub")])
 
+    def test_a_vote_cast_before_someone_became_a_maintainer_is_a_readers(self):
+        data = json.loads(json.dumps(MAINTAINERS))
+        data["maintainers"].append({"name": "New", "role": "maintainer", "email": "new@example.org", "since": "2026-10-03T10:30:00Z"})
+        gov = Governance(data)
+        votes, support, _ = count_votes(self.record, [], gov, [site_vote("p", "new@example.org", "approve", at="2026-10-03T10:20:00+00:00")])
+        self.assertEqual((votes, support), ([], 1))
+        votes, _, _ = count_votes(self.record, [], gov, [site_vote("p", "new@example.org", "approve", at="2026-10-03T10:40:00+00:00")])
+        self.assertEqual([v.maintainer.name for v in votes], ["New"])
+        data["maintainers"][-1]["since"] = "2026-10-04"  # a date alone: from the start of that day
+        votes, support, _ = count_votes(self.record, [], Governance(data),
+                                        [site_vote("p", "new@example.org", "approve", at="2026-10-03T23:59:00+00:00")])
+        self.assertEqual((votes, support), ([], 1))
+
     def test_votes_in_github_comments(self):
         cases = {"Approve": "approve", "approved!": "approve", "/approve": "approve", "**Approve.** Good catch.": "approve",
                  "Reject — this conflicts with rule 2": "reject", "/reject": "reject", "rejects": "reject",
@@ -180,6 +193,63 @@ class RunTest(unittest.TestCase):
 
     def manifest(self):
         return json.loads((self.repo / "versions.json").read_text())
+
+    def test_the_lead_maintainer_adds_and_removes_maintainers(self):
+        """Requests from the Maintainers page: a lead maintainer's are carried out in governance/maintainers.json, one
+        commit each, and every request is handled once."""
+        def request(id, action, email, name="", by=LEAD_EMAIL, created="2026-10-03T11:00:00+00:00", github=""):
+            return {"id": id, "requested_by": f"id-{by}", "requested_email": by, "action": action, "name": name,
+                    "email": email, "github": github, "created": created}
+
+        listed = lambda: {m["email"]: m for m in json.loads((self.repo / "governance" / "maintainers.json").read_text())["maintainers"]}
+        handled = lambda: {r["id"]: r for r in json.loads((self.repo / "governance" / "proposals.json").read_text())["maintainer_requests"]}
+        site = {"suggestions": [suggestion("p1", "replace", "estimated cost", "would cost money. Give me the ", " first.",
+                                           "estimated cost and how it's billed")],
+                "votes": [site_vote("sb-p1", "jane@example.edu", "approve", at="2026-10-03T11:30:00+00:00")],  # before she's a maintainer
+                "maintainer_requests": [
+                    request("r1", "add", "jane@example.edu", "Jane Doe", github="janedoe"),
+                    request("r2", "add", "mallory@example.org", "Mallory", by="mallory@example.org"),  # not a lead maintainer
+                    request("r3", "remove", LEAD_EMAIL.upper(), "Nathan Reitinger"),  # a lead maintainer isn't removed this way
+                    request("r4", "add", "old@example.org", "Old", created="2026-09-01T00:00:00+00:00"),  # too old
+                    request("r5", "add", "not-an-address", "Bad"),
+                    request("r6", "add", "jane@example.edu", "Jane Again"),  # already a maintainer by then
+                ]}
+        self.robot(site)
+        self.assertEqual(set(listed()), {LEAD_EMAIL, "jane@example.edu"})
+        self.assertEqual(listed()["jane@example.edu"], {"name": "Jane Doe", "role": "maintainer", "email": "jane@example.edu",
+                                                        "github": "janedoe", "since": "2026-10-03T12:00:00Z"})
+        commit = self.git("log", "-1", "--format=%an <%ae>%n%s%n%b", "--", "governance/maintainers.json")
+        self.assertIn(f"Nathan Reitinger <{LEAD_EMAIL}>\nMaintainers: add Jane Doe (jane@example.edu)", commit)
+        self.assertIn("Maintainer-request: r1", commit)
+        outcomes = {id: r["outcome"] for id, r in handled().items()}
+        self.assertEqual(outcomes["r1"], "added")
+        self.assertNotIn("r2", outcomes)  # someone else's request is ignored, and not recorded
+        self.assertNotIn("mallory@example.org", listed())
+        self.assertTrue(outcomes["r3"].startswith("not done: a lead maintainer"), outcomes["r3"])
+        self.assertTrue(outcomes["r4"].startswith("not done: more than a week old"), outcomes["r4"])
+        self.assertTrue(outcomes["r5"].startswith("not done: not a valid"), outcomes["r5"])
+        self.assertEqual(outcomes["r6"], "already a maintainer")
+        # Her approval from before she was a maintainer doesn't adopt the suggestion.
+        self.assertEqual(self.ledger()["sb-p1"]["status"], "open")
+        self.assertEqual(self.ledger()["sb-p1"]["support"], 1)
+
+        # Each request is handled once: run again, and nothing changes.
+        head = self.git("rev-parse", "HEAD")
+        self.robot(site, now="2026-10-03T12:05:00Z")
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+
+        # An approval she casts as a maintainer counts, and the version says who approved it.
+        site["votes"].append(site_vote("sb-p1", "jane@example.edu", "approve", at="2026-10-03T12:06:00+00:00"))
+        self.robot(site, now="2026-10-03T12:10:00Z")
+        self.assertEqual(self.ledger()["sb-p1"]["status"], "adopted")
+        self.assertIn("Approved-by: Jane Doe (Suggest Edits)", self.git("log", "-1", "--format=%B", "v0.0.3"))
+
+        # The lead maintainer removes her.
+        site["maintainer_requests"].append(request("r7", "remove", "jane@example.edu", "Jane Doe", created="2026-10-03T12:15:00+00:00"))
+        self.robot(site, now="2026-10-03T12:20:00Z")
+        self.assertEqual(set(listed()), {LEAD_EMAIL})
+        self.assertEqual(handled()["r7"]["outcome"], "removed")
+        self.assertIn("Maintainers: remove Jane Doe (jane@example.edu)", self.git("log", "-1", "--format=%s", "--", "governance/maintainers.json"))
 
     def site(self):
         """Suggestions and votes covering every outcome."""
@@ -432,6 +502,7 @@ class FetchSiteTest(unittest.TestCase):
         import http.server
         import threading
         self.requests = []
+        self.missing = set()  # tables the stand-in doesn't have, as a database set up before they were added
         rows = [{"id": str(i), "created": f"{i:06d}"} for i in range(1500)]
         test = self
 
@@ -444,7 +515,17 @@ class FetchSiteTest(unittest.TestCase):
                 url = urlparse(self.path)
                 query = {k: v[0] for k, v in parse_qs(url.query).items()}
                 test.requests.append((url.path, query, {k.lower(): v for k, v in self.headers.items()}))
-                table = rows if url.path == "/rest/v1/suggestions" else [{"suggestion": "sb-1", "vote": "approve"}]
+                if url.path.rsplit("/", 1)[-1] in test.missing:
+                    body = json.dumps({"code": "PGRST205", "message": "Could not find the table"}).encode()
+                    self.send_response(404)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                table = (rows if url.path == "/rest/v1/suggestions"
+                         else [{"id": "r1", "action": "add"}] if url.path == "/rest/v1/maintainer_requests"
+                         else [{"suggestion": "sb-1", "vote": "approve"}])
                 offset, limit = int(query.get("offset", 0)), int(query.get("limit", 1000))
                 body = json.dumps(table[offset:offset + limit]).encode()
                 self.send_response(200)
@@ -465,13 +546,20 @@ class FetchSiteTest(unittest.TestCase):
         data = fetch_site(self.url + "/", "sb_publishable_test")
         self.assertEqual(len(data["suggestions"]), 1500)
         self.assertEqual(data["votes"], [{"suggestion": "sb-1", "vote": "approve"}])
+        self.assertEqual(data["maintainer_requests"], [{"id": "r1", "action": "add"}])
         paths = [(path, query.get("offset")) for path, query, _ in self.requests]
-        self.assertEqual(paths, [("/rest/v1/suggestions", "0"), ("/rest/v1/suggestions", "1000"), ("/rest/v1/votes", "0")])
+        self.assertEqual(paths, [("/rest/v1/suggestions", "0"), ("/rest/v1/suggestions", "1000"), ("/rest/v1/votes", "0"),
+                                 ("/rest/v1/maintainer_requests", "0")])
         headers = self.requests[0][2]
         self.assertEqual(headers.get("apikey"), "sb_publishable_test")
         self.assertNotIn("authorization", headers)  # a publishable key isn't a JWT
         fetch_site(self.url, "eyJhbGciOiJIUzI1NiJ9.e30.x")
         self.assertEqual(self.requests[-1][2].get("authorization"), "Bearer eyJhbGciOiJIUzI1NiJ9.e30.x")
+
+    def test_a_database_without_the_maintainer_requests_table(self):
+        self.missing = {"maintainer_requests"}
+        data = fetch_site(self.url, "sb_publishable_test")
+        self.assertEqual((len(data["suggestions"]), data["maintainer_requests"]), (1500, []))
 
 
 class FakeGitHub:
@@ -530,7 +618,8 @@ class FakeGitHub:
                 if parts == ["issues"]:
                     number = len(fake.issues) + 1
                     fake.issues[number] = {"number": number, "title": data["title"], "body": data["body"],
-                                           "state": "open", "labels": [{"name": n} for n in data.get("labels", [])]}
+                                           "state": "open", "labels": [{"name": n} for n in data.get("labels", [])],
+                                           "user": {"login": "github-actions[bot]", "type": "Bot"}}
                     return self.reply(201, fake.issues[number])
                 if len(parts) == 3 and parts[2] == "comments":
                     fake.add_comment(int(parts[1]), "github-actions[bot]", data["body"], bot=True)
@@ -631,19 +720,33 @@ class GitHubRunTest(RunTest):
         self.assertEqual(self.origin_git("rev-parse", "main"), head)
         self.assertEqual(len([c for c in self.github.comments[number] if c["user"]["type"] == "Bot"]), 1)
 
-    def test_an_issue_opened_by_hand_counts(self):
+    def test_an_issue_opened_by_someone_else_doesnt_count(self):
+        """Only the robot's own issues stand for proposals: one anyone else opens with a proposal's marker, or with
+        the marker hidden in its text, gets no votes and no updates, and the robot opens its own."""
         self.github.issues[1] = {"number": 1, "title": "Proposal", "state": "open", "labels": [],
-                                 "body": "Opened by hand.\n\n<!-- proposal:sb-p2 -->"}
+                                 "body": "Opened by hand.\n\n<!-- proposal:sb-p2 -->", "user": {"login": "mallory", "type": "User"}}
         self.github.add_comment(1, "nathanreitinger", "/approve")
         self.robot_online(self.some("p2"))
         ledger = self.ledger()
-        self.assertEqual((ledger["sb-p2"]["issue"], ledger["sb-p2"]["status"], ledger["sb-p2"]["version"]), (1, "adopted", "0.0.3"))
-        self.assertEqual(len(self.github.issues), 1)  # no second issue for the same suggestion
-        self.assertEqual(self.github.issues[1]["state"], "closed")
+        self.assertEqual(ledger["sb-p2"]["status"], "open")  # the vote on the stand-in issue didn't count
+        self.assertEqual(ledger["sb-p2"]["issue"], 2)
+        self.assertEqual(self.github.issues[1]["state"], "open")  # left alone
+        self.assertEqual(self.github.issues[2]["user"]["login"], "github-actions[bot]")
+
+    def test_the_record_and_issues_link_to_the_site_not_the_data(self):
+        """The site's address and the database's rows are kept apart: every link is the address."""
+        self.robot_online(self.some("p2"))
+        site = self.manifest()["site"]
+        record = self.ledger()["sb-p2"]
+        self.assertEqual(record["link"], f"{site}draft/#proposals")
+        body = self.github.issues[record["issue"]]["body"]
+        self.assertIn(f"]({site}draft/#proposals)", body)
+        self.assertNotIn("'suggestions'", body)
+        self.assertTrue(body.rstrip().endswith("<!-- proposal:sb-p2 -->"))
 
     def test_the_robot_labels_issues_it_finds_unlabeled(self):
         self.github.issues[1] = {"number": 1, "title": "Proposal", "state": "open", "labels": [],
-                                 "body": "Opened by hand.\n\n<!-- proposal:sb-p2 -->"}
+                                 "body": "Opened before labels.\n\n<!-- proposal:sb-p2 -->", "user": {"login": "github-actions[bot]", "type": "Bot"}}
         self.robot_online(self.some("p2"))
         self.assertEqual(self.github.issues[1]["labels"], [{"name": "proposal"}])
         self.assertIn("**Maintainers:** approve or disapprove it on [Suggest Edits]", self.github.issues[1]["body"])

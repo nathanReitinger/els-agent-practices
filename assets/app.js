@@ -567,12 +567,14 @@
     };
   }
 
-  function maintainerList(governance) {
+  // The maintainers; with `remove`, a lead maintainer's way to remove each one who isn't a lead maintainer.
+  function maintainerList(governance, remove = null) {
     const how = (m) => [m.email && `signs in as ${m.email}`, m.github && `${m.github} on GitHub`].filter(Boolean).join(", ");
     return h("ul", { class: "member-list" }, ...(governance?.maintainers || []).map((m) => h("li", {},
       h("strong", { text: m.name }),
       m.role && m.role !== "maintainer" ? h("span", { class: "badge badge-soft", text: m.role }) : null,
-      h("span", { class: "muted", text: ` · ${how(m)}${m.since ? ` · since ${formatDate(m.since)}` : ""}` }))));
+      h("span", { class: "muted", text: ` · ${how(m)}${m.since ? ` · since ${formatDate(m.since)}` : ""}` }),
+      remove && m.email && !/lead/i.test(m.role || "") ? remove(m) : null)));
   }
 
   // On Suggest Edits: who decides, and where to read more.
@@ -1165,6 +1167,9 @@
         return row.id;
       },
       remove: async (docId) => must(await client.from("suggestions").delete().eq("id", docId)),
+      // Requests to add or remove a maintainer (the robot carries out a lead maintainer's).
+      maintainerRequests: async () => must(await client.from("maintainer_requests").select("*").order("created", { ascending: true })),
+      requestMaintainerChange: async (row) => must(await client.from("maintainer_requests").insert(row)),
       // The AI check of new rules (supabase/robot.sql): ask, then look up the answer; and keep it with the suggestion.
       startRuleCheck: async (request) => must(await client.rpc("start_rule_check", { request })),
       ruleCheckResult: async (id) => must(await client.rpc("rule_check_result", { check_id: id })),
@@ -1222,6 +1227,12 @@
       },
       async remove(docId) { write(SUGGESTIONS, read(SUGGESTIONS, []).filter((s) => s.docId !== docId)); emit(); },
       async startRuleCheck() { return { unavailable: "off" }; },  // no AI check here: the word check stands in
+      async maintainerRequests() { return read("els-local-maintainer-requests", []); },
+      async requestMaintainerChange(row) {
+        const list = read("els-local-maintainer-requests", []);
+        list.push({ ...row, id: crypto.randomUUID(), requested_email: me()?.email || "", created: new Date().toISOString() });
+        write("els-local-maintainer-requests", list);
+      },
       async vote(proposalId, vote, step = "patch") {
         const user = me();
         const votes = read(VOTES, []).filter((v) => !(v.suggestion === proposalId && v.voter_id === user.id));
@@ -1328,10 +1339,9 @@
     return last;
   }
 
-  // Draw one suggestion: someone else's in orange (with added words drawn by CSS, so the text itself doesn't
-  // change), or one of yours in blue, as marks you can keep editing.
-  function drawSuggestion(s, mine, taken) {
-    const index = sourceIndex();
+  // Where a suggestion goes in the text, found in `index`: { s, mine, a, b } to draw it there, { under } when a change
+  // to the same words is drawn there already (it's shown with that one), or false when it no longer fits the text.
+  function placeSuggestion(s, mine, taken, index) {
     const found = locateQuote(index, s.exact ?? s.old ?? "", s.prefix ?? s.before ?? "", s.suffix ?? s.after ?? "");
     if (!found) return false;
     const [a, b] = found;
@@ -1343,6 +1353,22 @@
     const first = blockOf(index.chars[a].node), block = blockOf(index.chars[b - 1].node);
     if (!first || !block || frozen(first) || frozen(block) || (mine && first !== block)) return false;
     if (!additive) taken.push([a, b, mine ? `mine:${s.docId}` : s.id]);
+    return { s, mine, a, b };
+  }
+
+  // Draw one suggestion: someone else's in orange (with added words drawn by CSS, so the text itself doesn't
+  // change), or one of yours in blue, as marks you can keep editing.
+  function drawSuggestion(s, mine, taken) {
+    const index = sourceIndex();
+    const placed = placeSuggestion(s, mine, taken, index);
+    if (!placed || placed.under) return placed;
+    drawPlaced(placed, index);
+    return true;
+  }
+
+  // Draw a placed suggestion, with an index of the text that's current from its first word to its last.
+  function drawPlaced({ s, mine, a, b }, index) {
+    const block = blockOf(index.chars[b - 1].node);
     const who = s.author?.email || s.proposer?.email || s.proposer?.name || "someone";
     const range = document.createRange();
     range.setStart(index.chars[a].node, index.chars[a].offset);
@@ -1376,8 +1402,22 @@
           h("div", { class: "ts-title", text: title }), ...rules.map((rule) => h("div", { class: "ts-rule", text: rule }))));
       }
     }
-    return true;
   }
+
+  // Draw many things into the text at once. Indexing the text afresh for each would take time in proportion to the
+  // text's length, for each one; instead it's indexed once, and they're drawn from the end of the text backwards, so
+  // drawing one doesn't move the places of those still to draw. Each has `from`, the first place where drawing it
+  // splits the text, and `to`, the last place it reads; when it reads a place an earlier one split, the text is
+  // indexed again.
+  function drawBackwards(items, index = sourceIndex()) {
+    let low = Infinity;
+    for (const item of [...items].sort((x, y) => (y.from === x.from ? 0 : y.from - x.from))) {
+      if (item.to >= low) { index = sourceIndex(); low = Infinity; }
+      item.draw(index);
+      low = Math.min(low, item.from);
+    }
+  }
+  const spanOf = ({ s, a, b }) => ({ from: s.kind === "delete" || s.kind === "replace" ? a : s.kind === "insert" ? b : Infinity, to: b - 1 });
 
   function clearOthers() {
     const doc = $("#doc");
@@ -1408,10 +1448,13 @@
     }
     suggest.others = othersOpen();
     suggest.alsoHere = new Map();
+    const placed = [];
     for (const s of suggest.others) {
-      const drawn = drawSuggestion(s, false, taken);
-      if (drawn?.under) suggest.alsoHere.set(drawn.under, [...(suggest.alsoHere.get(drawn.under) || []), s.id]);
+      const where = placeSuggestion(s, false, taken, index);
+      if (where?.under) suggest.alsoHere.set(where.under, [...(suggest.alsoHere.get(where.under) || []), s.id]);
+      else if (where) placed.push({ ...spanOf(where), draw: (fresh) => drawPlaced(where, fresh) });
     }
+    drawBackwards(placed, index);
     addAlsoHereBadges();
   }
 
@@ -1462,6 +1505,7 @@
     }
     drawOthers();
     drawComments();
+    suggest.marksKey = marksKey();
     addSectionControls();
     setEditable(suggest.editing);
     suggest.lastGood = doc.innerHTML;
@@ -1501,12 +1545,20 @@
     }
     const changed = suggest.redraw || decisionsKey(pendingDecisions()) !== suggest.decidedKey || mineChangedElsewhere();
     if (suggest.me && !suggest.dirty && !suggest.busy && changed) drawEverything();
-    else keepingCaret(() => { drawOthers(); drawComments(); });
+    else if (marksKey() !== suggest.marksKey) {
+      keepingCaret(() => { drawOthers(); drawComments(); });
+      suggest.marksKey = marksKey();
+    }
     renderProposals();
     refreshSpot();
     updateBar();
     if (pendingDecisions().size) watchForPublication();
   }
+
+  // What other people's marks and the comments in the text are drawn from. While none of it changes, and you don't
+  // edit, they're right as they are, and aren't drawn again.
+  const marksKey = () => JSON.stringify([suggest.edits, othersOpen().map((s) => [s.id, s.kind, s.exact, s.prefix, s.suffix, s.new, s.author?.email]),
+    [...suggest.saved], suggest.commentsReady && allComments().map((c) => [c.id, c.kind, c.exact, c.prefix, c.suffix, c.resolved, c.pending, c.body])]);
 
   // Only a reader who has verified their email address can edit the text.
   function setEditable(on) {
@@ -1759,7 +1811,8 @@
     for (const v of suggest.votes) {
       if (v.suggestion !== p.id || !(toTime(v.at) >= since)) continue;
       const m = maintainers.find((x) => sameEmail(x.email, v.voter_email));
-      if (!m || (v.vote === "approve" && rules.maintainers_may_approve_their_own_proposals === false && sameEmail(m.email, proposer))) continue;
+      if (!m || (m.since && toTime(v.at) < toTime(m.since))) continue;  // not a maintainer's vote, or cast before they were one
+      if (v.vote === "approve" && rules.maintainers_may_approve_their_own_proposals === false && sameEmail(m.email, proposer)) continue;
       const known = latest.get(m.email.toLowerCase());
       if (!known || toTime(v.at) > toTime(known.at)) latest.set(m.email.toLowerCase(), v);
     }
@@ -1897,7 +1950,8 @@
     const approve = action("Approve", () => cast("approve"), "button small");
     const disapprove = action("Disapprove", () => cast("reject"), "button secondary small");
     if (p.status === "needs-fix") { approve.disabled = true; approve.title = "It needs a fix before it can be approved"; }
-    const current = mine && toTime(mine.at) >= (toTime(p.updated) || 0);
+    const me = (suggest.governance?.maintainers || []).find((m) => sameEmail(m.email, suggest.me.email));
+    const current = mine && toTime(mine.at) >= Math.max(toTime(p.updated) || 0, toTime(me?.since) || 0);
     if (current) say(mine.vote === "approve" ? "You approved it." : "You disapproved it.", "done");
     const buttons = h("p", { class: "vote-buttons" }, approve, " ", step, " ", disapprove);
     if (!["approved", "disapproved"].includes(p.status)) return h("div", { class: "vote" }, buttons, status);
@@ -2167,18 +2221,21 @@
     suggest.commentSpots = new Map();
     if (!suggest.commentsReady) return;
     const onWords = allComments().filter((c) => !c.parent && !c.suggestion && c.exact && !(c.kind === "comment" && c.resolved));
+    const index = sourceIndex(), placed = [];
     for (const c of onWords.sort(byCreated)) {
-      const index = sourceIndex();
       const found = locateQuote(index, c.exact, c.prefix, c.suffix);
       suggest.commentSpots.set(c.id, !!found);
       if (!found) continue;
       const [a, b] = found;
-      const range = document.createRange();
-      range.setStart(index.chars[a].node, index.chars[a].offset);
-      range.setEnd(index.chars[b - 1].node, index.chars[b - 1].offset + 1);
-      wrapRange(range, () => h("mark", { class: `c-mark c-${c.kind}${c.pending ? " c-pending" : ""}`, "data-cid": c.id,
-        title: c.kind === "highlight" ? `Highlighted by ${c.author.email}` : `${c.author.email}: ${cut(c.body, 240)}` }));
+      placed.push({ from: a, to: b - 1, draw: (fresh) => {
+        const range = document.createRange();
+        range.setStart(fresh.chars[a].node, fresh.chars[a].offset);
+        range.setEnd(fresh.chars[b - 1].node, fresh.chars[b - 1].offset + 1);
+        wrapRange(range, () => h("mark", { class: `c-mark c-${c.kind}${c.pending ? " c-pending" : ""}`, "data-cid": c.id,
+          title: c.kind === "highlight" ? `Highlighted by ${c.author.email}` : `${c.author.email}: ${cut(c.body, 240)}` }));
+      } });
     }
+    drawBackwards(placed, index);
     renderRail();
   }
 
@@ -2568,63 +2625,80 @@
     return squash(box.textContent.replaceAll(ZWSP, ""));
   }
 
-  // The rules to compare a change with: every rule in the text except `skip` (as it reads with your changes, or as
-  // published), and the new words of every open suggestion except `exceptId` (and, with your changes, except yours,
-  // which are in the text already).
-  function ruleCandidates({ skip = [], withMine = false, exceptId = null } = {}) {
+  // The rules to compare a change with: every rule in the text (as it reads with your changes, or as published),
+  // each with its block, and the new words of every open suggestion, each with its id (with your changes, not
+  // yours: they're in the text already).
+  function ruleCandidates(withMine = false) {
     const doc = $("#doc"), list = [];
     for (const block of leafBlocks(doc)) {
-      if (skip.includes(block) || block.matches("h1, h2, h3, h4, h5, h6, h1 + p") || frozen(block)) continue;
+      if (block.matches("h1, h2, h3, h4, h5, h6, h1 + p") || frozen(block)) continue;
       const text = blockText(block, withMine);
-      if (text.split(" ").length >= 4) list.push({ text, where: sectionOf(block, doc) || "the introduction" });
+      if (text.split(" ").length >= 4) list.push({ text, where: sectionOf(block, doc) || "the introduction", block });
     }
     for (const s of suggest.remote || []) {
-      if (s.id === exceptId || isIgnored(s) || !isOpen(s) || (withMine && isMine(s))) continue;
+      if (isIgnored(s) || !isOpen(s) || (withMine && isMine(s))) continue;
       const lines = s.kind === "section" ? String(s.new).split("\n").slice(1) : ["rule", "insert", "replace"].includes(s.kind) ? [s.new] : [];
       for (const line of lines) {
-        if (squash(line).split(" ").length >= 4) list.push({ text: squash(line), where: `a suggestion by ${isMine(s) ? "you" : s.author?.email || "someone"}` });
+        if (squash(line).split(" ").length >= 4) list.push({ text: squash(line), where: `a suggestion by ${isMine(s) ? "you" : s.author?.email || "someone"}`, id: s.id });
       }
     }
     return list;
   }
 
-  // The candidates most like `text`, by the words they share: [{ text, where, score, kind: "repeat" | "conflict" }],
-  // best first. A possible contradiction is one rule ruling out what the other starts with ("without a pilot"
-  // against "Pilot on 1 percent"), or a "never" or "do not" against a closely worded rule without one.
-  function similarRules(text, candidates) {
-    const mine = termsOf(text);
-    if (mine.length < 3) return [];
-    const docs = candidates.map((c) => termsOf(c.text));
+  // The candidates as a corpus for comparing words: each one's words, weighted by how rare they are, worked out once.
+  const normOf = (v) => Math.sqrt([...v.values()].reduce((sum, x) => sum + x * x, 0)) || 1;
+  function corpusOf(candidates) {
+    const termLists = candidates.map((c) => termsOf(c.text));
     const df = new Map();
-    for (const terms of [mine, ...docs]) for (const term of new Set(terms)) df.set(term, (df.get(term) || 0) + 1);
-    const n = docs.length + 1;
-    const vector = (terms) => {
+    for (const terms of termLists) for (const term of new Set(terms)) df.set(term, (df.get(term) || 0) + 1);
+    const n = candidates.length + 1;
+    const vectorOf = (terms) => {
       const v = new Map();
-      for (const term of terms) v.set(term, (v.get(term) || 0) + Math.log(1 + n / df.get(term)));
+      for (const term of terms) v.set(term, (v.get(term) || 0) + Math.log(1 + n / ((df.get(term) || 0) + 1)));
       return v;
     };
-    const norm = (v) => Math.sqrt([...v.values()].reduce((sum, x) => sum + x * x, 0)) || 1;
-    const a = vector(mine), na = norm(a);
+    const vectors = termLists.map(vectorOf);
+    return { candidates, vectors, norms: vectors.map(normOf), vectorOf };
+  }
+
+  // Work shared by every card in one drawing of the list (say, the corpus above): done once, and forgotten when
+  // the drawing is over.
+  let pass = null;
+  function onePass(key, make) {
+    if (!pass) { pass = new Map(); queueMicrotask(() => { pass = null; }); }
+    if (!pass.has(key)) pass.set(key, make());
+    return pass.get(key);
+  }
+
+  // The candidates (those `keep` keeps) most like `text`, by the words they share: [{ text, where, score, kind:
+  // "repeat" | "conflict" }], best first. A possible contradiction is one rule ruling out what the other starts with
+  // ("without a pilot" against "Pilot on 1 percent"), or a "never" or "do not" against a closely worded rule without one.
+  function similarRules(text, corpus, keep = () => true) {
+    const mine = termsOf(text);
+    if (mine.length < 3) return [];
+    const a = corpus.vectorOf(mine), na = normOf(a);
     const found = [];
-    candidates.forEach((c, i) => {
-      const b = vector(docs[i]);
+    corpus.candidates.forEach((c, i) => {
+      if (!keep(c)) return;
+      const b = corpus.vectors[i];
       let dot = 0;
       for (const [term, x] of a) dot += x * (b.get(term) || 0);
-      const score = dot / (na * norm(b));
+      const score = dot / (na * corpus.norms[i]);
+      if (score < 0.2) return;  // too little in common to repeat or contradict it
       const opposite = rulesOut(text, c.text) || rulesOut(c.text, text) || (startsNegative(text) !== startsNegative(c.text) && score >= 0.45);
-      if (opposite && score >= 0.2) found.push({ ...c, score, kind: "conflict" });
-      else if (!opposite && score >= 0.55) found.push({ ...c, score, kind: "repeat" });
+      if (opposite) found.push({ ...c, score, kind: "conflict" });
+      else if (score >= 0.55) found.push({ ...c, score, kind: "repeat" });
     });
     return found.sort((x, y) => y.score - x.score).slice(0, 3);
   }
 
   // The word check of one change: its new words against the other rules, and, when it changes a word like "never",
   // the rule as changed against rules it didn't seem to contradict before.
-  function wordCheck({ lines = [], before = "", after = "", logic = false }, candidates) {
-    const found = lines.flatMap((line) => similarRules(line, candidates));
+  function wordCheck({ lines = [], before = "", after = "", logic = false }, corpus, keep) {
+    const found = lines.flatMap((line) => similarRules(line, corpus, keep));
     if (logic && after) {
-      const known = new Set(similarRules(before, candidates).filter((m) => m.kind === "conflict").map((m) => m.text));
-      found.push(...similarRules(after, candidates).filter((m) => m.kind === "conflict" && !known.has(m.text)));
+      const known = new Set(similarRules(before, corpus, keep).filter((m) => m.kind === "conflict").map((m) => m.text));
+      found.push(...similarRules(after, corpus, keep).filter((m) => m.kind === "conflict" && !known.has(m.text)));
     }
     const seen = new Set();
     return found.sort((x, y) => y.score - x.score).filter((m) => !seen.has(m.text) && seen.add(m.text)).slice(0, 3);
@@ -2756,6 +2830,7 @@
     inconsistent: ["conflict", "Is inconsistent within itself"] };
   const modelName = (id) => (String(id).match(/^claude-([a-z]+)-(\d+)-(\d+)/) || []).slice(1).reduce((name, part, i) =>
     (i === 0 ? `Claude ${part[0].toUpperCase()}${part.slice(1)}` : `${name}${i === 1 ? " " : "."}${part}`), "") || "an AI model";
+  const aiName = (id) => (modelName(id) === "an AI model" ? "an AI model" : `${modelName(id)}, an AI model`);
 
   // After your changes are saved: a change that may repeat or contradict another rule gets a warning beside it,
   // once you've moved on from it, asking whether to keep it.
@@ -2784,8 +2859,8 @@
       if (asked?.status === "asking") continue;
       const byAI = asked?.status === "done";
       const found = byAI
-        ? (asked.result.findings || []).map((f) => ({ kind: AI_KINDS[f.kind]?.[0] || "conflict", label: AI_KINDS[f.kind]?.[1] || "", text: f.rule, where: f.where, explanation: f.explanation }))
-        : wordCheck(subject, ruleCandidates({ skip: subject.blocks, withMine: true }));
+        ? (asked.result.findings || []).map((f) => ({ kind: AI_KINDS[f.kind]?.[0] || "conflict", label: AI_KINDS[f.kind]?.[1] || "May repeat or contradict ", text: f.rule, where: f.where, explanation: f.explanation }))
+        : wordCheck(subject, corpusOf(ruleCandidates(true)), (c) => !subject.blocks.includes(c.block));
       if (!found.length) {
         suggest.checked.add(subject.signature);
         if (byAI) hint(`Checked by ${modelName(asked.model)}: your change doesn't repeat or contradict another rule.`);
@@ -2807,7 +2882,7 @@
         model ? h("p", {}, h("strong", { text: m.label }), m.text ? `“${cut(m.text, 220)}”${m.where ? ` (${m.where})` : ""}` : "")
           : h("p", {}, h("strong", { text: m.kind === "repeat" ? "Looks like " : "May contradict " }), `this rule in ${m.where}: “${cut(m.text, 180)}”`),
         m.explanation ? h("p", { class: "rule-why", text: m.explanation }) : null)),
-      h("p", { class: "muted", text: model ? `Checked by ${modelName(model)}, an AI model, which can be wrong. Do you still want to keep your change?`
+      h("p", { class: "muted", text: model ? `Checked by ${aiName(model)}, which can be wrong. Do you still want to keep your change?`
         : "This check compares words, not meaning, so it can be wrong. Do you still want to keep your change?" }),
       h("p", { class: "c-actions" },
         action("Keep it", done, "button small"), " ",
@@ -2826,14 +2901,14 @@
     }
     if (check?.verdict === "problem" && check.findings?.length) {
       return h("div", { class: "similar-note" }, ...check.findings.slice(0, 3).map((f) => h("p", {},
-        h("strong", { text: AI_KINDS[f.kind]?.[1] || "" }), f.rule ? `“${cut(f.rule, 140)}”${f.where ? ` (${f.where})` : ""}` : "",
+        h("strong", { text: AI_KINDS[f.kind]?.[1] || "May repeat or contradict " }), f.rule ? `“${cut(f.rule, 140)}”${f.where ? ` (${f.where})` : ""}` : "",
         f.explanation ? h("span", { class: "rule-why", text: ` ${f.explanation}` }) : null)),
-        h("p", { class: "muted", text: `Found by ${modelName(check.model)}, an AI model, which can be wrong.` }));
+        h("p", { class: "muted", text: `Found by ${aiName(check.model)}, which can be wrong.` }));
     }
     if (!["rule", "section", "insert", "replace"].includes(p.kind)) return null;
     let subject = { lines: p.kind === "section" ? String(p.new || "").split("\n").slice(1) : [p.new] }, skip = [];
     if (p.kind === "insert" || p.kind === "replace") {
-      const index = sourceIndex(), found = locateQuote(index, p.old || "", p.before || "", p.after || "");
+      const index = onePass("index", sourceIndex), found = locateQuote(index, p.old || "", p.before || "", p.after || "");
       const block = found && blockOf(index.chars[found[0]].node);
       if (!block) return null;
       const before = blockText(block, false);
@@ -2843,7 +2918,7 @@
       subject = { lines: added.length >= 3 && squash(p.new).split(" ").length >= 6 ? [p.new] : [], before, after, logic };
       skip = [block];
     }
-    const found = wordCheck(subject, ruleCandidates({ skip, exceptId: p.id }));
+    const found = wordCheck(subject, onePass("corpus", () => corpusOf(ruleCandidates())), (c) => !skip.includes(c.block) && c.id !== p.id);
     if (!found.length) return null;
     return h("div", { class: "similar-note" }, ...found.slice(0, 2).map((m) => h("p", {},
       h("strong", { text: m.kind === "repeat" ? "May repeat: " : "May contradict: " }), `“${cut(m.text, 120)}” (${m.where})`)));
@@ -3850,14 +3925,114 @@
 
   // ---------- Maintainers ----------
 
+  // ---- Adding and removing maintainers ----
+  // The lead maintainer, signed in (on Suggest Edits) with their listed address, adds and removes maintainers on
+  // this page. The page saves each request; the robot makes the change in governance/maintainers.json within a few
+  // minutes, in a commit under the lead maintainer's name, and keeps what came of it in governance/proposals.json.
+  // A new maintainer's votes count from the moment they're added. A lead maintainer is removed only by editing that file.
+  async function manageMaintainers(cfg, governance, listBox, box) {
+    const useLocal = isLocal && new URLSearchParams(location.search).get("backend") === "local";
+    let backend = null;
+    try {
+      backend = useLocal ? localBackend() : cfg.supabase?.url && cfg.supabase?.key ? await supabaseBackend(cfg.supabase) : null;
+    } catch { /* no sign-in here: the list is all there is */ }
+    if (!backend?.requestMaintainerChange) return;
+    let user = null, requests = [], ledger = null, timer = null;
+    const isLead = (who) => !!who && (governance?.maintainers || []).some((m) => sameEmail(m.email, who.email) && /lead/i.test(m.role || ""));
+    const load = async () => {
+      const [record, rows, list] = await Promise.all([loadRecord(cfg, LEDGER_PATH), backend.maintainerRequests().catch(() => []),
+        loadRecord(cfg, MAINTAINERS_PATH)]);
+      ledger = record;
+      requests = rows || [];
+      governance = list || governance;
+    };
+    const status = h("p", { class: "manage-status", "aria-live": "polite" });
+    const send = async (row) => {
+      status.textContent = "Saving…";
+      try {
+        await backend.requestMaintainerChange(row);
+        await load();
+        status.textContent = row.action === "add"
+          ? `Saved. The robot adds ${row.name} within a few minutes; their votes count from then.`
+          : `Saved. The robot removes ${row.name} within a few minutes.`;
+        render();
+        return true;
+      } catch (error) {
+        status.textContent = /PGRST205|42P01/.test(error.code || "")
+          ? "Not saved: the database doesn't have the newest supabase/schema.sql yet. It takes it within about ten minutes of a change on GitHub."
+          : `Not saved (${error.message}). Please try again.`;
+        return false;
+      }
+    };
+    // The form, made once, so what's typed in it stays while the page checks on the robot.
+    const name = h("input", { type: "text", class: "key-input manage-input", maxlength: "100", placeholder: "Name", "aria-label": "Their name" });
+    const email = h("input", { type: "email", class: "key-input manage-input", maxlength: "320", placeholder: "Email address they'll sign in with",
+      "aria-label": "The email address they'll sign in with" });
+    const github = h("input", { type: "text", class: "key-input manage-input", maxlength: "39", placeholder: "GitHub username (optional)",
+      "aria-label": "Their GitHub username (optional)" });
+    const add = action("Add", async () => {
+      const row = { action: "add", name: squash(name.value), email: email.value.trim().toLowerCase(), github: github.value.trim() };
+      const problem = !row.name ? "Give their name." : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email) ? "Give the email address they'll sign in with."
+        : row.github && !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(row.github) ? "That isn't a GitHub username (letters, numbers, and hyphens)."
+          : (governance?.maintainers || []).some((m) => sameEmail(m.email, row.email)) ? "They're a maintainer already." : "";
+      if (problem) { status.textContent = problem; return; }
+      if (await send(row)) { name.value = ""; email.value = ""; github.value = ""; }
+    }, "button small");
+    const removeControl = (m) => {
+      const ask = h("button", { type: "button", class: "linklike", text: "Remove" });
+      const confirm = h("span", { class: "manage-confirm", hidden: true }, ` Remove ${m.name} as a maintainer? `,
+        action("Remove", () => send({ action: "remove", name: m.name, email: m.email.toLowerCase(), github: "" }), "button small"), " ",
+        action("Cancel", () => { confirm.hidden = true; ask.hidden = false; }, "button secondary small"));
+      ask.addEventListener("click", () => { ask.hidden = true; confirm.hidden = false; });
+      return h("span", { class: "manage-remove" }, " · ", ask, confirm);
+    };
+    const done = (r) => ({
+      added: `Added ${r.name} (${r.email}) on ${formatDate(r.handled)}, as ${r.asked_by} asked.`,
+      removed: `Removed ${r.name || r.email} (${r.email}) on ${formatDate(r.handled)}, as ${r.asked_by} asked.`,
+      "already a maintainer": `${r.name || r.email} (${r.email}) was a maintainer already.`,
+      "not a maintainer": `${r.email} wasn't a maintainer.`,
+    })[r.outcome] || `Not done for ${r.name || r.email} (${r.email}): ${String(r.outcome || "").replace(/^not done: /, "")}.`;
+    function render() {
+      clearTimeout(timer);
+      const lead = isLead(user);
+      listBox.replaceChildren(maintainerList(governance, lead ? removeControl : null));
+      if (!lead) {
+        box.replaceChildren(h("p", { class: "muted" }, ...(user ? ["Only a lead maintainer can add or remove maintainers."]
+          : ["The lead maintainer adds and removes maintainers here, signed in on ", h("a", { href: at("draft/"), text: "Suggest Edits" }), "."])));
+        return;
+      }
+      const handled = new Set((ledger?.maintainer_requests || []).map((r) => r.id));
+      const waiting = requests.filter((r) => sameEmail(r.requested_email, user.email) && !handled.has(r.id) && Date.now() - toTime(r.created) < WEEK);
+      const recent = (ledger?.maintainer_requests || []).filter((r) => r.action).slice(-5).reverse();
+      box.replaceChildren(...[
+        h("h2", { text: "Add a maintainer" }),
+        h("p", { class: "muted", text: "They approve and disapprove suggestions on Suggest Edits, signed in with the email address you give here, and their votes count from the moment they're added. To remove a maintainer, choose Remove beside their name." }),
+        h("div", { class: "manage-row" }, name, email, github, add),
+        status,
+        waiting.length ? h("div", { class: "manage-list" }, h("p", {}, h("strong", { text: "Waiting for the robot" }), " (a few minutes)"),
+          h("ul", {}, ...waiting.map((r) => h("li", { text: `${r.action === "add" ? "Add" : "Remove"} ${r.name || r.email} (${r.email}), asked ${formatDate(r.created)}` })))) : null,
+        recent.length ? h("div", { class: "manage-list" }, h("p", {}, h("strong", { text: "Done" })),
+          h("ul", {}, ...recent.map((r) => h("li", { text: done(r) })))) : null].filter(Boolean));
+      if (waiting.length) timer = setTimeout(async () => { await load(); render(); }, 30000);
+    }
+    backend.onUser(async (who) => {
+      user = who;
+      await load();
+      render();
+    });
+  }
+
   async function showMaintainers(cfg) {
     $(".file").hidden = true;
     const governance = await loadRecord(cfg, MAINTAINERS_PATH);
     const rules = governance?.rules || {};
+    const listBox = h("div", {}, maintainerList(governance));
+    const manage = h("section", { class: "manage", id: "manage", "aria-label": "Add or remove maintainers" });
     $("#intro").replaceChildren(h("section", { class: "intro" },
       h("h1", { text: "Maintainers" }),
       h("p", { class: "lede", text: "The maintainers decide which suggested changes go into AGENTS.md." }),
-      maintainerList(governance)));
+      listBox, manage));
+    manageMaintainers(cfg, governance, listBox, manage);
     $("#after").replaceChildren(h("section", { class: "versions", id: "how" },
       h("details", { class: "how" },
         h("summary", {}, h("h2", { text: "What maintainers do" })),
@@ -3868,8 +4043,8 @@
           h("li", {}, h("strong", { text: "Approved: a new version. " }), `Within ${CHECK_EVERY} or so, the change is made and published as a new version, with its own number and fingerprint. The record says who suggested it and who approved it.`),
           h("li", {}, h("strong", { text: "Disapproved: set aside. " }), "It leaves the list and moves to the ",
             h("a", { href: at("declined/"), text: "Declined page" }), ", where it's kept for the record.")),
-        h("p", {}, "Maintainers suggest changes like anyone else, then approve them. The lead maintainer can also edit the text directly, and keeps this list in ",
-          external(MAINTAINERS_PATH, repoFile(cfg, MAINTAINERS_PATH)), ", where every change is public."),
+        h("p", {}, "Maintainers suggest changes like anyone else, then approve them. The lead maintainer can also edit the text directly, and adds and removes maintainers on this page; the list is kept in ",
+          external(MAINTAINERS_PATH, repoFile(cfg, MAINTAINERS_PATH)), ", where every change is public. A maintainer's votes count from the moment they're added."),
         h("p", { class: "muted" }, "To become a maintainer, ask the lead maintainer", cfg.community ? [", for example in the ",
           h("a", { href: at("join/"), text: "community's Google group" })] : "", ". The full rules are in ",
           external("GOVERNANCE.md", repoFile(cfg, "GOVERNANCE.md")), "."))));

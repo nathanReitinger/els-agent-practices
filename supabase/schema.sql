@@ -271,12 +271,63 @@ $$;
 revoke all on function public.resolve_comment(uuid, boolean) from public, anon;
 grant execute on function public.resolve_comment(uuid, boolean) to authenticated;
 
+-- ---------- Changes to the list of maintainers ----------
+-- The lead maintainer adds and removes maintainers on the site's Maintainers page. Each request is kept here, and
+-- the robot (scripts/proposals.py) carries out those made by a lead maintainer, in governance/maintainers.json,
+-- where every change is kept in the history. Anyone else's requests are ignored. Anyone may read them, as anyone
+-- may read the maintainers' addresses on that page.
+
+create table if not exists public.maintainer_requests (
+  id uuid primary key default gen_random_uuid(),
+  requested_by uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  requested_email text not null default (auth.jwt() ->> 'email'),
+  action text not null check (action in ('add', 'remove')),
+  name text not null default '' check (char_length(name) <= 100),
+  email text not null check (char_length(email) <= 320 and email ~ '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$'),
+  github text not null default '' check (github ~ '^([A-Za-z0-9][A-Za-z0-9-]{0,38})?$'),
+  created timestamptz not null default now()
+);
+
+create or replace function public.stamp_maintainer_request() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  new.created := now();
+  new.email := lower(trim(new.email));
+  new.name := trim(regexp_replace(new.name, '[[:cntrl:]]', ' ', 'g'));
+  new.github := trim(new.github);
+  return new;
+end
+$$;
+
+drop trigger if exists stamp_maintainer_request on public.maintainer_requests;
+create trigger stamp_maintainer_request before insert on public.maintainer_requests
+  for each row execute function public.stamp_maintainer_request();
+
+alter table public.maintainer_requests enable row level security;
+
+drop policy if exists "Anyone can read requests to change the maintainers" on public.maintainer_requests;
+create policy "Anyone can read requests to change the maintainers" on public.maintainer_requests
+  for select using (true);
+
+-- At most 200 requests per reader, to stop runaway scripts.
+drop policy if exists "Signed-in readers make requests as themselves" on public.maintainer_requests;
+create policy "Signed-in readers make requests as themselves" on public.maintainer_requests
+  for insert to authenticated
+  with check (
+    requested_by = (select auth.uid())
+    and requested_email = (select auth.jwt() ->> 'email')
+    and (select count(*) from public.maintainer_requests r where r.requested_by = (select auth.uid())) < 200
+  );
+
 -- ---------- Who may do what ----------
 -- Anyone may read; only signed-in readers may write, and the policies above limit them to their own rows.
 
 grant select on public.suggestions, public.votes, public.comments to anon, authenticated;
 grant insert, update, delete on public.suggestions, public.votes, public.comments to authenticated;
 revoke insert, update, delete, truncate on public.suggestions, public.votes, public.comments from anon;
+revoke all on public.maintainer_requests from anon, authenticated;
+grant select on public.maintainer_requests to anon, authenticated;
+grant insert on public.maintainer_requests to authenticated;
 
 -- ---------- Live updates ----------
 -- The page hears about new and changed suggestions right away, so everyone sees everyone's.

@@ -55,7 +55,8 @@ LATEST = ROOT / "latest" / "AGENTS.md"
 MANIFEST = ROOT / "versions.json"
 MAINTAINERS = ROOT / "governance" / "maintainers.json"
 LEDGER = ROOT / "governance" / "proposals.json"
-WRITTEN = ["draft/AGENTS.md", "latest", "versions", "versions.json", "CHANGELOG.md", "governance/proposals.json"]
+WRITTEN = ["draft/AGENTS.md", "latest", "versions", "versions.json", "CHANGELOG.md", "governance/proposals.json",
+           "governance/maintainers.json"]
 
 BOT_NAME = "github-actions[bot]"
 BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
@@ -88,8 +89,12 @@ ALERTS = {
 }
 # The AI check of new rules (supabase/robot.sql): this many failures in a day, with no success, means it's broken.
 AI_CHECK_FAILURES = 3
-LEDGER_ABOUT = ("Every suggestion made on the Suggest Edits page, its votes, and its outcome. "
-                "Written by scripts/proposals.py; don't edit it by hand.")
+LEDGER_ABOUT = ("Every suggestion made on the Suggest Edits page, its votes, and its outcome, and every request to add or "
+                "remove a maintainer and what came of it. Written by scripts/proposals.py; don't edit it by hand.")
+# A request to add or remove a maintainer that's older than this when the robot first sees it isn't carried out.
+MAINTAINER_REQUEST_DAYS = 7
+EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+GITHUB_LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
 # Why a suggestion can't be voted on yet.
 PROBLEMS = {"missing-new": "Type the new words: this change replaces or adds words, but none were given."}
 _VOTE = re.compile(r"^[^A-Za-z0-9]*(approve|approved|approves|reject|rejected|rejects)\b", re.I)
@@ -109,9 +114,23 @@ def now_utc() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
+def since_of(value) -> dt.datetime | None:
+    """When someone became a maintainer, from governance/maintainers.json: a date (the start of that day, UTC) or a
+    time."""
+    if not value:
+        return None
+    when = parse_time(str(value))
+    return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
+
+
 def short(text: str, limit: int = 60) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def by_robot(issue: dict) -> bool:
+    """Whether the robot opened an issue (in GitHub Actions, it's github-actions[bot])."""
+    return (issue.get("user") or {}).get("login") == BOT_NAME
 
 
 def md(text: str) -> str:
@@ -170,6 +189,11 @@ class Maintainer:
     role: str
     email: str
     github: str
+    since: dt.datetime | None = None  # votes cast before then are a reader's, not a maintainer's
+
+    @property
+    def lead(self) -> bool:
+        return "lead" in self.role.lower()
 
 
 class Governance:
@@ -180,7 +204,7 @@ class Governance:
             self.self_approval = bool(rules["maintainers_may_approve_their_own_proposals"])
             self.hours_open = float(rules.get("hours_open_before_adoption", 0))
             self.maintainers = [Maintainer(m["name"], m.get("role", "maintainer"), m.get("email") or "",
-                                           m.get("github") or "") for m in data["maintainers"]]
+                                           m.get("github") or "", since_of(m.get("since"))) for m in data["maintainers"]]
             ignored = data.get("ignored_accounts", {})
             self.ignored_site = {u.lower() for u in ignored.get("site", [])}
             self.ignored_github = {u.lower() for u in ignored.get("github", [])}
@@ -236,7 +260,8 @@ def is_proposer(maintainer: Maintainer, proposer: dict) -> bool:
 
 def count_votes(record: dict, comments: list[dict], gov: Governance,
                 site_votes: list[dict] = ()) -> tuple[list[Vote], int, int]:
-    """Each maintainer's latest vote cast since the suggestion was last edited; others in favor; votes made stale by an edit.
+    """Each maintainer's latest vote cast since the suggestion was last edited (and since they became a maintainer);
+    others in favor; votes made stale by an edit.
 
     Votes come from the Suggest Edits page (rows of the database's votes table) and from comments on the suggestion's
     GitHub issue."""
@@ -247,6 +272,8 @@ def count_votes(record: dict, comments: list[dict], gov: Governance,
 
     def consider(maintainer: Maintainer | None, vote: str, when: dt.datetime, via: str, link: str, voter: str,
                  step: str = "patch") -> None:
+        if maintainer is not None and maintainer.since and when < maintainer.since:
+            maintainer = None  # cast before they became a maintainer: it counts as a reader's
         if maintainer is None:
             if vote == "approve":
                 support.add(voter)
@@ -308,7 +335,15 @@ def fetch_site(url: str, key: str) -> dict[str, list[dict]]:
             rows.extend(batch)
             if len(batch) < 1000:
                 return rows
-    return {"suggestions": table("suggestions", "created.asc,id.asc"), "votes": table("votes", "at.asc")}
+    def optional(name: str, order: str) -> list[dict]:
+        try:
+            return table(name, order)
+        except urllib.error.HTTPError as error:
+            if error.code == 404:  # a database set up before this table was added to supabase/schema.sql
+                return []
+            raise
+    return {"suggestions": table("suggestions", "created.asc,id.asc"), "votes": table("votes", "at.asc"),
+            "maintainer_requests": optional("maintainer_requests", "created.asc,id.asc")}
 
 
 def site_proposer(email: str) -> dict:
@@ -428,13 +463,13 @@ class GitHub:
             page += 1
 
     def proposal_issues(self) -> dict[str, dict]:
-        """Every issue for a proposal, found by the marker in its text. The robot opens them, but anyone can open
-        one with the marker (earlier versions of the Maintainers page did), and it counts the same."""
+        """Every issue the robot opened for a proposal, found by the marker on its last line. An issue anyone else
+        opens doesn't count, whatever it says, so nobody can stand in for a proposal's issue or take its votes."""
         found: dict[str, dict] = {}
         self.duplicates: list[tuple[dict, dict]] = []
         for issue in sorted(self.pages("/issues?state=all"), key=lambda i: i["number"]):
-            match = re.search(r"<!-- proposal:([\w-]+) -->", issue.get("body") or "")
-            if not match or "pull_request" in issue:
+            match = re.search(r"<!-- proposal:([\w-]+) -->\s*$", issue.get("body") or "")
+            if not match or "pull_request" in issue or not by_robot(issue):
                 continue
             if match.group(1) in found:  # two filed at once: keep the first
                 self.duplicates.append((issue, found[match.group(1)]))
@@ -604,7 +639,8 @@ class Robot:
         self.events: list[str] = []
         self.tags: list[str] = []
         self.health: dict[str, str | None] = {}  # alert -> what's wrong, or None if it's fine
-        self.site: dict | None = None  # Suggest Edits' data, as read in this run
+        self.data: dict | None = None  # Suggest Edits' data (suggestions, votes, ...), as read in this run
+        self.maintainer_log: list[dict] = []  # requests to add or remove a maintainer, and what came of each
         self.gov = Governance(json.loads(MAINTAINERS.read_text()))
         self.manifest = json.loads(MANIFEST.read_text())
         self.site = self.manifest["site"]
@@ -680,11 +716,76 @@ class Robot:
     def load_ledger(self) -> dict[str, dict]:
         if not LEDGER.exists():
             return {}
-        return {r["id"]: r for r in json.loads(LEDGER.read_text()).get("proposals", [])}
+        data = json.loads(LEDGER.read_text())
+        self.maintainer_log = data.get("maintainer_requests", [])
+        return {r["id"]: r for r in data.get("proposals", [])}
 
     def ledger_text(self, records: dict[str, dict]) -> str:
         data = {"about": LEDGER_ABOUT, "proposals": sorted(records.values(), key=lambda r: (r["created"], r["id"]))}
+        if self.maintainer_log:
+            data["maintainer_requests"] = self.maintainer_log
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+    # --- maintainers ---
+
+    def handle_maintainer_requests(self, requests: list[dict]) -> None:
+        """Carry out the lead maintainer's requests, made on the site's Maintainers page, to add or remove a maintainer:
+        in governance/maintainers.json, one commit each, under the lead maintainer's name. Each request is handled
+        once, and what came of it is kept in the record. Anyone else's requests are ignored (and not recorded, so
+        nobody can fill the record with them), a lead maintainer isn't removed this way, and a request more than a week
+        old when the robot first sees it isn't carried out."""
+        handled = {entry.get("id") for entry in self.maintainer_log}
+        for request in sorted(requests, key=lambda r: (r.get("created") or "", str(r.get("id") or ""))):
+            rid = str(request.get("id") or "")
+            if not rid or rid in handled:
+                continue
+            lead = self.gov.by_email(request.get("requested_email") or "")
+            if not lead or not lead.lead:
+                continue
+            handled.add(rid)
+            action, email = request.get("action"), str(request.get("email") or "").strip().lower()
+            name, github = " ".join(str(request.get("name") or "").split())[:100], str(request.get("github") or "").strip()
+            entry = {"id": rid, "action": action, "name": name, "email": email, **({"github": github} if github else {}),
+                     "asked_by": lead.name, "asked": request.get("created"), "handled": self.now.isoformat()}
+            made = parse_time(request["created"]) if request.get("created") else None
+            if made is None or (self.now - made).total_seconds() > MAINTAINER_REQUEST_DAYS * 86400:
+                entry["outcome"] = "not done: more than a week old when the robot saw it"
+            elif action not in ("add", "remove") or not EMAIL.fullmatch(email) or (action == "add" and not name) \
+                    or (github and not GITHUB_LOGIN.fullmatch(github)):
+                entry["outcome"] = "not done: not a valid name, email address, or GitHub username"
+            else:
+                entry["outcome"] = self.change_maintainers(action, name, email, github, lead, rid)
+            self.maintainer_log.append(entry)
+
+    def change_maintainers(self, action: str, name: str, email: str, github: str, lead: Maintainer, rid: str) -> str:
+        data = json.loads(MAINTAINERS.read_text())
+        listed = data["maintainers"]
+        existing = next((m for m in listed if (m.get("email") or "").lower() == email), None)
+        if action == "add":
+            if existing:
+                return "already a maintainer"
+            if github and any((m.get("github") or "").lower() == github.lower() for m in listed):
+                return "not done: another maintainer has that GitHub username"
+            listed.append({"name": name, "role": "maintainer", "email": email, **({"github": github} if github else {}),
+                           "since": self.now.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+            subject, outcome = f"Maintainers: add {name} ({email})", "added"
+        else:
+            if not existing:
+                return "not a maintainer"
+            if "lead" in (existing.get("role") or "").lower():
+                return "not done: a lead maintainer is removed only by editing governance/maintainers.json"
+            listed.remove(existing)
+            subject, outcome = f"Maintainers: remove {existing.get('name') or email} ({email})", "removed"
+        gov = Governance(data)  # the list must still be one the robot can work with
+        if self.o.dry_run:
+            self.say(f"Would commit: {subject}")
+            return outcome
+        MAINTAINERS.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        commit(f"{subject}\n\nAsked for on the Maintainers page by {lead.name} ({lead.email}), a lead maintainer.\n\n"
+               f"Maintainer-request: {rid}", f"{lead.name} <{lead.email}>")
+        self.gov = gov
+        self.say(f"{subject}.")
+        return outcome
 
     def site_data(self) -> dict[str, list[dict]] | None:
         """Suggest Edits' suggestions and votes; None if they couldn't be read (so nothing is withdrawn by mistake)."""
@@ -805,9 +906,10 @@ class Robot:
 
         records = self.load_ledger()
         before = LEDGER.read_text() if LEDGER.exists() else ""
-        site = self.site = self.site_data()
+        site = self.data = self.site_data()
         if site is None:
             return self.finish(records, before)
+        self.handle_maintainer_requests(site.get("maintainer_requests") or [])
         self.gather_site(site.get("suggestions") or [], records)
         site_votes: dict[str, list[dict]] = {}
         for vote in site.get("votes") or []:
@@ -921,9 +1023,9 @@ class Robot:
         if not config.get("starts_robot"):
             return
         if self.o.site_data:  # tests: the status is in the same file as the suggestions, or not checked
-            if "schema_status" not in (self.site or {}):
+            if "schema_status" not in (self.data or {}):
                 return
-            rows = self.site["schema_status"]
+            rows = self.data["schema_status"]
         else:
             try:
                 rows = get_json(f"{config['url'].rstrip('/')}/rest/v1/rpc/schema_status", site_headers(config["key"]))
@@ -962,9 +1064,9 @@ class Robot:
         if not config.get("starts_robot"):
             return
         if self.o.site_data:  # tests: the status is in the same file as the suggestions, or not checked
-            if "rule_check_status" not in (self.site or {}):
+            if "rule_check_status" not in (self.data or {}):
                 return
-            status = self.site["rule_check_status"]
+            status = self.data["rule_check_status"]
         else:
             try:
                 status = get_json(f"{config['url'].rstrip('/')}/rest/v1/rpc/rule_check_status", site_headers(config["key"]))
@@ -985,7 +1087,7 @@ class Robot:
         """Open an issue for each problem found in this run, and close the issue for each that's fixed."""
         if not self.health:
             return
-        open_issues = [i for i in self.github.pages("/issues?state=open") if "pull_request" not in i]
+        open_issues = [i for i in self.github.pages("/issues?state=open") if "pull_request" not in i and by_robot(i)]
         leads = [m.github for m in self.gov.maintainers if "lead" in m.role and m.github] or \
             [m.github for m in self.gov.maintainers if m.github]
         for kind, detail in self.health.items():

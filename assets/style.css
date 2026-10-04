@@ -618,6 +618,19 @@ details.how > summary::after { content: " ▸"; color: var(--muted); }
 details.how[open] > summary::after { content: " ▾"; }
 details.how[open] > summary { margin-bottom: 0.7rem; }
 .intro .member-list { margin-top: 0.4rem; }
+/* The Maintainers page, for a lead maintainer: add a maintainer, or remove one. */
+.manage { margin-top: 1rem; font-family: var(--sans); }
+.manage h2 { margin: 0 0 0.3rem; font-size: 1.05rem; }
+.manage .muted { color: var(--muted); font-size: 0.88rem; line-height: 1.5; }
+.manage-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0.5rem 0; }
+.manage-input { flex: 1 1 12rem; font: 0.92rem var(--sans); }
+.manage-status { margin: 0.2rem 0 0.4rem; color: var(--muted); font-size: 0.88rem; }
+.manage-status:empty { display: none; }
+.manage-list { margin-top: 0.6rem; font-size: 0.9rem; }
+.manage-list p { margin: 0 0 0.2rem; }
+.manage-list ul { margin: 0; padding-left: 1.2rem; }
+.manage-remove { font-family: var(--sans); font-size: 0.88rem; }
+.manage-confirm .button { margin-left: 0.2rem; }
 
 /* Suggest Edits: until a reader verifies an email address, the page shows only a popup asking them to. */
 .gated #intro, .gated .file, .gated #after, .gated #toc { display: none !important; }

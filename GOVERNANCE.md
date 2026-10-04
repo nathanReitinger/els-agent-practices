@@ -79,7 +79,10 @@ Each fingerprint is recorded in the file itself, in [versions.json](versions.jso
 ## Becoming a maintainer
 
 - The lead maintainer adds maintainers: typically people who have contributed suggestions and who agree to these rules. To become one, ask the lead maintainer, for example in the community's Google group, [agentselsmd](https://nathanreitinger.github.io/els-agent-practices/join/), or in an issue on GitHub.
+- The lead maintainer adds and removes maintainers on the site's [Maintainers](https://nathanreitinger.github.io/els-agent-practices/maintainers/) page, signed in with the address listed for them: a name, the email address the new maintainer will sign in with, and, if they like, a GitHub username. Within a few minutes the robot makes the change in governance/maintainers.json, in a commit under the lead maintainer's name, and records it in governance/proposals.json. Requests from anyone else are ignored. A lead maintainer is added or removed only by editing governance/maintainers.json directly.
+- A maintainer's votes count from the moment they become one. A vote cast before then counts as a reader's support, not as a maintainer's vote, so making someone a maintainer never adopts suggestions they approved earlier.
 - Each maintainer is listed with the email address they sign in with, and the GitHub username they can also vote with. The list is public, and every change to it is kept in the history.
+- Every adopted change records who approved it: in its version's commit message (`Approved-by:`), in governance/proposals.json, on the History page, and on its GitHub issue. A disapproved suggestion records who disapproved it, on the Declined page.
 - The lead maintainer can list accounts to ignore, such as spam, under `ignored_accounts` in governance/maintainers.json: email addresses under `site`, and GitHub usernames under `github`.
 
 ## Changes made directly

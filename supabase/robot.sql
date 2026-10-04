@@ -455,6 +455,17 @@ grant execute on function public.start_rule_check(jsonb) to authenticated;
 grant execute on function public.rule_check_result(bigint) to authenticated;
 grant execute on function public.rule_check_status() to anon, authenticated;
 
+-- A request to add or remove a maintainer starts the robot too (the table comes from supabase/schema.sql).
+do $$
+begin
+  if to_regclass('public.maintainer_requests') is not null then
+    drop trigger if exists start_robot on public.maintainer_requests;
+    create trigger start_robot after insert on public.maintainer_requests
+      for each statement execute function robot.start_after_vote();
+  end if;
+end
+$$;
+
 drop trigger if exists start_robot on public.votes;
 create trigger start_robot after insert or update on public.votes
   for each statement execute function robot.start_after_vote();

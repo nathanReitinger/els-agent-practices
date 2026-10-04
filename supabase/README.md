@@ -67,6 +67,8 @@ Commit and push. Within a few minutes, Suggest Edits asks visitors to verify an 
 
 A maintainer's votes count when they sign in with the email address listed for them in [governance/maintainers.json](../governance/maintainers.json) (`"email"`). Sign in once on Suggest Edits with that address: the bar says "maintainer" next to your name, and every suggestion gets **Approve** and **Disapprove** buttons.
 
+To add other maintainers, open the site's **Maintainers** page while signed in as the lead maintainer: give their name and the email address they'll sign in with, and choose **Add**. The robot adds them to governance/maintainers.json within a few minutes, and their votes count from then. **Remove**, beside a maintainer's name, takes them off the list the same way.
+
 ## 7. Let Supabase start the robot
 
 The robot publishes approved changes. GitHub runs it on a schedule, but GitHub runs scheduled jobs late, or skips them, when it's busy. So Supabase starts it too: within a minute of every vote, and every ten minutes, for as long as the project exists. For that, Supabase needs a GitHub token that can do one thing: start this repository's workflows.
