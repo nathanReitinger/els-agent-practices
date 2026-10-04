@@ -419,22 +419,26 @@ PHRASES = {
     "replace": ("Replace “{old}” with “{new}”", "Replaced “{old}” with “{new}”"),
     "insert": ("Add “{new}” after “{old}”", "Added “{new}” after “{old}”"),
     "rule": ("Add a rule: “{new}”", "Added a rule: “{new}”"),
+    "section": ("Add a section: “{new}”", "Added a section: “{new}”"),
 }
 
 
 def phrase(record: dict, past: bool = False, limit: int = 60) -> str:
     template = PHRASES[record["kind"]][past]
-    return template.format(old=short(record["old"], limit), new=short(record["new"], limit))
+    new = record["new"].split("\n")[0] if record["kind"] == "section" else record["new"]  # a section by its heading
+    return template.format(old=short(record["old"], limit), new=short(new, limit))
 
 
 def summary_of(record: dict) -> str:
     section = record.get("section")
-    return f"{phrase(record, past=True, limit=80)}{f' ({section})' if section else ''}."
+    where = f" (after {section})" if record["kind"] == "section" else f" ({section})"
+    return f"{phrase(record, past=True, limit=80)}{where if section else ''}."
 
 
 def change_segments(before: str, after: str) -> list[tuple[str | None, str, str]]:
     """A line's changes as (unchanged text, None, None) or (None, old words, new words). Changes separated
-    only by a space are joined, so "null, weak, and" -> "null and" is one change. assets/app.js does the same."""
+    only by a space, or by a punctuation mark or two, are joined, so "null, weak, and" -> "null and" is one change.
+    assets/app.js does the same."""
     old, new = TOKENS.findall(before), TOKENS.findall(after)
     segments: list[list] = []
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
@@ -448,7 +452,8 @@ def change_segments(before: str, after: str) -> list[tuple[str | None, str, str]
     i = len(segments) - 2
     while i > 0:
         a, gap, b = segments[i - 1], segments[i], segments[i + 1]
-        if gap[0] is not None and not gap[0].strip() and a[0] is None and b[0] is None:
+        slight = gap[0] is not None and (not gap[0].strip() or (len(gap[0]) <= 3 and not re.search(r"[^\W_]", gap[0])))
+        if slight and a[0] is None and b[0] is None:
             segments[i - 1:i + 2] = [[None, a[1] + gap[0] + b[1], a[2] + gap[0] + b[2]]]
         i -= 1
     return [tuple(segment) for segment in segments]
@@ -677,7 +682,9 @@ class Robot:
             if record is None:
                 record = records[rid] = {"id": rid, "status": "new", "based_on": self.manifest["latest"], "issue": None}
                 self.say(f"New suggestion {rid} from {email}: {row['kind']}.")
-            new = " ".join((row.get("new_text") or "").split())
+            lines = [" ".join(line.split()) for line in (row.get("new_text") or "").split("\n")]
+            # A new section keeps its lines: the heading, then one rule a line.
+            new = "\n".join(line for line in lines if line) if row["kind"] == "section" else " ".join(" ".join(lines).split())
             problems = [] if row["kind"] == "delete" or new else ["missing-new"]
             record.update({
                 "kind": row["kind"], "old": row["exact"], "new": new, "before": row.get("prefix") or "",

@@ -1,6 +1,6 @@
 /* AGENTS.md for Empirical Legal Scholars: shows one Markdown file, AGENTS.md, rendered for reading;
    Suggest Edits, where readers who verify an email address suggest changes by editing the text with track
-   changes on; History, every version with the changes from the one before it marked in the text; the
+   changes on, add sections, and comment on and highlight it; History, every version with the changes from the one before it marked in the text; the
    Maintainers page; the Declined page; a page for joining the community's group; and a page that checks
    whether a copy is exactly a published version.
    Each page says what to show with attributes on <body>:
@@ -20,7 +20,7 @@
   const MAINTAINERS_PATH = "governance/maintainers.json";
   const CHECK_EVERY = "five minutes";
   const FINAL = ["adopted", "declined", "withdrawn", "cannot-apply"];
-  const KIND_LABELS = { delete: "Delete", replace: "Replace", insert: "Add words", rule: "Add a rule" };
+  const KIND_LABELS = { delete: "Delete", replace: "Replace", insert: "Add words", rule: "Add a rule", section: "Add a section" };
   const COMMAND = "tr -d '\\r' < AGENTS.md | sed 3d | python3 -c \"import sys; from argon2.low_level import hash_secret_raw, Type; " +
     "print(hash_secret_raw(sys.stdin.buffer.read(), b'AGENTS.md-ELS-v1', 3, 65536, 4, 32, Type.ID).hex())\"";
   // The Argon2id library for checking a copy, pinned to one version and verified by the browser before it runs.
@@ -219,25 +219,43 @@
     if (!toc) return;
     const headings = $$("h2", article).filter((heading) => heading.id);  // not History's removed headings
     if (headings.length < 3) { toc.hidden = true; return; }
-    const links = new Map();
     toc.replaceChildren(h("details", { open: matchMedia("(min-width: 1100px)").matches },
       h("summary", { text: "Outline" }),
-      h("ol", {}, ...headings.map((heading) => {
-        const link = h("a", { href: `#${heading.id}`, text: plainText(heading) });
-        links.set(heading.id, link);
-        return h("li", {}, link);
-      }))));
+      h("ol", {}, ...headings.map((heading) => h("li", {}, h("a", { href: `#${heading.id}`, text: plainText(heading) }))))));
     toc.hidden = false;
-    if (!("IntersectionObserver" in window)) return;
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        $$("#toc a.current").forEach((a) => a.classList.remove("current"));
-        links.get(entry.target.id)?.classList.add("current");
-      }
-    }, { rootMargin: "-10% 0px -75% 0px" });
-    headings.forEach((heading) => observer.observe(heading));
+    markCurrentSection();
   }
+
+  // The outline marks the section being read: the last heading above a line a third of the way down the screen
+  // (the last one, at the very end of the page). Headings are looked up by id each time, so this keeps working
+  // when the text is drawn again, as it often is on Suggest Edits.
+  function markCurrentSection() {
+    const toc = $("#toc");
+    if (!toc || toc.hidden) return;
+    const links = $$("a[href^='#']", toc);
+    const line = innerHeight / 3;
+    const atEnd = scrollY + innerHeight >= document.documentElement.scrollHeight - 4;
+    let current = null;
+    for (const link of links) {
+      const heading = document.getElementById(decodeURIComponent(link.hash.slice(1)));
+      if (heading && heading.getBoundingClientRect().top <= line) current = link;
+    }
+    if (atEnd && links.length) current = links[links.length - 1];
+    for (const link of links) link.classList.toggle("current", link === current);
+    if (current) current.setAttribute("aria-current", "location");
+    for (const link of links) if (link !== current) link.removeAttribute("aria-current");
+    // On wide screens the outline is a column that scrolls by itself: keep the current section in view in it.
+    if (current && toc.scrollHeight > toc.clientHeight + 2) {
+      const top = current.getBoundingClientRect().top - toc.getBoundingClientRect().top + toc.scrollTop;
+      const bottom = top + current.offsetHeight;
+      if (top < toc.scrollTop) toc.scrollTop = top - 8;
+      else if (bottom > toc.scrollTop + toc.clientHeight) toc.scrollTop = bottom - toc.clientHeight + 8;
+    }
+  }
+  let sectionFrame = 0;
+  const followSection = () => { cancelAnimationFrame(sectionFrame); sectionFrame = requestAnimationFrame(markCurrentSection); };
+  addEventListener("scroll", followSection, { passive: true });
+  addEventListener("resize", followSection);
 
   // A block's own words, without History's labels and the old words shown beside new ones.
   function plainText(block) {
@@ -491,6 +509,10 @@
     line.append(after ? ` ${after}…` : "");
     box.append(line);
     if (p.kind === "rule") box.append(h("p", {}, h("ins", { text: p.new })));
+    if (p.kind === "section") {
+      const [title, ...rules] = String(p.new || "").split("\n");
+      box.append(h("p", { class: "new-section-title" }, h("ins", { text: title })), ...rules.map((rule) => h("p", {}, h("ins", { text: rule }))));
+    }
     return box;
   }
 
@@ -518,6 +540,8 @@
       note ? h("p", { class: "proposal-note", text: note }) : null,
       changeView(p),
       p.reason ? h("p", { class: "proposal-reason", text: `“${p.reason}”` }) : null,
+      mode === "drafter" && p.builds_on ? buildsOnNote(p) : null,
+      mode === "drafter" && !FINAL.includes(p.status) ? similarNote(p) : null,
       h("p", { class: "proposal-meta" }, ...joined([
         `Proposed by ${p.proposer?.name || "someone"}, ${formatDate(p.created)}`,
         p.section || null,
@@ -624,8 +648,12 @@
     }
     const caret = getSelection().anchorNode;
     for (const block of $$(".track-new", doc)) {
-      if (!block.textContent.replaceAll(ZWSP, "").trim() && !block.contains(caret)) block.remove();
+      if (block.textContent.replaceAll(ZWSP, "").trim() || block.contains(caret)) continue;
+      if (block.matches("h2.track-section") && sectionHasRules(block)) continue;  // a new section's heading stays while it has rules
+      block.remove();
     }
+    for (const list of $$("ul.track-section-list", doc)) if (!list.children.length) list.remove();
+    for (const block of $$(".track-section", doc)) block.toggleAttribute("data-empty", !block.textContent.replaceAll(ZWSP, "").trim());
   }
 
   const removedBy = (by) => ({ class: "track mine", "data-by": by, title: `Removed by ${by}` });
@@ -728,9 +756,16 @@
     if (oneKey && (blockOf(range.startContainer) !== block || blockOf(range.endContainer) !== block)) {
       // At the edge of a rule: rules aren't merged. But backing out of an empty new rule removes it.
       if (direction === "backward" && block.classList.contains("track-new") && !block.textContent.replaceAll(ZWSP, "").trim()) {
-        const previous = block.previousElementSibling;
+        if (block.matches("h2.track-section") && sectionHasRules(block)) return;  // a new section keeps its heading while it has rules
+        const list = block.parentElement?.matches("ul.track-section-list") ? block.parentElement : null;
+        const previous = block.previousElementSibling || list?.previousElementSibling || null;
+        if (block.matches("h2.track-section") && block.nextElementSibling?.matches("ul.track-section-list")) block.nextElementSibling.remove();
         block.remove();
-        if (previous) caretAt(previous, previous.childNodes.length);
+        if (list && !list.children.length) list.remove();
+        if (previous) {
+          const end = [...previous.querySelectorAll("ins.track.mine")].pop() || previous;
+          caretAt(end, end.childNodes.length);
+        }
       } else {
         range.collapse(direction !== "backward");
         select(range);
@@ -755,6 +790,7 @@
     const range = sel.getRangeAt(0);
     const block = blockOf(range.startContainer);
     if (!block || frozen(block)) return;
+    if (block.classList.contains("track-section")) return sectionEnter(block);
     if (block.classList.contains("track-new")) {
       return hint("Add one new rule at a time. To add another, put the cursor at the end of an existing rule and press Enter.");
     }
@@ -862,6 +898,7 @@
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode, el = node.parentElement;
+      if (el.closest("button")) continue;  // a "+1" beside someone's change isn't text
       const type = el.closest("ins.track.mine") ? "ins" : el.closest("del.track.mine") ? "del" : "orig";
       for (const ch of node.data) chars.push({ ch, type });
     }
@@ -949,24 +986,35 @@
       const marks = [...new Set([...extra, ...chars.map((c) => c.mark).filter(Boolean)])];
       return { marks, sids: new Set(marks.map((mark) => mark.dataset.sid).filter(Boolean)) };
     };
+    // A new rule or section is anchored on the last words of the rule above it that no other change touches, so
+    // the changes can be approved in any order.
+    const anchorAfter = (index) => {
+      const previous = parts.slice(0, index).reverse().find((other) => !other.isNew);
+      if (!previous) return null;
+      const prevText = sourceOf(previous.chars);
+      let untouched = previous.chars.length;
+      while (untouched > 0 && previous.chars[untouched - 1].type === "orig") untouched -= 1;
+      const tailStart = sourceOf(previous.chars.slice(0, untouched)).length;
+      let words = [...prevText.matchAll(/\S+/g)].filter((w) => w.index >= tailStart).slice(-6);
+      if (!words.length) words = [...prevText.matchAll(/\S+/g)].slice(-6);
+      if (!words.length) return null;
+      const start = previous.at + words[0].index, end = previous.at + words.at(-1).index + words.at(-1)[0].length;
+      return { exact: squash(source.slice(start, end)), ...context(start, end) };
+    };
     const changes = [];
+    const sections = new Map();  // each new section's blocks (its heading and rules), by its id
     parts.forEach((part, index) => {
+      if (part.isNew && part.block.dataset.section) {
+        const id = part.block.dataset.section;
+        if (!sections.has(id)) sections.set(id, { index, parts: [] });
+        sections.get(id).parts.push(part);
+        return;
+      }
       if (part.isNew) {
         const text = squash(part.chars.map((c) => c.ch).join(""));
-        const previous = parts.slice(0, index).reverse().find((other) => !other.isNew);
-        if (!text || !previous) return;
-        // Anchor it on the last words of the rule above that no other change touches, so the changes can be
-        // approved in any order.
-        const prevText = sourceOf(previous.chars);
-        let untouched = previous.chars.length;
-        while (untouched > 0 && previous.chars[untouched - 1].type === "orig") untouched -= 1;
-        const tailStart = sourceOf(previous.chars.slice(0, untouched)).length;
-        let words = [...prevText.matchAll(/\S+/g)].filter((w) => w.index >= tailStart).slice(-6);
-        if (!words.length) words = [...prevText.matchAll(/\S+/g)].slice(-6);
-        if (!words.length) return;
-        const start = previous.at + words[0].index, end = previous.at + words.at(-1).index + words.at(-1)[0].length;
-        changes.push({ kind: "rule", exact: squash(source.slice(start, end)), new: text, ...context(start, end),
-          ...madeOf(part.chars, [part.block, ...part.block.querySelectorAll("ins.track.mine")]) });
+        const anchor = text && anchorAfter(index);
+        if (!anchor) return;
+        changes.push({ kind: "rule", ...anchor, new: text, ...madeOf(part.chars, [part.block, ...part.block.querySelectorAll("ins.track.mine")]) });
         return;
       }
       const chars = part.chars;
@@ -1007,6 +1055,16 @@
         }
       }
     });
+    // A new section is one change: its heading, then one rule a line. It's saved once it has a heading.
+    for (const { index, parts: group } of sections.values()) {
+      const textOf = (part) => squash(part.chars.map((c) => c.ch).join(""));
+      const title = group.filter((part) => part.block.tagName === "H2").map(textOf).join(" ");
+      const rules = group.filter((part) => part.block.tagName === "LI").map(textOf).filter(Boolean);
+      const anchor = title && anchorAfter(index);
+      if (!anchor) continue;
+      changes.push({ kind: "section", ...anchor, new: [title, ...rules].join("\n"),
+        ...madeOf(group.flatMap((part) => part.chars), group.flatMap((part) => [part.block, ...part.block.querySelectorAll("ins.track.mine")])) });
+    }
     return changes;
   }
 
@@ -1034,9 +1092,10 @@
   const fromRow = (row) => ({
     id: `sb-${row.id}`, docId: row.id, kind: row.kind, exact: row.exact, prefix: row.prefix, suffix: row.suffix,
     new: row.new_text, reason: row.reason, base: row.base, created: row.created, updated: row.updated,
-    author: { id: row.author_id, email: row.author_email },
+    author: { id: row.author_id, email: row.author_email }, builds_on: row.builds_on || null,
   });
-  const COLUMNS = { kind: "kind", exact: "exact", prefix: "prefix", suffix: "suffix", new: "new_text", reason: "reason", base: "base" };
+  const COLUMNS = { kind: "kind", exact: "exact", prefix: "prefix", suffix: "suffix", new: "new_text", reason: "reason", base: "base",
+    builds_on: "builds_on" };
   const toRow = (fields) => Object.fromEntries(Object.entries(fields).filter(([key]) => COLUMNS[key]).map(([key, value]) => [COLUMNS[key], value ?? ""]));
 
   async function supabaseBackend(config) {
@@ -1044,10 +1103,13 @@
     const client = library.createClient(config.url, config.key, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: "els-sign-in" },
     });
+    // An error from the database carries its code; one from the connection has none, so it's tried again later.
     const must = ({ data, error }) => {
-      if (error) throw new Error(error.message || String(error));
+      if (error) throw Object.assign(new Error(error.message || String(error)), { code: error.code || "" });
       return data;
     };
+    // The comments table comes from a later version of supabase/schema.sql: until it's run again, no comments.
+    const missingTable = (error) => /PGRST205|42P01/.test(error.code) || /does not exist|could not find the table/i.test(error.message);
     const everything = async (table, order) => {  // the database sends at most 1,000 rows at a time
       const rows = [];
       for (let from = 0; ; from += 1000) {
@@ -1067,11 +1129,17 @@
       verifyCode: async (email, code) => must(await client.auth.verifyOtp({ email, token: code, type: "email" })),
       signOut: async () => must(await client.auth.signOut()),
       watch(callback, failed) {
-        let timer = null;
+        let timer = null, commentsChannel = null;
         const load = async () => {
           try {
-            const [suggestions, votes] = await Promise.all([everything("suggestions", "created"), everything("votes", "at")]);
-            callback({ suggestions: suggestions.map(fromRow), votes });
+            const [suggestions, votes, comments] = await Promise.all([everything("suggestions", "created"), everything("votes", "at"),
+              everything("comments", "created").catch((error) => (missingTable(error) ? null : Promise.reject(error)))]);
+            // Live updates for comments only once the table is there, so a database without it still gets them for the rest.
+            if (comments && !commentsChannel) {
+              commentsChannel = client.channel("suggest-edits-comments")
+                .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, soon).subscribe();
+            }
+            callback({ suggestions: suggestions.map(fromRow), votes, comments: comments || [], commentsReady: !!comments });
           } catch (error) {
             failed(error);
           }
@@ -1097,6 +1165,10 @@
         return row.id;
       },
       remove: async (docId) => must(await client.from("suggestions").delete().eq("id", docId)),
+      // Comments have ids made on this computer, so one sent twice (say, after the connection dropped) is added once.
+      addComment: async (row) => must(await client.from("comments").upsert(row, { onConflict: "id", ignoreDuplicates: true })),
+      deleteComment: async (id) => must(await client.from("comments").delete().eq("id", id)),
+      resolveComment: async (id, done) => must(await client.rpc("resolve_comment", { comment_id: id, done })),
       async vote(proposalId, vote, step = "patch") {
         const upsert = (row) => client.from("votes").upsert(row, { onConflict: "suggestion,voter_id" });
         let result = await upsert({ suggestion: proposalId, vote, version_step: step });
@@ -1111,12 +1183,12 @@
   // For trying the page on this computer without Supabase: add ?backend=local to a local preview's address.
   // Everything stays in this browser, and any 6-digit code signs you in.
   function localBackend() {
-    const SUGGESTIONS = "els-local-suggestions", VOTES = "els-local-votes", USER = "els-local-user";
+    const SUGGESTIONS = "els-local-suggestions", VOTES = "els-local-votes", COMMENTS = "els-local-comments", USER = "els-local-user";
     const read = (key, empty) => { try { return JSON.parse(localStorage.getItem(key)) ?? empty; } catch { return empty; } };
     const write = (key, value) => localStorage.setItem(key, JSON.stringify(value));
     let onData = null, onUser = () => {};
-    const emit = () => onData?.({ suggestions: read(SUGGESTIONS, []), votes: read(VOTES, []) });
-    addEventListener("storage", (event) => { if (event.key === SUGGESTIONS || event.key === VOTES) emit(); });
+    const emit = () => onData?.({ suggestions: read(SUGGESTIONS, []), votes: read(VOTES, []), comments: read(COMMENTS, []), commentsReady: true });
+    addEventListener("storage", (event) => { if ([SUGGESTIONS, VOTES, COMMENTS].includes(event.key)) emit(); });
     const me = () => read(USER, null);
     return {
       kind: "local",
@@ -1152,6 +1224,19 @@
         write(VOTES, votes);
         emit();
       },
+      async addComment(row) {
+        const list = read(COMMENTS, []), now = new Date().toISOString(), user = me();
+        if (!list.some((c) => c.id === row.id)) {
+          list.push({ ...row, author_id: user.id, author_email: user.email, resolved: false, resolved_by: "", created: now, updated: now });
+        }
+        write(COMMENTS, list);
+        emit();
+      },
+      async deleteComment(id) { write(COMMENTS, read(COMMENTS, []).filter((c) => c.id !== id && c.parent !== id)); emit(); },
+      async resolveComment(id, done) {
+        write(COMMENTS, read(COMMENTS, []).map((c) => (c.id === id ? { ...c, resolved: done, resolved_by: done ? me().email : "" } : c)));
+        emit();
+      },
     };
   }
 
@@ -1164,6 +1249,9 @@
     votes: [],  // everyone's votes, from the database
     pendingVotes: [],  // votes cast here that the database hasn't sent back yet
     voting: new Map(),  // a maintainer's choices on a card before voting (version number, buttons shown), kept on redraws
+    comments: [], commentsReady: false, outbox: [], commentSpots: new Map(),  // comments and highlights, and ones not sent yet
+    alsoHere: new Map(),  // a drawn suggestion's id: the other suggestions for the same words
+    checked: new Set(), lastChanges: [],  // new rules already compared with the others, and your changes as last saved
     proposals: { records: [] },  // the robot's record (governance/proposals.json)
     others: [], saved: new Map(), undrawable: new Set(), undo: [], redo: [], lastGood: "",
     dirty: false, edits: 0, lastEdit: 0, busy: false, syncing: Promise.resolve(), timer: null,
@@ -1191,7 +1279,7 @@
     const walker = document.createTreeWalker($("#doc"), NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode;
-      if (within(node, "ins.track.mine, .track-new, button")) continue;
+      if (within(node, "ins.track.mine, .track-new, button, .track-section-others")) continue;
       for (let i = 0; i < node.data.length; i++) if (!/\s/.test(node.data[i]) && node.data[i] !== ZWSP) chars.push({ node, offset: i });
     }
     return { chars, text: chars.map(({ node, offset }) => node.data[offset]).join("") };
@@ -1241,10 +1329,14 @@
     const found = locateQuote(index, s.exact ?? s.old ?? "", s.prefix ?? s.before ?? "", s.suffix ?? s.after ?? "");
     if (!found) return false;
     const [a, b] = found;
-    if (taken.some(([x, y]) => a < y && x < b)) return false;
+    // Additions don't change the words they follow, so they never stand in another change's way. A change to words
+    // already changed is shown with the one drawn there.
+    const additive = ["insert", "rule", "section"].includes(s.kind);
+    const hit = additive ? null : taken.find(([x, y]) => a < y && x < b);
+    if (hit) return { under: hit[2] };
     const first = blockOf(index.chars[a].node), block = blockOf(index.chars[b - 1].node);
     if (!first || !block || frozen(first) || frozen(block) || (mine && first !== block)) return false;
-    taken.push([a, b]);
+    if (!additive) taken.push([a, b, mine ? `mine:${s.docId}` : s.id]);
     const who = s.author?.email || s.proposer?.email || s.proposer?.name || "someone";
     const range = document.createRange();
     range.setStart(index.chars[a].node, index.chars[a].offset);
@@ -1266,13 +1358,25 @@
       block.after(mine ? h(tag, { class: "track-new mine", "data-by": who, ...label }, h("ins", { ...addedBy(who), ...label }, ZWSP + s.new))
         : h(tag, { class: "track-rule others", "data-by": who, "data-text": s.new, contenteditable: "false", ...label }));
     }
+    if (s.kind === "section") {
+      const [title, ...rules] = String(s.new || "").split("\n");
+      const end = sectionEndAfter(block);
+      if (mine) {
+        const ins = (text) => h("ins", { ...addedBy(who), ...label }, ZWSP + text);
+        const part = (tag, text) => h(tag, { class: "track-new mine track-section", "data-by": who, "data-section": s.docId, ...label }, ins(text));
+        end.after(part("h2", title), ...(rules.length ? [h("ul", { class: "track-section-list", "data-section": s.docId }, ...rules.map((rule) => part("li", rule)))] : []));
+      } else {
+        end.after(h("div", { class: "track-section-others", "data-by": who, contenteditable: "false", ...label },
+          h("div", { class: "ts-title", text: title }), ...rules.map((rule) => h("div", { class: "ts-rule", text: rule }))));
+      }
+    }
     return true;
   }
 
   function clearOthers() {
     const doc = $("#doc");
     for (const del of $$("del.track.others", doc)) del.replaceWith(...del.childNodes);
-    for (const mark of $$("ins.track.others, .track-rule.others", doc)) mark.remove();
+    for (const mark of $$("ins.track.others, .track-rule.others, .track-section-others, button.also-here", doc)) mark.remove();
     doc.normalize();
   }
 
@@ -1289,9 +1393,20 @@
 
   function drawOthers() {
     clearOthers();
-    const taken = [];
+    // Your own changes are in the text already: someone else's change to the same words is shown with yours.
+    const taken = [], index = sourceIndex();
+    for (const [docId, s] of suggest.saved) {
+      if (s.kind !== "delete" && s.kind !== "replace") continue;
+      const found = locateQuote(index, s.exact, s.prefix, s.suffix);
+      if (found) taken.push([...found, `mine:${docId}`]);
+    }
     suggest.others = othersOpen();
-    for (const s of suggest.others) drawSuggestion(s, false, taken);
+    suggest.alsoHere = new Map();
+    for (const s of suggest.others) {
+      const drawn = drawSuggestion(s, false, taken);
+      if (drawn?.under) suggest.alsoHere.set(drawn.under, [...(suggest.alsoHere.get(drawn.under) || []), s.id]);
+    }
+    addAlsoHereBadges();
   }
 
   // Keep the cursor where it was while other people's marks are redrawn: they don't change the text itself.
@@ -1336,16 +1451,22 @@
     suggest.undrawable = new Set();
     const taken = [];
     for (const s of mineOpen(decided)) {
-      if (drawSuggestion(s, true, taken)) suggest.saved.set(s.docId, pickChange(s));
+      if (drawSuggestion(s, true, taken) === true) suggest.saved.set(s.docId, pickChange(s));
       else suggest.undrawable.add(s.docId);  // it no longer fits the text; it's kept, and the robot reports it
     }
     drawOthers();
+    drawComments();
+    addSectionControls();
     setEditable(suggest.editing);
     suggest.lastGood = doc.innerHTML;
     suggest.undo = [];
     suggest.redo = [];
     suggest.dirty = false;
     updateBar();
+    if (suggest.me && suggest.remote === null) {
+      setSaveStatus("Can't reach the database yet. Editing starts as soon as it answers; changes not yet saved are kept on this computer.", true);
+    }
+    if (suggest.restoreLater) restoreUnsaved();
   }
 
   async function redrawNow() {
@@ -1374,8 +1495,9 @@
     }
     const changed = suggest.redraw || decisionsKey(pendingDecisions()) !== suggest.decidedKey || mineChangedElsewhere();
     if (suggest.me && !suggest.dirty && !suggest.busy && changed) drawEverything();
-    else keepingCaret(drawOthers);
+    else keepingCaret(() => { drawOthers(); drawComments(); });
     renderProposals();
+    refreshSpot();
     updateBar();
     if (pendingDecisions().size) watchForPublication();
   }
@@ -1383,7 +1505,8 @@
   // Only a reader who has verified their email address can edit the text.
   function setEditable(on) {
     const doc = $("#doc");
-    const editable = on && suggest.ready && !!suggest.me;
+    // Editing starts once your saved suggestions have loaded, so nothing is saved twice.
+    const editable = on && suggest.ready && !!suggest.me && suggest.remote !== null;
     if (editable) {
       doc.setAttribute("contenteditable", "true");
       doc.setAttribute("spellcheck", "true");
@@ -1424,10 +1547,12 @@
     const { backend, me } = suggest;
     if (!backend?.save || !me || !suggest.dirty) return;
     const edits = suggest.edits;
+    keepUnsaved();  // on this computer too, in case the connection or the page goes first
     suggest.busy = true;
     try {
       const used = new Set();
-      for (const change of collectChanges()) {
+      const changes = collectChanges();
+      for (const change of changes) {
         const fields = { ...pickChange(change), base: suggest.version };
         const docId = [...change.sids].find((id) => suggest.saved.has(id) && !used.has(id));
         if (docId && sameChange(suggest.saved.get(docId), fields)) { used.add(docId); continue; }
@@ -1442,12 +1567,22 @@
         await backend.remove(id);
         suggest.saved.delete(id);
       }
-      if (suggest.edits === edits) suggest.dirty = false;
+      if (suggest.edits === edits) {
+        suggest.dirty = false;
+        forgetUnsaved();
+      }
       suggest.lastGood = $("#doc").innerHTML;
-      setSaveStatus(suggest.dirty ? "Saving…" : "All changes saved");
+      suggest.lastChanges = changes;
+      const untitled = $$("#doc h2.track-section").some((heading) => !heading.textContent.replaceAll(ZWSP, "").trim());
+      setSaveStatus(untitled ? "Give the new section a heading to save it." : suggest.dirty ? "Saving…" : "All changes saved", untitled);
       suggest.watcher?.refresh();  // so the list below the text shows them now
+      setTimeout(checkNewRules, 0);
     } catch (error) {
-      setSaveStatus(`Not saved yet (${error.message}). Trying again…`, true);
+      // New sections come from a later version of supabase/schema.sql (the sections are saved last, so the rest are saved).
+      const needsUpdate = error.code === "23514" && /kind/.test(error.message);
+      setSaveStatus(needsUpdate ? "New sections need one more step from the lead maintainer: run supabase/schema.sql again in Supabase. Your other changes are saved."
+        : navigator.onLine && error.code ? `Not saved yet (${error.message}). Trying again…`
+          : "Can't reach the database right now. Your changes are kept on this computer and will be saved when it's back.", true);
       clearTimeout(suggest.timer);
       suggest.timer = setTimeout(sync, 15000);
     } finally {
@@ -1732,7 +1867,7 @@
       const others = (list) => list.filter((v) => !(v.suggestion === p.id && v.voter_id === me.id));
       suggest.pendingVotes = [...others(suggest.pendingVotes), mine];
       suggest.votes = [...others(suggest.votes), mine];
-      $(".suggestion-pop")?.remove();
+      $(".spot-pop")?.remove();
       await redrawNow();
       const decided = pendingDecisions().get(p.id);
       hint(decided?.kind === "adopt" ? `Approved. It's in the publishing queue, and the text shows it now; it will be version ${decided.version}.`
@@ -1789,30 +1924,650 @@
     return h("p", { class: "reason-row" }, input, action("Save", save, "button secondary small"), note);
   }
 
-  function suggestionCard(s) {
-    const record = { ...s, old: s.old ?? s.exact, before: s.before ?? s.prefix, after: s.after ?? s.suffix,
-      proposer: s.proposer || { name: s.author?.email } };
-    const known = recordOf(s.id);
-    const p = known && toTime(known.updated) === toTime(s.updated) ? { ...record, ...known } : { ...record, status: known?.status || "new" };
-    return h("div", { class: "suggestion-pop", role: "dialog", "aria-label": "Suggestion" },
-      h("p", { class: "pop-head" }, h("strong", { text: KIND_LABELS[s.kind] || "Change" }),
-        ` · suggested by ${record.proposer?.name || "someone"}, ${formatDate(s.created)}`),
-      changeView(record),
-      s.reason ? h("p", { class: "proposal-reason", text: `“${s.reason}”` }) : "",
-      voteControls(p));
+  // ---- New sections: a heading and its rules ----
+  // While editing, a "+ New section" control sits at the end of each section. A new section is one suggestion:
+  // its heading on the first line, then one rule a line, and the robot adds it after the section it follows
+  // (scripts/edits.py). Enter moves from the heading to its first rule, and from a rule to a new one.
+
+  let sectionCount = 0;
+  const sectionHasRules = (heading) => {
+    const list = heading.nextElementSibling;
+    return !!list?.matches?.("ul.track-section-list") && !!list.textContent.replaceAll(ZWSP, "").trim();
+  };
+
+  // The last element of each section (and of the introduction), where a new section can follow.
+  function sectionEnds() {
+    const children = [...$("#doc").children].filter((el) => !el.matches(".add-here"));
+    const ends = [];
+    children.forEach((el, i) => {
+      const next = children[i + 1];
+      if (el.tagName === "H1" || el.matches("h1 + p")) return;
+      if (!next || (next.tagName === "H2" && !next.matches(".track-section"))) ends.push(el);
+    });
+    return ends;
   }
 
-  function onSuggestionClick(event) {
-    const mark = event.target.closest?.("[data-proposal]");
-    if (!event.target.closest?.(".suggestion-pop")) $(".suggestion-pop")?.remove();
-    if (!mark || !$("#doc").contains(mark)) return;
-    const s = suggest.others.find((x) => x.id === mark.dataset.proposal);
-    if (!s) return;
-    const card = suggestionCard(s);
+  // The last element of the section holding `block`: a new section drawn for it goes after this.
+  function sectionEndAfter(block) {
+    const doc = $("#doc");
+    let end = topBlock(block, doc);
+    for (let next = end.nextElementSibling; next; next = end.nextElementSibling) {
+      if ((next.tagName === "H2" && !next.matches(".track-section")) || next.matches(".add-here")) break;
+      end = next;
+    }
+    return end;
+  }
+
+  function addSectionControls() {
+    const doc = $("#doc");
+    for (const old of $$(".add-here", doc)) old.remove();
+    if (!suggest.me) return;
+    for (const end of sectionEnds()) {
+      end.after(h("div", { class: "add-here", contenteditable: "false" },
+        h("button", { type: "button", class: "add-section", title: "Add a new section here: a heading and its rules", text: "+ New section" })));
+    }
+  }
+
+  function startSection(control) {
+    if (!suggest.editing || !suggest.me) return;
+    rememberForUndo();
+    const by = myName();
+    const title = h("ins", addedBy(by), ZWSP);
+    control.before(h("h2", { class: "track-new mine track-section", "data-by": by, "data-section": `new-${Date.now()}-${++sectionCount}`,
+      "data-empty": "" }, title));
+    caretAt(title.firstChild, 1);
+    afterChange();
+  }
+
+  // Enter in a new section: from its heading to its first rule, or from a rule to a new one after it.
+  function sectionEnter(block) {
+    const by = myName(), id = block.dataset.section;
+    const rule = () => {
+      const ins = h("ins", addedBy(by), ZWSP);
+      return [h("li", { class: "track-new mine track-section", "data-by": by, "data-section": id, "data-empty": "" }, ins), ins];
+    };
+    if (block.tagName === "H2") {
+      let list = block.nextElementSibling;
+      if (!list?.matches?.("ul.track-section-list")) {
+        list = h("ul", { class: "track-section-list", "data-section": id });
+        block.after(list);
+      }
+      const first = list.querySelector("li");
+      if (first) {
+        const ins = first.querySelector("ins") || first;
+        return caretAt(ins, ins.childNodes.length);
+      }
+      const [li, ins] = rule();
+      list.append(li);
+      return caretAt(ins.firstChild, 1);
+    }
+    const [li, ins] = rule();
+    block.after(li);
+    caretAt(ins.firstChild, 1);
+  }
+
+  // ---- Several people's changes to the same words ----
+  // Only one change can be drawn on any word, so the others for the same words are shown with it: a "+1" next to
+  // it opens all of them. Anyone can also suggest a different change for words someone else changed; it's saved as
+  // their own suggestion, marked as built on the other one, and the maintainers choose.
+
+  function addAlsoHereBadges() {
+    for (const [key, ids] of suggest.alsoHere) {
+      const marks = key.startsWith("mine:") ? $$(`#doc [data-sid="${CSS.escape(key.slice(5))}"]`) : $$(`#doc [data-proposal="${CSS.escape(key)}"]`);
+      const last = marks.pop();
+      if (!last) continue;
+      last.after(h("button", { type: "button", class: "also-here", contenteditable: "false", "data-also": ids.join(" "), "data-under": key,
+        title: `${plural(ids.length, "more suggestion")} for these words. Click to see ${ids.length === 1 ? "it" : "them"}.`, text: `+${ids.length}` }));
+    }
+  }
+
+  async function suggestDifferent(s, text) {
+    const lines = String(text || "").split("\n").map(squash).filter(Boolean);
+    const words = s.kind === "section" ? lines.join("\n") : squash(text);
+    const kind = s.kind === "delete" ? (words ? "replace" : "delete") : s.kind;
+    if (kind === "replace" && squash(words) === squash(s.exact)) return hint("Those are the words in the text now. To keep them as they are, add a comment instead.");
+    if (kind !== "delete" && !words) return hint("Write the change you suggest first.");
+    if (words === squash(s.new) && kind === s.kind) return hint("That's the same change. To support it, add a comment instead.");
+    const fields = { kind, exact: s.exact ?? s.old, prefix: s.prefix ?? s.before ?? "", suffix: s.suffix ?? s.after ?? "", new: kind === "delete" ? "" : words,
+      base: suggest.version, builds_on: s.id };
+    try {
+      if (suggest.dirty || suggest.busy) await sync();
+      const docId = await suggest.backend.save(null, fields);
+      const now = new Date().toISOString();
+      suggest.remote = [...(suggest.remote || []), { ...fields, id: `sb-${docId}`, docId, reason: "", created: now, updated: now,
+        author: { id: suggest.me.id, email: suggest.me.email } }];
+      $(".spot-pop")?.remove();
+      drawEverything();
+      renderProposals();
+      hint("Saved as your own suggestion, built on the other one. The maintainers will see both and choose.");
+      suggest.watcher?.refresh();
+    } catch (error) {
+      hint(`It wasn't saved (${error.message}).${/builds_on/.test(error.message) ? " The database needs one more step first (run supabase/schema.sql again in Supabase's SQL Editor)." : ""}`);
+    }
+  }
+
+  function differentChangeForm(s) {
+    const start = s.kind === "delete" ? (s.exact ?? s.old) : s.kind === "section" ? s.new : s.new;
+    const input = h("textarea", { class: "c-input", rows: s.kind === "section" ? "4" : "2", "aria-label": "Your different change" });
+    input.value = start || "";
+    const box = h("div", { class: "different", hidden: true },
+      h("p", { class: "muted", text: s.kind === "delete" ? "Keep these words, changed as you write them here:"
+        : s.kind === "section" ? "Your version of the new section: the heading on the first line, one rule a line." : "Your version of the new words:" }),
+      input,
+      h("p", { class: "c-actions" }, action("Suggest it", () => suggestDifferent(s, input.value), "button small"), " ",
+        action("Cancel", () => { box.hidden = true; open.hidden = false; }, "button secondary small")));
+    const open = h("button", { type: "button", class: "linklike", text: "Suggest a different change",
+      onclick: () => { box.hidden = false; open.hidden = true; input.focus(); } });
+    return [open, box];
+  }
+
+  // ---- Comments and highlights ----
+  // Select words to comment on them or highlight them. Both carry your email address, everyone sees them, and they
+  // never change the text. A comment can be on words, on a suggestion, or a reply; anyone signed in can resolve a
+  // comment, and only its author can delete it. Each is sent from an outbox kept on this computer, so one written
+  // offline is sent once the connection is back; it has its own id, so sending it twice adds it once.
+
+  const fromCommentRow = (row) => ({ id: row.id, kind: row.kind || "comment", body: row.body || "", exact: row.exact || "",
+    prefix: row.prefix || "", suffix: row.suffix || "", suggestion: row.suggestion || null, parent: row.parent || null,
+    base: row.base || "", resolved: !!row.resolved, resolvedBy: row.resolved_by || "", created: row.created, updated: row.updated,
+    author: { id: row.author_id, email: row.author_email || "" } });
+  const COMMENT_FIELDS = ["id", "kind", "body", "exact", "prefix", "suffix", "suggestion", "parent", "base"];
+  const commentRow = (row) => Object.fromEntries(COMMENT_FIELDS.map((key) => [key, row[key] ?? (key === "suggestion" || key === "parent" ? null : "")]));
+  const cut = (text, n) => { const t = squash(text); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+  const byCreated = (a, b) => (a.created || "").localeCompare(b.created || "");
+
+  const outboxKey = () => `els-outbox:${suggest.me?.id || "nobody"}`;
+  function readOutbox() {
+    try { return JSON.parse(localStorage.getItem(outboxKey())) || []; } catch { return suggest.outbox || []; }
+  }
+  function writeOutbox(list) {
+    suggest.outbox = list;
+    try { localStorage.setItem(outboxKey(), JSON.stringify(list)); } catch { /* kept in this tab only */ }
+  }
+
+  // Everyone's comments as they'll be once this computer's outbox is sent, without ignored accounts'.
+  function allComments() {
+    let list = [...suggest.comments];
+    for (const op of suggest.outbox) {
+      if (op.op === "add" && !list.some((c) => c.id === op.row.id)) list.push({ ...fromCommentRow(op.row), pending: true });
+      if (op.op === "delete") list = list.filter((c) => c.id !== op.id && c.parent !== op.id);
+      if (op.op === "resolve") list = list.map((c) => (c.id === op.id ? { ...c, resolved: op.done, resolvedBy: op.done ? myName() : "" } : c));
+    }
+    const ignored = suggest.governance?.ignored_accounts?.site || [];
+    return list.filter((c) => !ignored.some((email) => sameEmail(email, c.author.email)));
+  }
+
+  async function sendOutbox() {
+    if (sendOutbox.busy || !suggest.backend?.addComment || !suggest.me) return;
+    sendOutbox.busy = true;
+    clearTimeout(sendOutbox.timer);
+    try {
+      for (let op = readOutbox()[0]; op; op = readOutbox()[0]) {
+        try {
+          if (op.op === "add") await suggest.backend.addComment(commentRow(op.row));
+          else if (op.op === "delete") await suggest.backend.deleteComment(op.id);
+          else if (op.op === "resolve") await suggest.backend.resolveComment(op.id, op.done);
+        } catch (error) {
+          if (!error.code) throw error;  // the connection: try again later
+          hint(`A comment couldn't be saved (${error.message}).`);  // the database said no: drop it
+        }
+        writeOutbox(readOutbox().filter((other) => other.key !== op.key));  // by its own key, in case another tab sent it too
+      }
+      suggest.watcher?.refresh();
+    } catch {
+      sendOutbox.timer = setTimeout(sendOutbox, 30000);
+    } finally {
+      sendOutbox.busy = false;
+      afterComments();
+    }
+  }
+
+  function addComment(fields) {
+    const now = new Date().toISOString();
+    const row = { id: crypto.randomUUID(), kind: "comment", body: "", exact: "", prefix: "", suffix: "", suggestion: null, parent: null,
+      base: suggest.version, ...fields, author_id: suggest.me.id, author_email: suggest.me.email, created: now, updated: now };
+    writeOutbox([...readOutbox(), { op: "add", row, key: crypto.randomUUID() }]);
+    afterComments();
+    sendOutbox();
+    return row.id;
+  }
+  function deleteComment(c) {
+    const list = readOutbox();
+    if (list.some((op) => op.op === "add" && op.row.id === c.id)) writeOutbox(list.filter((op) => !(op.op === "add" && op.row.id === c.id)));
+    else writeOutbox([...list, { op: "delete", id: c.id, key: crypto.randomUUID() }]);
+    afterComments();
+    sendOutbox();
+  }
+  function resolveComment(c, done) {
+    writeOutbox([...readOutbox(), { op: "resolve", id: c.id, done, key: crypto.randomUUID() }]);
+    afterComments();
+    sendOutbox();
+  }
+
+  function afterComments() {
+    if (!suggest.ready) return;
+    keepingCaret(drawComments);
+    renderProposals();
+    refreshSpot();
+  }
+
+  // Comments and highlights on words are drawn over the text, after everything else; overlapping ones nest.
+  function drawComments() {
+    const doc = $("#doc");
+    for (const mark of $$("mark.c-mark", doc)) mark.replaceWith(...mark.childNodes);
+    doc.normalize();
+    suggest.commentSpots = new Map();
+    if (!suggest.commentsReady) return;
+    const onWords = allComments().filter((c) => !c.parent && !c.suggestion && c.exact && !(c.kind === "comment" && c.resolved));
+    for (const c of onWords.sort(byCreated)) {
+      const index = sourceIndex();
+      const found = locateQuote(index, c.exact, c.prefix, c.suffix);
+      suggest.commentSpots.set(c.id, !!found);
+      if (!found) continue;
+      const [a, b] = found;
+      const range = document.createRange();
+      range.setStart(index.chars[a].node, index.chars[a].offset);
+      range.setEnd(index.chars[b - 1].node, index.chars[b - 1].offset + 1);
+      wrapRange(range, () => h("mark", { class: `c-mark c-${c.kind}${c.pending ? " c-pending" : ""}`, "data-cid": c.id,
+        title: c.kind === "highlight" ? `Highlighted by ${c.author.email}` : `Comment by ${c.author.email}. Click to read it.` }));
+    }
+  }
+
+  // The selected words as everyone sees them, with the words around them, so a comment finds its place again
+  // (the same way a suggestion does), or null if they can't be told apart from words elsewhere.
+  function quoteOf(range) {
+    const chars = [];
+    const walker = document.createTreeWalker($("#doc"), NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (within(node, "ins.track.mine, .track-new, button, .track-section-others, h1 + p")) continue;
+      for (let i = 0; i < node.length; i++) if (node.data[i] !== ZWSP) chars.push([node, i]);
+    }
+    const inside = ([node, i]) => range.comparePoint(node, i) >= 0 && range.comparePoint(node, i + 1) <= 0;
+    const a = chars.findIndex(inside);
+    if (a < 0) return null;
+    let b = a;
+    while (b < chars.length && inside(chars[b])) b += 1;
+    const text = (from, to) => chars.slice(Math.max(0, from), to).map(([node, i]) => node.data[i]).join("").replace(/\s+/g, " ");
+    const quote = { exact: squash(text(a, b)), prefix: text(a - 32, a), suffix: text(b, b + 32) };
+    if (!quote.exact || quote.exact.length > 2000) return null;
+    return locateQuote(sourceIndex(), quote.exact, quote.prefix, quote.suffix) ? quote : null;
+  }
+
+  // While editing, selecting words shows two buttons above them: Comment and Highlight.
+  function showSelectionTools() {
+    const sel = getSelection(), doc = $("#doc"), old = $(".sel-tools");
+    const usable = suggest.ready && suggest.me && suggest.commentsReady && sel.rangeCount && !sel.isCollapsed
+      && doc.contains(sel.anchorNode) && doc.contains(sel.focusNode) && !$(".comment-composer");
+    const range = usable ? sel.getRangeAt(0) : null;
+    const quote = range && quoteOf(range);
+    if (!quote) return old?.remove();
+    const box = range.getBoundingClientRect();
+    const keep = { onmousedown: (event) => event.preventDefault() };  // so the words stay selected
+    const tools = old || h("div", { class: "sel-tools", role: "toolbar", "aria-label": "Comment on or highlight the selected words" });
+    tools.replaceChildren(
+      h("button", { type: "button", ...keep, text: "Comment", onclick: () => composeComment(quote, box) }),
+      h("button", { type: "button", ...keep, text: "Highlight", onclick: () => {
+        tools.remove();
+        addComment({ kind: "highlight", ...quote });
+        hint("Highlighted, under your name. Click the highlight to remove it.");
+      } }));
+    if (!old) document.body.append(tools);
+    const above = box.top - tools.offsetHeight - 10;
+    tools.style.top = `${scrollY + (above > 70 ? above : box.bottom + 10)}px`;
+    tools.style.left = `${Math.max(12, Math.min(scrollX + box.left + box.width / 2 - tools.offsetWidth / 2, scrollX + innerWidth - tools.offsetWidth - 12))}px`;
+  }
+
+  function placePop(pop, box) {
+    pop.style.top = `${scrollY + box.bottom + 10}px`;
+    pop.style.left = `${Math.max(12, Math.min(scrollX + box.left, scrollX + innerWidth - pop.offsetWidth - 12))}px`;
+  }
+
+  function composeComment(quote, box) {
+    $(".sel-tools")?.remove();
+    $(".comment-composer")?.remove();
+    const input = h("textarea", { class: "c-input", rows: "3", placeholder: "Your comment", "aria-label": "Your comment" });
+    const send = () => {
+      const body = input.value.trim();
+      if (!body) return input.focus();
+      addComment({ ...quote, body });
+      pop.remove();
+      hint("Comment added, under your name.");
+    };
+    const pop = h("div", { class: "spot-pop comment-composer", role: "dialog", "aria-label": "Add a comment" },
+      h("p", { class: "c-quote", text: `“${cut(quote.exact, 160)}”` }), input,
+      h("p", { class: "c-actions" }, action("Comment", send, "button small"), " ", action("Cancel", () => pop.remove(), "button secondary small")));
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) send();
+      if (event.key === "Escape") pop.remove();
+    });
+    document.body.append(pop);
+    placePop(pop, box);
+    input.focus();
+  }
+
+  // A comment and its replies, with Reply, Resolve, and (for its author) Delete.
+  function threadView(root) {
+    const replies = allComments().filter((c) => c.parent === root.id).sort(byCreated);
+    const mine = (c) => !!suggest.me && c.author.id === suggest.me.id;
+    const item = (c) => h("div", { class: `c-item${c.pending ? " c-pending" : ""}` },
+      h("p", { class: "c-head" }, h("strong", { text: c.author.email }), ` · ${formatDate(c.created)}${c.pending ? " · not sent yet" : ""}`),
+      h("p", { class: "c-body", text: c.body }),
+      mine(c) ? h("p", { class: "c-actions" }, h("button", { type: "button", class: "linklike", text: c === root ? "Delete the comment" : "Delete",
+        onclick: () => deleteComment(c) })) : null);
+    const box = h("div", { class: `c-thread${root.resolved ? " resolved" : ""}`, "data-thread": root.id },
+      root.resolved ? h("p", { class: "c-state", text: `Resolved${root.resolvedBy ? ` by ${root.resolvedBy}` : ""}` }) : null,
+      item(root), ...replies.map(item));
+    if (suggest.me) {
+      const input = h("textarea", { class: "c-input", rows: "2", placeholder: "Reply", "aria-label": "Your reply" });
+      box.append(input, h("p", { class: "c-actions" },
+        action("Reply", () => { const body = input.value.trim(); if (body) addComment({ parent: root.id, body }); }, "button small"), " ",
+        action(root.resolved ? "Open it again" : "Resolve", () => resolveComment(root, !root.resolved), "button secondary small")));
+    }
+    return box;
+  }
+
+  // What's at a spot in the text: the suggestions there (with votes for maintainers, a different change to
+  // suggest, and comments on each), and the comments and highlights on those words.
+  function spotCard(proposalIds, commentIds) {
+    const comments = allComments();
+    const card = h("div", { class: "spot-pop", role: "dialog", "aria-label": "Suggestions and comments here" },
+      h("button", { type: "button", class: "pop-close", "aria-label": "Close", text: "×", onclick: () => card.remove() }));
+    proposalIds.forEach((id) => {
+      const s = suggest.others.find((x) => x.id === id);
+      if (!s) return;
+      const record = { ...s, old: s.old ?? s.exact, before: s.before ?? s.prefix, after: s.after ?? s.suffix, proposer: s.proposer || { name: s.author?.email } };
+      const known = recordOf(s.id);
+      const p = known && toTime(known.updated) === toTime(s.updated) ? { ...record, ...known } : { ...record, status: known?.status || "new" };
+      const basis = s.builds_on && currentProposals().find((x) => x.id === s.builds_on);
+      const onIt = comments.filter((c) => c.suggestion === s.id && !c.parent).sort(byCreated);
+      const block = h("div", { class: "spot-suggestion" },
+        h("p", { class: "pop-head" }, h("strong", { text: KIND_LABELS[s.kind] || "Change" }), ` · suggested by ${record.proposer?.name || "someone"}, ${formatDate(s.created)}`),
+        basis ? h("p", { class: "muted", text: `A different change for the same words as a suggestion by ${basis.proposer?.name || "someone"}.` }) : null,
+        changeView(record), s.reason ? h("p", { class: "proposal-reason", text: `“${s.reason}”` }) : null,
+        similarNote(p), voteControls(p));
+      if (suggest.me) {
+        const [open, form] = differentChangeForm(s);
+        const say = h("textarea", { class: "c-input", rows: "2", placeholder: "Comment on this suggestion", "aria-label": "Your comment on this suggestion", hidden: true });
+        const send = action("Comment", () => { const body = say.value.trim(); if (body) addComment({ suggestion: s.id, body }); }, "button small");
+        send.hidden = true;
+        block.append(h("p", { class: "c-actions" }, open, " · ",
+          h("button", { type: "button", class: "linklike", text: "Comment", onclick: (event) => { say.hidden = send.hidden = false; event.currentTarget.hidden = true; say.focus(); } })),
+        form, say, send);
+      }
+      for (const root of onIt) block.append(threadView(root));
+      card.append(block);
+    });
+    const here = commentIds.map((id) => comments.find((c) => c.id === id)).filter(Boolean);
+    const highlights = here.filter((c) => c.kind === "highlight");
+    if (highlights.length) {
+      const names = [...new Set(highlights.map((c) => c.author.email))];
+      const mine = highlights.filter((c) => suggest.me && c.author.id === suggest.me.id);
+      card.append(h("div", { class: "c-highlights" },
+        h("p", {}, h("strong", { text: "Highlighted by " }), names.join(", ")),
+        mine.length ? h("p", { class: "c-actions" }, action("Remove my highlight", () => mine.forEach(deleteComment), "button secondary small")) : null));
+    }
+    for (const root of here.filter((c) => c.kind === "comment").sort(byCreated)) card.append(threadView(root));
+    return card;
+  }
+
+  function openSpot(proposalIds, commentIds, box) {
+    $(".spot-pop:not(.comment-composer)")?.remove();
+    const card = spotCard(proposalIds, commentIds);
+    if (card.childElementCount <= 1) return;
+    openSpot.last = { proposalIds, commentIds, box };
     document.body.append(card);
-    const box = mark.getBoundingClientRect();
-    card.style.top = `${scrollY + box.bottom + 8}px`;
-    card.style.left = `${Math.max(12, Math.min(scrollX + box.left, scrollX + innerWidth - card.offsetWidth - 12))}px`;
+    placePop(card, box);
+  }
+  function refreshSpot() {
+    const open = $(".spot-pop:not(.comment-composer)");
+    if (!open || !openSpot.last) return;
+    const { proposalIds, commentIds, box } = openSpot.last;
+    const focused = document.activeElement?.closest?.(".spot-pop") ? document.activeElement : null;
+    if (focused?.matches("textarea") && focused.value.trim()) return;  // don't lose what someone is writing
+    const card = spotCard(proposalIds, commentIds);
+    card.style.top = open.style.top;
+    card.style.left = open.style.left;
+    open.replaceWith(card);
+  }
+
+  // A click in the text: on a new-section control, on a suggestion or a "+1", or on a comment or highlight.
+  function onDocClick(event) {
+    const target = event.target;
+    if (target.closest?.(".spot-pop, .sel-tools")) return;
+    if (!target.closest?.(".comment-composer")) $(".spot-pop:not(.comment-composer)")?.remove();
+    const doc = $("#doc");
+    if (!doc.contains(target)) return;
+    const control = target.closest(".add-section");
+    if (control) return startSection(control.parentElement);
+    const ids = new Set();
+    const badge = target.closest(".also-here");
+    const mark = target.closest("[data-proposal]");
+    if (mark) [mark.dataset.proposal, ...(suggest.alsoHere.get(mark.dataset.proposal) || [])].forEach((id) => ids.add(id));
+    if (badge) {
+      if (!badge.dataset.under.startsWith("mine:")) ids.add(badge.dataset.under);
+      badge.dataset.also.split(" ").forEach((id) => ids.add(id));
+    }
+    const commentIds = [];
+    for (let el = target; el && el !== doc; el = el.parentElement) if (el.matches("mark.c-mark")) commentIds.push(el.dataset.cid);
+    if (!ids.size && !commentIds.length) return;
+    openSpot([...ids], commentIds, (badge || mark || target).getBoundingClientRect());
+  }
+
+  // Comments that aren't resolved, for the list below the text: each with what it's on and its newest reply.
+  function commentCard(root) {
+    const replies = allComments().filter((c) => c.parent === root.id);
+    const on = root.suggestion ? currentProposals().find((p) => p.id === root.suggestion) : null;
+    const placed = root.exact && suggest.commentSpots?.get(root.id);
+    const show = () => {
+      const mark = root.suggestion ? $(`#doc [data-proposal="${CSS.escape(root.suggestion)}"]`) : $(`#doc mark[data-cid="${CSS.escape(root.id)}"]`);
+      if (!mark) return openSpot(root.suggestion ? [root.suggestion] : [], [root.id], card.getBoundingClientRect());
+      mark.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => openSpot(root.suggestion ? [root.suggestion] : [], root.suggestion ? [] : [root.id], mark.getBoundingClientRect()), 450);
+    };
+    const card = h("article", { class: "comment-card" },
+      h("p", { class: "c-head" }, h("strong", { text: root.author.email }), ` · ${formatDate(root.created)}${root.pending ? " · not sent yet" : ""}`),
+      root.exact ? h("p", { class: "c-quote", text: `On “${cut(root.exact, 110)}”${placed === false ? " (those words have changed since)" : ""}` })
+        : on ? h("p", { class: "c-quote", text: `On a suggestion by ${on.proposer?.name || "someone"}` }) : null,
+      h("p", { class: "c-body", text: root.body }),
+      h("p", { class: "c-actions" }, `${plural(replies.length, "reply", "replies")} · `,
+        h("button", { type: "button", class: "linklike", text: placed === false ? "Read and reply" : "Show it in the text", onclick: show })));
+    return card;
+  }
+
+  // ---- Is a new rule already there, or against another one? ----
+  // When someone adds a rule, a section's rules, or a sentence of six or more words, the page compares it with
+  // every rule in the text and every suggestion still open, by the words they share (not by meaning). A close
+  // match is shown as a likely repeat. A possible contradiction is one rule ruling out what the other starts with
+  // ("without a pilot" against "Pilot on 1 percent"), or a "never" or "do not" against a closely worded rule
+  // without one. The person decides whether to keep theirs.
+
+  const STOPWORDS = new Set(("a about after all also an and any are as at be been before but by can could did do does each every for from " +
+    "has have how i if in into is it its just may me might more most must my no not of on only or other our own same shall should so " +
+    "some such than that the their them then there these this those to too very was we were what when where which while who why will " +
+    "with would you your").split(" "));
+  const stemOf = (word) => (word.length > 4 ? word.replace(/(?:ings?|ed|es|s|ly)$/, "") : word);
+  const termsOf = (text) => (String(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter((w) => w.length > 2 && !STOPWORDS.has(w)).map(stemOf);
+  const NEGATED = /\b(?:never|not|no|without|avoid|cannot|don't|do not|must not|should not)\s+(?:(?:a|an|the|to|be|any)\s+)?([\p{L}\p{N}]+)/giu;
+  const negatedOf = (text) => new Set([...String(text).matchAll(NEGATED)].map((m) => stemOf(m[1].toLowerCase())));
+  const leadOf = (text) => new Set(termsOf(text).slice(0, 2));
+  const startsNegative = (text) => /^\s*(?:never|do not|don't|no|avoid)\b/i.test(text);
+  const rulesOut = (a, b) => { const no = negatedOf(b); return [...negatedOf(a)].some((term) => leadOf(b).has(term) && !no.has(term)); };
+
+  function ruleCandidates(exceptId) {
+    const list = [];
+    for (const block of leafBlocks($("#doc"))) {
+      if (block.matches(".track-new, h1, h2, h3, h4, h1 + p") || frozen(block)) continue;
+      const box = block.cloneNode(true);
+      for (const extra of $$("ins.track, button, mark.c-mark > button", box)) extra.remove();
+      const text = squash(box.textContent.replaceAll(ZWSP, ""));
+      if (text.split(" ").length >= 4) list.push({ text, where: sectionOf(block, $("#doc")) || "the introduction" });
+    }
+    for (const s of suggest.remote || []) {
+      if (s.id === exceptId || isIgnored(s) || !isOpen(s)) continue;
+      const lines = s.kind === "section" ? String(s.new).split("\n").slice(1) : ["rule", "insert", "replace"].includes(s.kind) ? [s.new] : [];
+      for (const line of lines) {
+        if (squash(line).split(" ").length >= 4) list.push({ text: squash(line), where: `a suggestion by ${isMine(s) ? "you" : s.author?.email || "someone"}` });
+      }
+    }
+    return list;
+  }
+
+  // The rules and suggestions most like `text`: [{ text, where, score, kind: "repeat" | "conflict" }], best first.
+  function similarRules(text, exceptId) {
+    const mine = termsOf(text);
+    if (mine.length < 3) return [];
+    const candidates = ruleCandidates(exceptId).filter((c) => squash(c.text) !== squash(text));
+    const docs = candidates.map((c) => termsOf(c.text));
+    const df = new Map();
+    for (const terms of [mine, ...docs]) for (const term of new Set(terms)) df.set(term, (df.get(term) || 0) + 1);
+    const n = docs.length + 1;
+    const vector = (terms) => {
+      const v = new Map();
+      for (const term of terms) v.set(term, (v.get(term) || 0) + Math.log(1 + n / df.get(term)));
+      return v;
+    };
+    const norm = (v) => Math.sqrt([...v.values()].reduce((sum, x) => sum + x * x, 0)) || 1;
+    const a = vector(mine), na = norm(a);
+    const found = [];
+    candidates.forEach((c, i) => {
+      const b = vector(docs[i]);
+      let dot = 0;
+      for (const [term, x] of a) dot += x * (b.get(term) || 0);
+      const score = dot / (na * norm(b));
+      const opposite = rulesOut(text, c.text) || rulesOut(c.text, text) || (startsNegative(text) !== startsNegative(c.text) && score >= 0.45);
+      if (opposite && score >= 0.2) found.push({ ...c, score, kind: "conflict" });
+      else if (!opposite && score >= 0.55) found.push({ ...c, score, kind: "repeat" });
+    });
+    return found.sort((x, y) => y.score - x.score).slice(0, 3);
+  }
+
+  // For the maintainers, on a suggestion that adds words: what it may repeat or contradict.
+  function similarNote(p) {
+    if (FINAL_STATUS.has(p.status) || !["rule", "section", "insert", "replace"].includes(p.kind)) return null;
+    const lines = p.kind === "section" ? String(p.new || "").split("\n").slice(1) : [p.new];
+    const found = lines.flatMap((line) => (squash(line).split(" ").length >= 6 || p.kind !== "replace" ? similarRules(line, p.id) : []));
+    if (!found.length) return null;
+    return h("div", { class: "similar-note" }, ...found.slice(0, 2).map((m) => h("p", {},
+      h("strong", { text: m.kind === "repeat" ? "May repeat: " : "May contradict: " }), `“${cut(m.text, 120)}” (${m.where})`)));
+  }
+
+  // After your changes are saved: a new rule (or a long new sentence) that may repeat or contradict another gets a
+  // warning beside it, once you've moved on from it, asking whether to keep it.
+  function checkNewRules() {
+    if (!suggest.me || $(".rule-check")) return;
+    const caret = getSelection().anchorNode;
+    for (const change of suggest.lastChanges || []) {
+      if (!["rule", "section", "insert", "replace"].includes(change.kind)) continue;
+      const lines = change.kind === "section" ? change.new.split("\n").slice(1) : [change.new];
+      const text = lines.join(" ");
+      const signature = `${change.kind}|${change.exact}|${change.new}`;
+      if (suggest.checked.has(signature) || (change.kind !== "rule" && change.kind !== "section" && squash(text).split(" ").length < 6)) continue;
+      const blocks = change.marks.map((mark) => blockOf(mark) || mark).filter((el) => el?.isConnected);
+      if (!blocks.length || (caret && blocks.some((el) => el.contains(caret)))) continue;  // still writing it
+      const found = lines.flatMap((line) => similarRules(line).map((m) => ({ ...m, line }))).sort((x, y) => y.score - x.score).slice(0, 3);
+      if (!found.length) { suggest.checked.add(signature); continue; }
+      showRuleCheck(change, blocks[blocks.length - 1], found, signature);
+      return;
+    }
+  }
+
+  function showRuleCheck(change, block, found, signature) {
+    const pop = h("div", { class: "spot-pop rule-check", role: "alertdialog", "aria-label": "This rule may repeat or contradict another" },
+      h("p", { class: "rule-check-title", text: "Before you keep this" }),
+      ...found.map((m) => h("div", { class: `rule-match ${m.kind}` },
+        h("p", { class: "c-quote", text: `Your ${change.kind === "insert" || change.kind === "replace" ? "words" : "rule"}: “${cut(m.line, 140)}”` }),
+        h("p", {}, h("strong", { text: m.kind === "repeat" ? "Looks like " : "May contradict " }), `this rule in ${m.where}: “${cut(m.text, 180)}”`))),
+      h("p", {}, "This check compares words, not meaning, so it can be wrong. Do you still want to add it?"),
+      h("p", { class: "c-actions" },
+        action("Keep it", () => { suggest.checked.add(signature); pop.remove(); }, "button small"), " ",
+        action("Remove it", () => { pop.remove(); removeChange(change); }, "button secondary small")));
+    document.body.append(pop);
+    placePop(pop, block.getBoundingClientRect());
+  }
+
+  // Take back one of your changes: added words go, struck words come back, a new rule or section goes.
+  function removeChange(change) {
+    rememberForUndo();
+    for (const mark of change.marks) {
+      if (!mark.isConnected) continue;
+      if (mark.matches(".track-new")) {
+        const list = mark.matches("h2.track-section") ? mark.nextElementSibling : null;
+        if (list?.matches("ul.track-section-list")) list.remove();
+        mark.remove();
+      } else if (mark.matches("del.track.mine")) mark.replaceWith(...mark.childNodes);
+      else mark.remove();
+    }
+    for (const list of $$("#doc ul.track-section-list")) if (!list.children.length) list.remove();
+    afterChange();
+  }
+
+  // ---- Editing offline ----
+  // While the connection is down, your changes stay in the text and are kept on this computer too, then saved when
+  // it's back. If the page is closed first, they're put back the next time it's opened here, and saved, as long as
+  // the words they're on are still in the text. Nobody else's work is touched: each person's changes are their own
+  // suggestions, so there's nothing to merge.
+
+  const unsavedKey = () => `els-unsaved:${suggest.me?.id}`;
+  function keepUnsaved() {
+    if (!suggest.me) return;
+    try {
+      localStorage.setItem(unsavedKey(), JSON.stringify({ version: suggest.version, at: new Date().toISOString(),
+        changes: collectChanges().map((change) => ({ ...pickChange(change), ...(change.builds_on ? { builds_on: change.builds_on } : {}) })) }));
+    } catch { /* private browsing: nothing kept */ }
+  }
+  function forgetUnsaved() {
+    try { localStorage.removeItem(unsavedKey()); } catch { /* nothing kept */ }
+  }
+
+  function removeMarksOf(docId) {
+    for (const mark of $$(`#doc [data-sid="${CSS.escape(docId)}"]`)) {
+      if (!mark.isConnected) continue;
+      if (mark.matches(".track-new")) mark.remove();
+      else if (mark.matches("del")) mark.replaceWith(...mark.childNodes);
+      else mark.remove();
+    }
+    for (const list of $$("#doc ul.track-section-list")) if (!list.children.length) list.remove();
+  }
+
+  // Only additions and changes come back: a change withdrawn offline isn't withdrawn again here, so a suggestion
+  // saved meanwhile from another tab or computer is never lost.
+  function restoreUnsaved() {
+    if (!suggest.me || suggest.remote === null) return;  // once your saved suggestions are drawn
+    suggest.restoreLater = false;
+    let kept = null;
+    try { kept = JSON.parse(localStorage.getItem(unsavedKey())); } catch { /* nothing kept */ }
+    if (!kept?.changes?.length) return;
+    const known = (suggest.remote || []).filter(isMine).map(pickChange);  // saved, approved, or published already
+    const sameSpot = (a, b) => ["kind", "exact", "prefix", "suffix"].every((key) => (a?.[key] || "") === (b?.[key] || ""));
+    let restored = 0;
+    const lost = [];
+    for (const change of kept.changes) {
+      if (known.some((c) => sameChange(c, change))) continue;
+      // A saved suggestion changed while offline: drawn as changed, with its id, so saving updates it.
+      const edited = [...suggest.saved].find(([, saved]) => sameSpot(saved, change));
+      if (edited) removeMarksOf(edited[0]);
+      if (drawSuggestion({ ...change, docId: edited?.[0] }, true, []) === true) restored += 1;
+      else lost.push(change);
+    }
+    if (restored) {
+      afterChange();
+      hint(`Put back ${plural(restored, "change")} you made on this computer while offline. Saving ${restored === 1 ? "it" : "them"} now.`);
+    } else forgetUnsaved();
+    if (lost.length) {
+      const list = h("div", { class: "lost-changes" },
+        h("p", {}, h("strong", { text: `${plural(lost.length, "change")} you made offline no longer ${lost.length === 1 ? "fits" : "fit"} the text, ` }),
+          "because the words have changed since. Make them again if you still want them:"),
+        h("ul", {}, ...lost.map((c) => h("li", { text: changeSentence(c) }))),
+        h("p", {}, action("Dismiss", () => list.remove(), "button secondary small")));
+      $("#suggest-bar")?.append(list);
+    }
+  }
+
+  // On a suggestion that builds on another: whose.
+  function buildsOnNote(p) {
+    const basis = currentProposals().find((x) => x.id === p.builds_on);
+    return h("p", { class: "proposal-builds", text: `A different change for the same words as ${basis ? `a suggestion by ${basis.proposer?.name || "someone"}` : "another suggestion"}.` });
   }
 
   // ---- The list of suggestions below the text ----
@@ -1820,9 +2575,10 @@
   // A suggestion from the database as a proposal: the robot's record of it if that's up to date, or what's known
   // until the robot looks (within a few minutes).
   function asProposal(s, known) {
-    if (known && (FINAL_STATUS.has(known.status) || toTime(known.updated) === toTime(s.updated))) return known;
+    if (known && (FINAL_STATUS.has(known.status) || toTime(known.updated) === toTime(s.updated))) return s.builds_on ? { ...known, builds_on: s.builds_on } : known;
     return { id: s.id, status: "new", kind: s.kind, old: s.exact, new: s.new, before: s.prefix, after: s.suffix, reason: s.reason,
-      created: s.created, updated: s.updated, proposer: { name: s.author.email, email: s.author.email }, issue: known?.issue };
+      created: s.created, updated: s.updated, proposer: { name: s.author.email, email: s.author.email }, issue: known?.issue,
+      builds_on: s.builds_on || null };
   }
 
   function currentProposals() {
@@ -1861,7 +2617,8 @@
   function changeSentence(p) {
     const cut = (text, n) => { const t = squash(text); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
     return { delete: `Removed “${cut(p.old, 70)}”`, replace: `Replaced “${cut(p.old, 40)}” with “${cut(p.new, 40)}”`,
-      insert: `Added “${cut(p.new, 70)}”`, rule: `Added a rule: “${cut(p.new, 70)}”` }[p.kind] || "Changed the text";
+      insert: `Added “${cut(p.new, 70)}”`, rule: `Added a rule: “${cut(p.new, 70)}”`,
+      section: `Added a section: “${cut(String(p.new).split("\n")[0], 70)}”` }[p.kind] || "Changed the text";
   }
 
   // Below the text on Suggest Edits: the suggestions waiting for a maintainer, and the publishing queue. Published
@@ -1873,7 +2630,9 @@
     const rules = governance?.rules || {};
     const decided = pendingDecisions();
     // Redraw only when something shown has changed, so nothing a maintainer is doing is interrupted.
-    const shown = JSON.stringify([suggest.version, suggest.me?.id ?? null, currentProposals(), suggest.votes, decisionsKey(decided)]);
+    const comments = suggest.commentsReady ? allComments() : [];
+    const shown = JSON.stringify([suggest.version, suggest.me?.id ?? null, currentProposals(), suggest.votes, decisionsKey(decided),
+      suggest.commentsReady, comments, [...suggest.commentSpots]]);
     if (shown === renderProposals.shown && section.childElementCount) return;
     renderProposals.shown = shown;
     const place = new Map([...decided].filter(([, d]) => d.kind === "adopt").map(([id], i) => [id, i + 1]));  // the robot's order
@@ -1890,6 +2649,8 @@
     renderProposals.queued = new Set(queue.map((p) => p.id));
     const card = (p) => proposalCard(p, cfg, rules, [reasonField(p), voteControls(p)]);
     const thisWeek = adopted.filter((p) => Date.now() - (toTime(p.decided) || 0) < WEEK).length;
+    const openComments = comments.filter((c) => c.kind === "comment" && !c.parent && !c.resolved)
+      .sort((a, b) => (b.created || "").localeCompare(a.created || ""));
     section.replaceChildren(
       h("h2", { text: "Suggestions" }),
       h("p", {}, "Each suggestion waits for the ", h("a", { href: at("maintainers/"), text: "maintainers" }),
@@ -1899,6 +2660,7 @@
         { n: queue.length, label: "being published now", href: "#queue", kind: "queue" },
         { n: thisWeek, label: "published in the past week", href: at("history/"), kind: "done" },
         { n: adopted.length, label: "published in all", href: at("history/"), kind: "done" },
+        ...(suggest.commentsReady ? [{ n: openComments.length, label: openComments.length === 1 ? "open comment" : "open comments", href: "#comments", kind: "comment" }] : []),
       ]));
     if (!open.length) section.append(h("p", { class: "empty", text: "No suggestions are waiting right now. Edit the text above to make one." }));
     else section.append(h("h3", { id: "waiting", text: `Waiting for approval (${open.length})` }), ...open.map(card));
@@ -1907,6 +2669,11 @@
         h("h3", { text: `Publishing queue (${queue.length})` }),
         h("p", { class: "muted", text: "Decided, and waiting for the robot, which takes them in this order, usually within a minute or two. The text above already shows the approved changes, in purple; each leaves the queue once it's published, and is then in History. Disapproved ones move to the Declined page." }),
         ...queue.map(card)));
+    }
+    if (openComments.length) {
+      section.append(h("div", { class: "comments-list", id: "comments" }, h("h3", { text: `Open comments (${openComments.length})` }),
+        h("p", { class: "muted", text: "Comments never change the text. Anyone signed in can reply to one, or resolve it once it's settled; resolved comments are hidden." }),
+        ...openComments.map(commentCard)));
     }
     if (renderProposals.published.length) {
       section.append(h("div", { class: "just-published", "aria-live": "polite" }, ...renderProposals.published.map((p) =>
@@ -1947,13 +2714,27 @@
       if (key === "y" && event.ctrlKey) { event.preventDefault(); redo(); }
     });
 
-    document.addEventListener("click", onSuggestionClick);
+    document.addEventListener("click", onDocClick);
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") $(".suggestion-pop")?.remove();
-      if (event.key === "Enter" && event.target.matches?.("[data-proposal]")) onSuggestionClick(event);
+      if (event.key === "Escape") { $(".spot-pop")?.remove(); $(".sel-tools")?.remove(); }
+      if (event.key === "Enter" && event.target.matches?.("[data-proposal], .also-here")) onDocClick(event);
     });
+    let selectionTimer = 0;
+    document.addEventListener("selectionchange", () => {
+      clearTimeout(selectionTimer);
+      selectionTimer = setTimeout(() => { showSelectionTools(); checkNewRules(); }, 200);
+    });
+    // Offline and back: changes and comments wait on this computer, and go as soon as the connection is back.
+    addEventListener("offline", () => setSaveStatus("Offline. Your changes are kept on this computer and will be saved when you're back online.", true));
+    addEventListener("online", () => {
+      setSaveStatus(suggest.dirty ? "Back online. Saving…" : "All changes saved");
+      if (suggest.dirty) sync();
+      sendOutbox();
+      suggest.watcher?.refresh();
+    });
+    addEventListener("pagehide", () => { if (suggest.me && suggest.dirty) keepUnsaved(); });
     addEventListener("beforeunload", (event) => {
-      if (suggest.me && suggest.dirty) { sync(); event.preventDefault(); }
+      if (suggest.me && suggest.dirty) { keepUnsaved(); sync(); event.preventDefault(); }
     });
     drawEverything();
 
@@ -1969,14 +2750,23 @@
     const start = () => {
       if (suggest.ready || !gotUser || !gotData) return;
       suggest.ready = true;
+      suggest.outbox = readOutbox();
+      suggest.restoreLater = true;  // changes kept on this computer go back in once your saved ones are drawn
       drawEverything();
       renderProposals();
+      sendOutbox();
       if (pendingDecisions().size) watchForPublication(true);
     };
     const backend = suggest.backend;
     if (backend.kind === "none") { gotUser = gotData = true; return start(); }
-    suggest.watcher = backend.watch(({ suggestions, votes }) => {
+    suggest.watcher = backend.watch(({ suggestions, votes, comments = [], commentsReady = false }) => {
+      if (suggest.remote === null && suggest.ready) {  // the first data, after a slow start: draw it all
+        suggest.redraw = true;
+        setSaveStatus("All changes saved");
+      }
       suggest.remote = suggestions;
+      suggest.comments = comments.map(fromCommentRow);
+      suggest.commentsReady = commentsReady;
       const saved = (mine) => votes.some((v) => v.suggestion === mine.suggestion && v.voter_id === mine.voter_id && v.vote === mine.vote);
       suggest.pendingVotes = suggest.pendingVotes.filter((mine) => !saved(mine) && Date.now() - toTime(mine.at) < 120000);
       suggest.votes = [...votes.filter((v) => !suggest.pendingVotes.some((mine) => mine.suggestion === v.suggestion && mine.voter_id === v.voter_id)),
@@ -1984,7 +2774,7 @@
       if (!gotData) { gotData = true; return start(); }
       refresh();
     }, (error) => {
-      hint(`Suggestions couldn't be loaded: ${error.message}.`);
+      if (navigator.onLine) hint(`Suggestions couldn't be loaded: ${error.message}.`);
       if (!gotData) { gotData = true; start(); }
     });
     backend.onUser((user) => {
@@ -1993,9 +2783,13 @@
       if (!gotUser) { gotUser = true; return start(); }
       if (!suggest.ready || (before?.id ?? null) === (user?.id ?? null)) return updateBar();
       setSaveStatus("All changes saved");
-      $(".suggestion-pop")?.remove();
+      $(".spot-pop")?.remove();
+      $(".sel-tools")?.remove();
+      suggest.outbox = readOutbox();
+      suggest.restoreLater = true;
       drawEverything();
       renderProposals();
+      sendOutbox();
       if (user) {
         scrollTo({ top: 0, behavior: "instant" });
         hint("You're verified. Click anywhere in the text to start editing.");
@@ -2369,7 +3163,7 @@
     return box;
   }
 
-  const CHANGE_KINDS = { delete: "removed", replace: "changed", insert: "added", rule: "added" };
+  const CHANGE_KINDS = { delete: "removed", replace: "changed", insert: "added", rule: "added", section: "added" };
 
   // History has two views. Without ?v=, every published change, newest first and by day, each with what changed
   // marked; with ?v=0.0.9, that version's text with its changes marked in place, and the versions beside it.
@@ -2431,7 +3225,7 @@
       });
       all.replaceChildren(
         statsRow([
-          { n: versions.length, label: "versions published", kind: "done" },
+          { n: versions.length, label: versions.length === 1 ? "version published" : "versions published", kind: "done" },
           { n: versions.filter((r) => Date.now() - when(r) < WEEK).length, label: "published in the past week", kind: "done" },
           { n: records.filter((r) => !FINAL.includes(r.status)).length, label: "waiting for approval", href: at("draft/#waiting"), kind: "waiting" },
           { n: records.filter((r) => FINAL.includes(r.status) && r.status !== "adopted").length, label: "on the Declined page", href: at("declined/"), kind: "declined" },

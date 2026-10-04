@@ -6,9 +6,20 @@ This project is one file, **AGENTS.md**: standing instructions for AI agents wor
 
 1. Open [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/).
 2. Verify an email address: enter any address you can check, then the 6-digit code the site emails to it. That address is your name on the site, and everyone can see it.
-3. Edit the text as in Word with track changes on: deleted words are struck out, and new words appear in blue under your name. Press Enter at the end of a rule to add a new one. Every change is saved automatically as a suggestion.
+3. Edit the text as in Word with track changes on: deleted words are struck out, and new words appear in blue under your name. Press Enter at the end of a rule to add a new one. To add a section, choose **+ New section** at the end of a section, type its heading, press Enter, and type its rules. Every change is saved automatically as a suggestion.
+
+When you add a rule, the page compares it with the rules in the text and the open suggestions, by their words. If it looks like a repeat, or like it contradicts one, the page says which and asks whether you still want it.
 
 When a maintainer approves your suggestion, it's published as a new version automatically. You can follow it in the list below the text on Suggest Edits; if it's disapproved, it moves to the [Declined](https://nathanreitinger.github.io/els-agent-practices/declined/) page.
+
+## Comment, highlight, or suggest something different
+
+- **Comment or highlight:** select words, then choose **Comment** or **Highlight** in the small bar above them. Comments and highlights carry your email address, everyone sees them, and they never change the text. Click one to read it, reply, or resolve it. Anyone can resolve a comment; only its author can delete it.
+- **Respond to someone's suggestion:** click it in the text. Choose **Comment** to discuss it, or **Suggest a different change** to offer your own version of the same change. Yours is saved as your own suggestion, marked as building on theirs, and the maintainers choose between them. When several people change the same words, a "+2" (or more) beside the change opens all of them.
+
+## Working offline
+
+If your connection drops while you're editing, keep going. Your changes and comments are kept on your computer and saved when the connection is back. If you close the page first, they're put back the next time you open Suggest Edits on that computer, as long as the words they're on haven't changed meanwhile. Nothing is merged with anyone else's work: each person's changes are their own suggestions.
 
 ## Talk with others
 

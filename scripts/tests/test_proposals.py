@@ -375,6 +375,18 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.git("tag", "--list", "v*").split(), ["v0.0.2", "v0.1.0", "v0.1.1", "v1.0.0"])
         self.assertIn("*Version 1.0.0 · Published", (self.repo / "draft" / "AGENTS.md").read_text())
 
+    def test_a_new_section_keeps_its_lines_and_is_published(self):
+        site = {"suggestions": [suggestion("s1", "section", "the strongest counterargument.", "", "",
+                                           "Language\n  Write   plainly. \n\nDefine every term.", email="reader@example.org")],
+                "votes": [site_vote("sb-s1", LEAD_EMAIL, "approve")]}
+        self.robot(site)
+        record = self.ledger()["sb-s1"]
+        self.assertEqual(record["new"], "Language\nWrite plainly.\nDefine every term.")
+        self.assertEqual(record["status"], "adopted")
+        self.assertEqual(self.manifest()["versions"][0]["summary"], "Added a section: “Language” (after Pushing back).")
+        draft = (self.repo / "draft" / "AGENTS.md").read_text()
+        self.assertIn("\n\n## Language\n\n- Write plainly.\n- Define every term.\n\n## Evidence before you say done\n", draft)
+
     def test_a_suggestion_without_its_new_words_needs_a_fix(self):
         self.robot({"suggestions": [suggestion("q", "insert", "plans", new="  ")], "votes": [site_vote("sb-q", LEAD_EMAIL, "approve")]})
         record = self.ledger()["sb-q"]

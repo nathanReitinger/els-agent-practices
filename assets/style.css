@@ -44,6 +44,9 @@
   --old-bar: #f1e9da;
   --old-line: rgba(110, 83, 50, 0.3);
   --old-tint: rgba(110, 83, 50, 0.09);
+  --comment: #946200;
+  --comment-soft: rgba(255, 190, 0, 0.16);
+  --highlight: rgba(255, 228, 0, 0.42);
   --shadow: 0 1px 2px rgba(29, 27, 32, 0.04), 0 10px 30px rgba(29, 27, 32, 0.06);
   --serif: "Playfair", "Playfair Display", Georgia, "Times New Roman", serif;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -91,6 +94,9 @@
   --old-bar: #24211b;
   --old-line: rgba(216, 187, 142, 0.3);
   --old-tint: rgba(216, 187, 142, 0.1);
+  --comment: #e8c463;
+  --comment-soft: rgba(232, 196, 99, 0.15);
+  --highlight: rgba(250, 220, 90, 0.27);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 @media (prefers-color-scheme: dark) {
@@ -134,6 +140,9 @@
     --old-bar: #24211b;
     --old-line: rgba(216, 187, 142, 0.3);
     --old-tint: rgba(216, 187, 142, 0.1);
+    --comment: #e8c463;
+    --comment-soft: rgba(232, 196, 99, 0.15);
+    --highlight: rgba(250, 220, 90, 0.27);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
   }
 }
@@ -678,7 +687,7 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 /* Your own changes: struck-out words, and new words in blue with your name (your email address). */
 .doc ins.track.mine { color: var(--mine); background: var(--mine-soft); text-decoration: none; border-bottom: 1px solid var(--mine); border-radius: 2px; }
 .doc del.track.mine { color: var(--del); background: var(--del-soft); }
-.doc ins.track.mine::before, .doc .track.others::before, .doc .track-rule.others::before {
+.doc ins.track.mine::before, .doc .track.others::before, .doc .track-rule.others::before, .doc .track-section-others::before {
   content: attr(data-by);
   display: inline-block;
   max-width: 16em;
@@ -703,27 +712,98 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .doc ins.track.others::before { background: var(--others); color: var(--bg); }
 .doc .track-rule.others { color: var(--others); cursor: pointer; }
 .doc .track-rule.others::after { content: attr(data-text); background: var(--others-soft); border-bottom: 1px solid var(--others); }
-.doc .track-rule.others::before { background: var(--others); color: var(--bg); }
+.doc .track-rule.others::before, .doc .track-section-others::before { background: var(--others); color: var(--bg); }
+
+/* Several changes to the same words: a "+1" beside the one drawn opens all of them. */
+.doc .also-here { margin: 0 0.15em; padding: 0 0.45em; border: 1px solid var(--others); border-radius: 999px; background: var(--bg); color: var(--others);
+  font: 700 0.6em/1.55 var(--sans); vertical-align: 0.2em; cursor: pointer; }
+.doc .also-here:hover, .doc .also-here:focus-visible { background: var(--others); color: var(--bg); }
+
+/* New sections: a "+ New section" control at the end of each section while editing; yours in blue, others' in orange. */
+.doc .add-here { margin: 0.5em 0 0.3em; }
+.doc:not(.suggesting) .add-here { display: none; }
+.doc .add-section { padding: 0.1rem 0.75rem; border: 1px dashed var(--border); border-radius: 999px; background: none; color: var(--muted);
+  font: 600 0.7rem/1.7 var(--sans); cursor: pointer; }
+.doc .add-section:hover, .doc .add-section:focus-visible { border-color: var(--mine); color: var(--mine); }
+.doc h2.track-section { border-top-style: dashed; }
+.doc .track-section[data-empty] ins.track.mine::after { color: var(--faint); font-weight: 400; }
+.doc h2.track-section[data-empty] ins.track.mine::after { content: "Name the new section"; }
+.doc li.track-section[data-empty] ins.track.mine::after { content: "A rule for the new section"; }
+.doc .track-section-others { margin: 1.4em 0 1em; padding: 0.45em 0.75em; border-left: 3px solid var(--others); border-radius: 0 8px 8px 0;
+  background: var(--others-soft); color: var(--others); cursor: pointer; }
+.doc .track-section-others .ts-title { margin: 0.2em 0 0.3em; font: 700 1.1em/1.3 var(--sans); }
+.doc .track-section-others .ts-rule { margin: 0.25em 0 0 1em; text-indent: -0.8em; }
+.doc .track-section-others .ts-rule::before { content: "• "; }
+.change .new-section-title { font-family: var(--sans); font-weight: 700; }
+
+/* Comments (amber, dotted underline) and highlights (yellow) on words; overlapping ones get darker. */
+.doc mark.c-mark { color: inherit; border-radius: 2px; cursor: pointer; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.doc mark.c-comment { background: var(--comment-soft); border-bottom: 2px dotted var(--comment); }
+.doc mark.c-highlight { background: var(--highlight); }
+.doc mark.c-pending { border-bottom-style: dashed; }
+
+/* Above selected words while editing: Comment and Highlight. */
+.sel-tools { position: absolute; z-index: 35; display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); box-shadow: var(--shadow); }
+.sel-tools button { padding: 0.28rem 0.8rem; border: 0; border-radius: 999px; background: none; color: var(--text); font: 600 0.82rem/1.4 var(--sans); cursor: pointer; }
+.sel-tools button:hover, .sel-tools button:focus-visible { background: var(--comment-soft); color: var(--comment); }
 .doc [data-proposal]:focus-visible { outline: 2px solid var(--others); outline-offset: 2px; }
 .doc .flash { outline: 2px solid var(--others); outline-offset: 3px; border-radius: 3px; }
 /* An approved change, shown as part of the text while the robot publishes it. */
 .doc .accepted { background: var(--pending-soft); border-bottom: 1px solid var(--pending); border-radius: 2px; }
 .doc .flash.mine, .doc [data-sid].flash { outline-color: var(--mine); }
-.suggestion-pop {
+.spot-pop {
   position: absolute;
   z-index: 30;
-  width: min(26rem, calc(100vw - 24px));
+  width: min(28rem, calc(100vw - 24px));
+  max-height: min(70vh, 40rem);
+  overflow: auto;
   padding: 0.8rem 0.95rem;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--others);
   border-radius: 12px;
   background: var(--bg);
   box-shadow: var(--shadow);
   font-size: 0.9rem;
 }
-.suggestion-pop p { margin: 0.35rem 0 0; }
-.suggestion-pop .pop-head { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
-.suggestion-pop .pop-head strong { color: var(--text); }
+.spot-pop p { margin: 0.35rem 0 0; }
+.spot-pop .pop-head { margin: 0; padding-right: 1.4rem; color: var(--muted); overflow-wrap: anywhere; }
+.spot-pop .pop-head strong { color: var(--text); }
+.pop-close { position: absolute; top: 0.25rem; right: 0.45rem; padding: 0 0.3rem; border: 0; background: none; color: var(--muted); font-size: 1.25rem; line-height: 1; cursor: pointer; }
+.spot-suggestion { margin: 0.2rem 0 0.7rem; padding-left: 0.7rem; border-left: 3px solid var(--others); }
+.spot-suggestion + .spot-suggestion { padding-top: 0.6rem; border-top: 1px solid var(--rule); }
+.spot-suggestion .different { margin-top: 0.3rem; }
+.c-thread { margin: 0.6rem 0 0.3rem; padding-left: 0.7rem; border-left: 3px solid var(--comment); }
+.c-thread.resolved { opacity: 0.8; }
+.c-item + .c-item { margin-top: 0.55rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); }
+.c-head { margin: 0 !important; padding-right: 1.4rem; color: var(--muted); font-size: 0.82rem; overflow-wrap: anywhere; }
+.c-head strong { color: var(--text); }
+.c-body { margin: 0.2rem 0 0 !important; font-family: var(--serif); font-size: 0.98rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.c-quote { margin: 0 0 0.35rem !important; color: var(--muted); font-family: var(--serif); font-size: 0.92rem; font-style: italic; overflow-wrap: anywhere; }
+.c-state { margin: 0 0 0.25rem !important; color: var(--good); font-size: 0.82rem; font-weight: 600; }
+.c-pending .c-head { color: var(--warn); }
+.c-input { box-sizing: border-box; width: 100%; margin-top: 0.5rem; padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: 0.92rem/1.45 var(--sans); resize: vertical; }
+.c-input:focus { outline: 2px solid var(--comment-soft); border-color: var(--comment); }
+.c-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; margin: 0.4rem 0 0 !important; color: var(--muted); font-size: 0.86rem; }
+.c-highlights { margin: 0.4rem 0; padding-left: 0.7rem; border-left: 3px solid var(--highlight); }
+
+/* "This rule may repeat or contradict another": for the person adding it, and for the maintainers. */
+.rule-check { border-left: 3px solid var(--warn); }
+.rule-check-title { margin: 0 0 0.3rem !important; color: var(--warn); font: 700 0.95rem var(--sans); }
+.rule-match { font-size: 0.88rem; overflow-wrap: anywhere; }
+.rule-match.conflict strong { color: var(--bad); }
+.similar-note { margin: 0.5rem 0 0; padding: 0.4rem 0.65rem; border-left: 3px solid var(--warn); border-radius: 0 8px 8px 0; background: var(--warn-soft);
+  font-family: var(--sans); font-size: 0.85rem; overflow-wrap: anywhere; }
+.similar-note p { margin: 0.1rem 0 0 !important; }
+.proposal-builds { color: var(--muted); font-family: var(--sans); font-size: 0.88rem; }
+.lost-changes { margin-top: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--warn); border-radius: 8px; background: var(--warn-soft); font-size: 0.86rem; }
+.lost-changes ul { margin: 0.3rem 0; padding-left: 1.2rem; }
+
+/* Open comments, below the suggestions on Suggest Edits. */
+.comments-list { margin: 1.4rem 0 1rem; }
+.comment-card { margin: 0 0 0.6rem; padding: 0.7rem 0.9rem; border: 1px solid var(--rule); border-left: 3px solid var(--comment); border-radius: 0 10px 10px 0; background: var(--bg); }
+.comment-card p { margin: 0.2rem 0 0; }
+.comment-card .c-body { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 
 /* Join the community */
 .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; margin-top: 1.4rem; }
@@ -772,6 +852,7 @@ a.stat:hover { border-color: var(--stat); }
 .stat-queue { --stat: var(--pending); }
 .stat-done { --stat: var(--old); }
 .stat-declined { --stat: var(--faint); }
+.stat-comment { --stat: var(--comment); }
 
 /* Suggest Edits, below the queue: what was published while the page was open, and the way to History. */
 .just-published { margin: 0 0 1rem; font-family: var(--sans); font-size: 0.92rem; line-height: 1.5; }

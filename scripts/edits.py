@@ -9,6 +9,7 @@ and makes the change there:
     replace   put new words in place of the selected words
     insert    add words right after the selected words
     rule      add a new rule (a new line) after the one holding the selection
+    section   add a new section (a ## heading and its rules) after the section holding the selection
 
 It refuses anything it can't do exactly, and checks every edit it makes: the
 rendered text afterward must be the rendered text before, with only the selected
@@ -25,7 +26,7 @@ import unicodedata
 from bisect import bisect_right
 from dataclasses import dataclass, field
 
-KINDS = ("delete", "replace", "insert", "rule")
+KINDS = ("delete", "replace", "insert", "rule", "section")
 
 # Plain-English reasons a proposal can't be applied, shown to the proposer and the maintainers.
 REASONS = {
@@ -612,6 +613,31 @@ def _new_rule(doc: Doc, lines: list[str], anchor: Line, text: str) -> tuple[int,
     raise Refused("code")
 
 
+def section_parts(text: str) -> tuple[str, list[str]]:
+    """A new section's heading and rules, from its text: the heading on the first line, then one rule a line."""
+    parts = [" ".join(part.split()) for part in text.split("\n")]
+    parts = [part for part in parts if part]
+    if not parts:
+        return "", []
+    rules = [MARKER_TEXT.sub("", part) for part in parts[1:]]
+    return re.sub(r"^#+\s*", "", parts[0]), [rule for rule in rules if rule]
+
+
+def _new_section(doc: Doc, lines: list[str], anchor: Line, title: str, rules: list[str]) -> tuple[int, list[str]]:
+    """Where a new section goes (right after the last line of the section holding `anchor`, before the next ##
+    heading or at the end), and its lines, with a blank line before and after it."""
+    k = anchor.number + 1
+    while k < len(doc.lines) and not (doc.lines[k].kind == "heading" and len(doc.lines[k].marker) <= 2):
+        k += 1
+    end = k
+    while end > anchor.number + 1 and doc.lines[end - 1].kind == "blank":
+        end -= 1
+    block = ["", f"## {title}"] + ([""] + [f"- {rule}" for rule in rules] if rules else [])
+    if end < len(lines) and lines[end].strip():
+        block.append("")
+    return end, block
+
+
 def _check_structure(original: str, updated: str) -> None:
     old, new = original.split("\n"), updated.split("\n")
     if (len(new) <= STAMP_INDEX or not new[0].startswith("# ") or new[1] != "" or new[STAMP_INDEX] != old[STAMP_INDEX]
@@ -697,6 +723,17 @@ def apply(source: str, kind: str, exact: str, prefix: str = "", suffix: str = ""
         trail = " " if right and (right[0].isalnum() or right[0] in "([\"'“‘") else ""
         lines[last.number] = left + lead + expected_new + trail + right
         expected = doc.squeezed[:b] + squeeze(plain_text(expected_new)) + doc.squeezed[b:]
+
+    elif kind == "section":
+        title, rules = section_parts(new_text)
+        if not title:
+            raise Refused("unchecked")
+        insert_at, new_lines = _new_section(doc, lines, last, title, rules)
+        cut_at = doc.lines[insert_at].start if insert_at < len(doc.lines) else len(source)
+        lines[insert_at:insert_at] = new_lines
+        cut = sum(1 for off in doc.offsets if off < cut_at)
+        added = squeeze(plain_text(title)) + "".join(squeeze(plain_text(rule)) for rule in rules)
+        expected = doc.squeezed[:cut] + added + doc.squeezed[cut:]
 
     else:  # rule
         expected_new = _clean_new(new_text, strip_marker=True)

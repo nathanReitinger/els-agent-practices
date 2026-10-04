@@ -100,5 +100,5 @@ The robot also keeps GitHub from switching off its schedule: GitHub does that af
 ## Good to know
 
 - **Free projects pause after a week without use.** The robot reads the database every time it runs, which counts as use. If the project is ever paused, restore it from the Supabase dashboard; nothing is lost.
-- **Who can see what.** Suggestions and votes are public, with the email address of the person who made them, as the site says when someone signs in. Readers' sign-ins are in the project's Authentication page, which only you can see.
-- **Removing someone's suggestions.** Add their email address to `ignored_accounts.site` in governance/maintainers.json: the robot then ignores everything from it, and its open suggestions are withdrawn.
+- **Who can see what.** Suggestions, votes, comments, and highlights are public, with the email address of the person who made them, as the site says when someone signs in. Readers' sign-ins are in the project's Authentication page, which only you can see.
+- **Removing someone's suggestions.** Add their email address to `ignored_accounts.site` in governance/maintainers.json: the robot then ignores everything from it, its open suggestions are withdrawn, and the site hides its comments and highlights.

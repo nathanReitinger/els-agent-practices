@@ -15,12 +15,20 @@ Open Suggest Edits. A popup asks you to verify an email address: enter any addre
 - Select words and press Delete to strike them out; they stay visible, struck through, until a maintainer decides.
 - Type to add words; they appear in blue, labeled with your email address.
 - To add a new rule, put the cursor at the end of a rule and press Enter.
+- To add a section, choose **+ New section** at the end of a section: type its heading, press Enter, and type its rules. A new section is one suggestion.
+- To offer a different change for words someone else changed, click their change and choose **Suggest a different change**. It's saved as your own suggestion, marked as building on theirs, and the maintainers choose.
 
 The address you verify is your name on the site: it's shown with your suggestions, and it's recorded with every change that's adopted. Every change is saved automatically, as one suggestion, so maintainers can approve some and disapprove others. Change it again, and the suggestion is updated; undo it, and it's withdrawn. Undo and Redo work as usual. You can add a reason to each suggestion in the list below the text.
 
 Everyone sees everyone's suggestions in the text: your own in blue, other people's in orange, each with the suggester's email address. Clicking one shows the details. Readers' suggestions and votes are kept in the site's database (see [supabase/README.md](supabase/README.md)), which anyone can read.
 
+When someone adds a rule, the page compares it with the rules in the text and the open suggestions, by their words (not their meaning), and warns if it looks like a repeat or a contradiction. The person decides whether to keep it, and the maintainers see the same note on the suggestion.
+
 Each suggestion is checked against the current text. If it can't be applied exactly (for example, because an earlier change altered its words), it's closed with an explanation, and you can suggest it again.
+
+## Comments and highlights
+
+Anyone who has verified an email address can comment on words, highlight them, comment on a suggestion, and reply to comments. Comments and highlights carry the person's email address, everyone sees them, and they never change the text or decide anything. Anyone verified can resolve a comment; resolved comments are hidden but kept. Each person can delete only their own. Accounts listed in `ignored_accounts.site` are hidden here too.
 
 ## Deciding
 

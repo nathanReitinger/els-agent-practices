@@ -172,6 +172,23 @@ class ApplyTest(unittest.TestCase):
         edit = apply(AGENTS, "rule", "When a trigger fires, stop and tell me", "", "", "A new trigger.")
         self.assertIn("Then wait for my answer.\n\n- A new trigger.\n- A step would drop", edit.source)
 
+    def test_new_section_goes_after_the_section_it_follows(self):
+        edit = apply(SAMPLE, "section", "Second rule.", "", "", "Extra\nOne more rule.\n- And another.")
+        self.assertIn("3. Third rule.\n\n## Extra\n\n- One more rule.\n- And another.\n\n## Loose\n", edit.source)
+        self.assertEqual(edit.before, [])
+        self.assertEqual(edit.after, ["Extra", "One more rule.", "And another."])
+        self.assertEqual(edit.section, "Numbered")
+
+    def test_new_section_at_the_end_and_with_no_rules(self):
+        edit = apply(SAMPLE, "section", "Two loose item.", "", "", "## Last words")
+        self.assertTrue(edit.source.endswith("- Two loose item.\n\n## Last words\n"))
+        edit = apply(AGENTS, "section", "Pushing back", "", "", "Language\nWrite plainly.")
+        self.assertIn("\n\n## Language\n\n- Write plainly.\n\n## Evidence before you say done\n", edit.source)
+
+    def test_new_section_needs_a_heading(self):
+        with self.assertRaises(Refused):
+            apply(SAMPLE, "section", "Second rule.", "", "", "  \n ")
+
     def test_new_paragraph_after_a_paragraph(self):
         edit = apply(AGENTS, "rule", "make every result easy for me to check.", "", "", "A new paragraph.")
         self.assertIn("easy for me to check.\n\nA new paragraph.\n\n## Non-negotiable rules", edit.source)
