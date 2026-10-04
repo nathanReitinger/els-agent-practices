@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": true
   },
-  "latest": "0.0.18",
+  "latest": "0.0.19",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.19",
+      "date": "2026-10-04",
+      "summary": "Added “I am the author, and I answer—not you—for every number, quote, citation, and li…” after “check.”.",
+      "fingerprint": "650939ce8e41233953ac1487679987e06de67e27510bc4a09732975d8a0b0586",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.18",
       "date": "2026-10-04",

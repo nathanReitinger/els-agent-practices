@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.19] - 2026-10-04
+
+Added “I am the author, and I answer—not you—for every number, quote, citation, and li…” after “check.”.
+
+- Proposed by nathan.reitinger@⁠gmail.com (Suggest Edits) on 2026-10-04
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-04)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals> · Discussion: <https://github.com/nathanReitinger/els-agent-practices/issues/15>
+
+Argon2id fingerprint: `650939ce8e41233953ac1487679987e06de67e27510bc4a09732975d8a0b0586`
+
+
 ## [0.0.18] - 2026-10-04
 
 Deleted “I am the author, and I answer for every number, quote, citation, and line of co…”.
