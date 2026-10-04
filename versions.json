@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": true
   },
-  "latest": "0.0.15",
+  "latest": "0.0.16",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.16",
+      "date": "2026-10-04",
+      "summary": "The lead maintainer's edits: 13 rules removed, 5 added (one in a new Language section), others reworded, and no contractions.",
+      "fingerprint": "bc7ff0c6977f6ca749843efec4a9ed0aea412620bd92dc8c53b91e2ca8b5dd8d",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.15",
       "date": "2026-10-03",

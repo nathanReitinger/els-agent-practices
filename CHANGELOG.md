@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.16] - 2026-10-04
+
+The lead maintainer's edits: 13 rules removed, 5 added (one in a new Language section), others reworded, and no contractions.
+
+Changes to the text, by nathanReitinger:
+
+- AGENTS.md: the lead maintainer's edits, no contractions, and a Language section
+
+Argon2id fingerprint: `bc7ff0c6977f6ca749843efec4a9ed0aea412620bd92dc8c53b91e2ca8b5dd8d`
+
+
 ## [0.0.15] - 2026-10-03
 
 Deleted “the opposite result” (Pushing back).
