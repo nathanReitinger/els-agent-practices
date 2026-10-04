@@ -14,7 +14,7 @@ Nothing secret goes into this repository. The two values the site needs, the pro
 1. Open the project's **SQL Editor**, and choose **New query**.
 2. Paste the whole of [schema.sql](schema.sql), and choose **Run**. It should say "Success. No rows returned."
 
-Running it again later is safe, and needed whenever this file changes: it adds what's new and leaves the rest as it is.
+Running it again is safe: it adds what's new and leaves the rest as it is. Once step 7 is done, you never need to run it again: the database runs each new version of it by itself.
 
 ## 3. Send the codes from your own email account
 
@@ -83,12 +83,15 @@ The robot publishes approved changes. GitHub runs it on a schedule, but GitHub r
 
 Within ten minutes, GitHub's list of the robot's runs (the repository's **Actions** tab, then **Proposals**) shows runs started by "workflow_dispatch." Then set `"starts_robot": true` under `"supabase"` in versions.json, so the robot reports it if these starts ever stop.
 
+robot.sql also keeps the database up to date by itself. Every ten minutes Supabase fetches [schema.sql](schema.sql) and robot.sql from GitHub and runs whichever has changed since it last ran it, schema.sql first. So a change to either file reaches the database within about ten minutes, and nobody has to paste it again. Each file runs all or nothing: if one fails, the database keeps its previous version, and the robot opens an issue with the error. Because whatever these two files say on GitHub runs with the database owner's rights, review changes to them as carefully as changes to the robot.
+
 ## If something stops working
 
-The robot watches for two problems it can't fix itself. For each, it opens a GitHub issue that mentions the lead maintainer, so GitHub emails them, and it closes the issue by itself once things work again:
+The robot watches for three problems it can't fix itself. For each, it opens a GitHub issue that mentions the lead maintainer, so GitHub emails them, and it closes the issue by itself once things work again:
 
 - **"The Suggest Edits database isn't answering."** Usually Supabase paused the project. Restore it from the dashboard.
 - **"Supabase isn't starting the robot."** Usually the token was deleted. The issue says how to make a new one.
+- **"The database hasn't taken the latest supabase/ files."** Either a new version of schema.sql or robot.sql failed to run (the issue quotes the error; fix the file on GitHub, and the database tries again within ten minutes), or the database doesn't update itself (run robot.sql in the SQL Editor once more).
 
 One problem the robot can't see, because it never sends email: if Suggest Edits says **"The email couldn't be sent,"** open the project's [Auth logs](https://supabase.com/dashboard/project/_/logs/auth-logs) and find the error at that time.
 

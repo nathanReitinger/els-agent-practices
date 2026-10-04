@@ -3,6 +3,8 @@
     python3 -m unittest discover -s scripts/tests -t scripts/tests
 """
 
+import datetime as dt
+import hashlib
 import json
 import os
 import shutil
@@ -685,6 +687,43 @@ class GitHubRunTest(RunTest):
         # Six hours without a start: it opens again.
         self.robot_online(None, "2026-10-03T19:00:00Z")
         self.assertIn("The last start was October 03, 2026, at 12:30 UTC.", self.alerts()[0]["body"])
+
+    def test_an_issue_when_the_database_falls_behind(self):
+        """Supabase runs supabase/schema.sql and supabase/robot.sql itself when they change; the robot checks it did."""
+        self.set_supabase(starts_robot=True)
+        changed = int(self.git("log", "-1", "--format=%ct", "--", "supabase/robot.sql"))
+        at = lambda hours: dt.datetime.fromtimestamp(changed + hours * 3600, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.github.runs = [{"created_at": at(5), "event": "workflow_dispatch"}]  # Supabase is starting the robot
+        files = ("supabase/schema.sql", "supabase/robot.sql")
+        md5 = {name: hashlib.md5((self.repo / name).read_bytes()).hexdigest() for name in files}
+
+        def status(**changes):
+            rows = [{"file": name, "applied_md5": md5[name], "applied_at": at(0), "error": None, "failed_at": None,
+                     **changes.get(name.split("/")[1].split(".")[0], {})} for name in files]
+            return {**NO_SITE, "schema_status": rows}
+
+        self.robot_online(status(), at(2))  # up to date
+        self.assertEqual(self.alerts(), [])
+        # A file that didn't run: an issue at once, with the error and what to do.
+        self.robot_online(status(robot={"error": 'syntax error at or near "this"', "failed_at": at(2)}), at(2.1))
+        [issue] = self.alerts()
+        self.assertEqual(issue["title"], "The database hasn't taken the latest supabase/ files")
+        self.assertIn("@nathanReitinger", issue["body"])
+        self.assertIn("syntax error at or near", issue["body"])
+        self.assertIn("paste the whole of `supabase/robot.sql`", issue["body"])
+        self.robot_online(status(), at(2.2))  # fixed
+        self.assertEqual(self.alerts(), [])
+        # Behind: a changed file is given an hour to reach the database.
+        self.robot_online(status(schema={"applied_md5": "an older version"}), at(0.5))
+        self.assertEqual(self.alerts(), [])
+        self.robot_online(status(schema={"applied_md5": "an older version"}), at(2.3))
+        self.assertIn("but the database still has an older version", self.alerts()[0]["body"])
+        self.robot_online(status(), at(2.4))
+        # A database that doesn't update itself yet: six hours after robot.sql changed, an issue.
+        self.robot_online({**NO_SITE, "schema_status": None}, at(3))
+        self.assertEqual(self.alerts(), [])
+        self.robot_online({**NO_SITE, "schema_status": None}, at(7))
+        self.assertIn("doesn't update itself yet", self.alerts()[0]["body"])
 
     def test_no_issue_until_supabase_starts_the_robot(self):
         self.robot_online()

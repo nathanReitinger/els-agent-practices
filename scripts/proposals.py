@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import difflib
+import hashlib
 import html
 import json
 import os
@@ -73,12 +74,16 @@ WORKFLOW = "proposals.yml"
 HEARTBEAT_DAYS = 30
 # Supabase starts the robot every ten minutes (supabase/robot.sql); this long without a start means something's wrong.
 WAKE_STALE_HOURS = 6
+# Supabase runs these files itself when they change on GitHub (supabase/robot.sql), within about ten minutes.
+SCHEMA_FILES = ("supabase/schema.sql", "supabase/robot.sql")
+SCHEMA_STALE_HOURS = 1
 # Waits between tries when the database doesn't answer (a brief outage is common).
 RETRY_SECONDS = tuple(float(s) for s in os.environ.get("ROBOT_RETRY_SECONDS", "5,20").split(",") if s.strip())
 # Problems the robot reports as GitHub issues (which email the lead maintainer), and closes once they're fixed.
 ALERTS = {
     "database": "The Suggest Edits database isn't answering",
     "wake": "Supabase isn't starting the robot",
+    "schema": "The database hasn't taken the latest supabase/ files",
 }
 LEDGER_ABOUT = ("Every suggestion made on the Suggest Edits page, its votes, and its outcome. "
                 "Written by scripts/proposals.py; don't edit it by hand.")
@@ -336,6 +341,21 @@ def alert_body(kind: str, detail: str, repo: str, leads: list[str]) -> str:
             "normally prevent that.)",
             "2. If the project is running, check [Supabase's status page](https://status.supabase.com).",
         ]
+    elif kind == "schema":
+        lines = [
+            f"{hello} Supabase keeps its own database up to date: every ten minutes it fetches `supabase/schema.sql` and "
+            f"`supabase/robot.sql` from GitHub and runs each one that has changed. {md(detail)}",
+            "",
+            "Until this is fixed, the database keeps the versions it has, and the site and the robot go on working with them.",
+            "",
+            "What to do:",
+            "",
+            "1. If a file didn't run, the error above says why. Fix the file on GitHub; the database tries it again within "
+            "ten minutes.",
+            "2. If the database doesn't update itself (yet, or any more), open the project's **SQL Editor** in the "
+            "[Supabase dashboard](https://supabase.com/dashboard/projects), paste the whole of `supabase/robot.sql`, and "
+            "choose **Run**. From then on it updates itself.",
+        ]
     else:
         token = (f"https://github.com/settings/personal-access-tokens/new?name=Start+the+ELS+robot"
                  f"&description=Lets+Supabase+start+the+proposals+robot+%28supabase%2Frobot.sql%29"
@@ -564,6 +584,7 @@ class Robot:
         self.events: list[str] = []
         self.tags: list[str] = []
         self.health: dict[str, str | None] = {}  # alert -> what's wrong, or None if it's fine
+        self.site: dict | None = None  # Suggest Edits' data, as read in this run
         self.gov = Governance(json.loads(MAINTAINERS.read_text()))
         self.manifest = json.loads(MANIFEST.read_text())
         self.site = self.manifest["site"]
@@ -764,7 +785,7 @@ class Robot:
 
         records = self.load_ledger()
         before = LEDGER.read_text() if LEDGER.exists() else ""
-        site = self.site_data()
+        site = self.site = self.site_data()
         if site is None:
             return self.finish(records, before)
         self.gather_site(site.get("suggestions") or [], records)
@@ -833,6 +854,7 @@ class Robot:
             self.update_issues(records, issues)
         if self.github:
             self.check_starts()
+            self.check_schema()
             self.update_alerts()
 
     def heartbeat(self) -> None:
@@ -865,6 +887,52 @@ class Robot:
         else:
             when = f"{last:%B %d, %Y, at %H:%M} UTC" if last else "never"
             self.health["wake"] = f"The last start was {when}."
+
+    def committed_at(self, path: str) -> dt.datetime | None:
+        stamp = git("log", "-1", "--format=%ct", "--", path)
+        return dt.datetime.fromtimestamp(int(stamp), dt.timezone.utc) if stamp else None
+
+    def check_schema(self) -> None:
+        """Once Supabase starts the robot, check that the database has run the current supabase/schema.sql and
+        supabase/robot.sql: it fetches them from GitHub and runs any that changed (public.schema_status says how
+        that went)."""
+        config = self.manifest.get("supabase") or {}
+        if not config.get("starts_robot"):
+            return
+        if self.o.site_data:  # tests: the status is in the same file as the suggestions, or not checked
+            if "schema_status" not in (self.site or {}):
+                return
+            rows = self.site["schema_status"]
+        else:
+            try:
+                rows = get_json(f"{config['url'].rstrip('/')}/rest/v1/rpc/schema_status", site_headers(config["key"]))
+            except urllib.error.HTTPError as error:
+                if error.code != 404:
+                    return  # a database that isn't answering has its own alert
+                rows = None  # supabase/robot.sql from before the database updated itself
+            except (urllib.error.URLError, TimeoutError, ValueError):
+                return
+        status = {row["file"]: row for row in rows or []}
+        problems = []
+        for name in SCHEMA_FILES:
+            path = ROOT / name
+            changed = self.committed_at(name) if path.exists() else None
+            if changed is None:
+                continue
+            age = (self.now - changed).total_seconds() / 3600
+            row = status.get(name)
+            if not status:
+                if age >= WAKE_STALE_HOURS:
+                    problems = ["The database doesn't update itself yet: `supabase/robot.sql` hasn't been run there "
+                                "since that was added."]
+                break
+            if row and row.get("error"):
+                problems.append(f"`{name}` didn't run: `{row['error']}`")
+            elif (not row or row.get("applied_md5") != hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()) \
+                    and age >= SCHEMA_STALE_HOURS:
+                problems.append(f"`{name}` changed on GitHub {changed:%B %d, %Y, at %H:%M} UTC, but the database still has "
+                                "an older version.")
+        self.health["schema"] = " ".join(problems) or None
 
     def update_alerts(self) -> None:
         """Open an issue for each problem found in this run, and close the issue for each that's fixed."""
