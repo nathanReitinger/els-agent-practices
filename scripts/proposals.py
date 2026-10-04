@@ -84,7 +84,10 @@ ALERTS = {
     "database": "The Suggest Edits database isn't answering",
     "wake": "Supabase isn't starting the robot",
     "schema": "The database hasn't taken the latest supabase/ files",
+    "ai-check": "The AI check of new rules needs attention",
 }
+# The AI check of new rules (supabase/robot.sql): this many failures in a day, with no success, means it's broken.
+AI_CHECK_FAILURES = 3
 LEDGER_ABOUT = ("Every suggestion made on the Suggest Edits page, its votes, and its outcome. "
                 "Written by scripts/proposals.py; don't edit it by hand.")
 # Why a suggestion can't be voted on yet.
@@ -355,6 +358,23 @@ def alert_body(kind: str, detail: str, repo: str, leads: list[str]) -> str:
             "2. If the database doesn't update itself (yet, or any more), open the project's **SQL Editor** in the "
             "[Supabase dashboard](https://supabase.com/dashboard/projects), paste the whole of `supabase/robot.sql`, and "
             "choose **Run**. From then on it updates itself.",
+        ]
+    elif kind == "ai-check":
+        lines = [
+            f"{hello} When someone adds or changes a rule on Suggest Edits, the page asks an AI model (Anthropic's "
+            f"Claude) whether it repeats or contradicts another rule (`supabase/robot.sql`). {md(detail)}",
+            "",
+            "Until this is fixed, the page uses its simpler check, which compares words. Nothing else is affected.",
+            "",
+            "What to do:",
+            "",
+            "1. If the checks fail, sign in to the [Claude Console](https://platform.claude.com/) and look at the key's "
+            "account: its credit, its spending limit, and whether the key still exists. To replace the key, open the "
+            "project's **SQL Editor** in the [Supabase dashboard](https://supabase.com/dashboard/projects) and run "
+            "`select robot.set_anthropic_key('sk-ant-...');` with the new key between the quotes.",
+            "2. If it reached its daily limit, that's unusually heavy use, or someone misusing it. The count falls as the "
+            "day's checks age out. The limits are in `public.start_rule_check`, in `supabase/robot.sql`.",
+            "3. To turn the AI check off, run `select robot.set_anthropic_key('off');` in the SQL Editor.",
         ]
     else:
         token = (f"https://github.com/settings/personal-access-tokens/new?name=Start+the+ELS+robot"
@@ -855,6 +875,7 @@ class Robot:
         if self.github:
             self.check_starts()
             self.check_schema()
+            self.check_rule_checks()
             self.update_alerts()
 
     def heartbeat(self) -> None:
@@ -933,6 +954,32 @@ class Robot:
                 problems.append(f"`{name}` changed on GitHub {changed:%B %d, %Y, at %H:%M} UTC, but the database still has "
                                 "an older version.")
         self.health["schema"] = " ".join(problems) or None
+
+    def check_rule_checks(self) -> None:
+        """If the AI check of new rules is on (supabase/robot.sql), check that it works: that its checks aren't all
+        failing (say, the Anthropic key ran out of credit), and that it hasn't reached its daily limit."""
+        config = self.manifest.get("supabase") or {}
+        if not config.get("starts_robot"):
+            return
+        if self.o.site_data:  # tests: the status is in the same file as the suggestions, or not checked
+            if "rule_check_status" not in (self.site or {}):
+                return
+            status = self.site["rule_check_status"]
+        else:
+            try:
+                status = get_json(f"{config['url'].rstrip('/')}/rest/v1/rpc/rule_check_status", site_headers(config["key"]))
+            except (urllib.error.URLError, TimeoutError, ValueError):
+                return  # not installed yet (the schema alert covers that), or the database isn't answering
+        problems = []
+        if status and status.get("on"):
+            failed, answered = status.get("failed_today") or 0, status.get("answered_today") or 0
+            if failed >= AI_CHECK_FAILURES and not answered:
+                problems.append(f"In the past day, {failed} checks failed and none worked. The last error: "
+                                f"`{status.get('last_error') or 'none recorded'}`")
+            limit = status.get("daily_limit") or 0
+            if limit and (status.get("asked_today") or 0) >= limit:
+                problems.append(f"It reached its limit of {limit} checks a day, so the page is using its simpler check.")
+        self.health["ai-check"] = " ".join(problems) or None
 
     def update_alerts(self) -> None:
         """Open an issue for each problem found in this run, and close the issue for each that's fixed."""

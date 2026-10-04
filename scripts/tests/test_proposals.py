@@ -725,6 +725,33 @@ class GitHubRunTest(RunTest):
         self.robot_online({**NO_SITE, "schema_status": None}, at(7))
         self.assertIn("doesn't update itself yet", self.alerts()[0]["body"])
 
+    def test_an_issue_when_the_ai_check_fails(self):
+        """The AI check of new rules (supabase/robot.sql): an issue if its checks keep failing or it reaches its daily
+        limit, and none while it's off or working."""
+        self.set_supabase(starts_robot=True)
+        self.github.runs = [{"created_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "event": "workflow_dispatch"}]
+
+        def status(**fields):
+            return {**NO_SITE, "rule_check_status": {"on": True, "asked_today": 4, "answered_today": 4, "failed_today": 0,
+                                                     "daily_limit": 100, "last_error": None, **fields}}
+
+        self.robot_online(status())
+        self.assertEqual(self.alerts(), [])
+        self.robot_online(status(on=False, failed_today=9, answered_today=0))  # off: nothing to report
+        self.assertEqual(self.alerts(), [])
+        self.robot_online(status(answered_today=0, failed_today=2, last_error="HTTP 401: invalid x-api-key"))
+        self.assertEqual(self.alerts(), [])  # two failures could be a passing outage
+        self.robot_online(status(answered_today=0, failed_today=3, last_error="HTTP 401: invalid x-api-key"))
+        [issue] = self.alerts()
+        self.assertEqual(issue["title"], "The AI check of new rules needs attention")
+        self.assertIn("invalid x-api-key", issue["body"])
+        self.assertIn("robot.set_anthropic_key", issue["body"])
+        self.assertNotIn("sk-ant-", issue["body"].replace("'sk-ant-...'", ""))
+        self.robot_online(status())  # working again
+        self.assertEqual(self.alerts(), [])
+        self.robot_online(status(asked_today=100))
+        self.assertIn("limit of 100 checks a day", self.alerts()[0]["body"])
+
     def test_no_issue_until_supabase_starts_the_robot(self):
         self.robot_online()
         self.assertEqual(self.alerts(), [])

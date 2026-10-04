@@ -8,7 +8,7 @@ This project is one file, **AGENTS.md**: standing instructions for AI agents wor
 2. Verify an email address: enter any address you can check, then the 6-digit code the site emails to it. That address is your name on the site, and everyone can see it.
 3. Edit the text as in Word with track changes on: deleted words are struck out, and new words appear in blue under your name. Press Enter at the end of a rule to add a new one. To add a section, choose **+ New section** at the end of a section, type its heading, press Enter, and type its rules. Every change is saved automatically as a suggestion.
 
-When you add a rule, the page compares it with the rules in the text and the open suggestions, by their words. If it looks like a repeat, or like it contradicts one, the page says which and asks whether you still want it.
+When you add a rule or a section, or change what a rule says, the page checks your change against the rules in the text and the open suggestions. If the lead maintainer has turned on the AI check, an AI model reads it for its meaning; otherwise the page compares words. Moving words within a rule, fixing a typo, or changing one word isn't checked, unless the word is one like "never," "only," or a number. If your change looks like a repeat, or like it contradicts a rule, the page says which (and, from the AI, why) and asks whether you still want it.
 
 When a maintainer approves your suggestion, it's published as a new version automatically. You can follow it in the list below the text on Suggest Edits; if it's disapproved, it moves to the [Declined](https://nathanreitinger.github.io/els-agent-practices/declined/) page.
 

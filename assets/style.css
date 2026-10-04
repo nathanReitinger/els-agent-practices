@@ -658,6 +658,7 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .save-status { color: var(--muted); font-size: 0.86rem; }
 .save-status:empty { display: none; }
 .save-status.problem { color: var(--warn); }
+.check-status { color: var(--muted); font-size: 0.86rem; font-style: italic; }
 .signin-note { color: var(--muted); font-size: 0.86rem; }
 .signin-note:empty { display: none; }
 .suggest-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin-top: 0.45rem !important; }
@@ -787,11 +788,17 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .c-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; margin: 0.4rem 0 0 !important; color: var(--muted); font-size: 0.86rem; }
 .c-highlights { margin: 0.4rem 0; padding-left: 0.7rem; border-left: 3px solid var(--highlight); }
 
-/* "This rule may repeat or contradict another": for the person adding it, and for the maintainers. */
+/* "This change may repeat or contradict another rule": for the person making it, and for the maintainers. */
 .rule-check { border-left: 3px solid var(--warn); }
 .rule-check-title { margin: 0 0 0.3rem !important; color: var(--warn); font: 700 0.95rem var(--sans); }
+.rule-check .muted { color: var(--muted); font-size: 0.84rem; }
 .rule-match { font-size: 0.88rem; overflow-wrap: anywhere; }
+.rule-match + .rule-match { margin-top: 0.45rem; }
 .rule-match.conflict strong { color: var(--bad); }
+.rule-why { color: var(--text); }
+p.rule-why { margin-top: 0.15rem !important; }
+.similar-note.fine { border-left-color: var(--good); background: var(--good-soft); }
+.similar-note .muted { color: var(--muted); font-size: 0.8rem; }
 .similar-note { margin: 0.5rem 0 0; padding: 0.4rem 0.65rem; border-left: 3px solid var(--warn); border-radius: 0 8px 8px 0; background: var(--warn-soft);
   font-family: var(--sans); font-size: 0.85rem; overflow-wrap: anywhere; }
 .similar-note p { margin: 0.1rem 0 0 !important; }

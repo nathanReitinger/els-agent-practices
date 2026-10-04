@@ -22,7 +22,7 @@ The address you verify is your name on the site: it's shown with your suggestion
 
 Everyone sees everyone's suggestions in the text: your own in blue, other people's in orange, each with the suggester's email address. Clicking one shows the details. Readers' suggestions and votes are kept in the site's database (see [supabase/README.md](supabase/README.md)), which anyone can read.
 
-When someone adds a rule, the page compares it with the rules in the text and the open suggestions, by their words (not their meaning), and warns if it looks like a repeat or a contradiction. The person decides whether to keep it, and the maintainers see the same note on the suggestion.
+When someone adds a rule or a section, or changes what a rule says, the page checks the change against the rules in the text and the open suggestions, and warns if it looks like a repeat or a contradiction. If the lead maintainer has turned it on (supabase/README.md), an AI model judges the change's meaning, comparing the rule before and after the change; otherwise the page compares words. The check is advice and decides nothing: the person decides whether to keep the change, and the maintainers see the same note on the suggestion.
 
 Each suggestion is checked against the current text. If it can't be applied exactly (for example, because an earlier change altered its words), it's closed with an explanation, and you can suggest it again.
 

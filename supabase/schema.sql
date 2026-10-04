@@ -42,19 +42,38 @@ alter table public.suggestions add constraint suggestions_new_text_check check (
 alter table public.suggestions add column if not exists builds_on text
   check (builds_on is null or char_length(builds_on) between 1 and 100);
 
--- The database, not the reader's browser, sets who wrote a suggestion and when, and keeps it that way.
+-- What the AI check found about a suggestion (supabase/robot.sql), saved by its author's page so the maintainers
+-- see it too: { "verdict": "fine" | "problem", "findings": [...] }.
+alter table public.suggestions add column if not exists ai_check jsonb;
+alter table public.suggestions drop constraint if exists suggestions_ai_check_check;
+alter table public.suggestions add constraint suggestions_ai_check_check
+  check (ai_check is null or (jsonb_typeof(ai_check) = 'object' and length(ai_check::text) <= 20000));
+
+-- The database, not the reader's browser, sets who wrote a suggestion and when, and keeps it that way. Saving the AI
+-- check's note isn't an edit: it doesn't move "updated" (so votes already cast still count). An edit to the change
+-- itself clears the note, since it was about the old wording.
 create or replace function public.stamp_suggestion() returns trigger
 language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then
     new.created := now();
-  else
-    new.id := old.id;
-    new.author_id := old.author_id;
-    new.author_email := old.author_email;
-    new.created := old.created;
+    new.updated := now();
+    return new;
   end if;
-  new.updated := now();
+  new.id := old.id;
+  new.author_id := old.author_id;
+  new.author_email := old.author_email;
+  new.created := old.created;
+  if (new.kind, new.exact, new.prefix, new.suffix, new.new_text, new.reason, new.base, new.builds_on)
+     is not distinct from (old.kind, old.exact, old.prefix, old.suffix, old.new_text, old.reason, old.base, old.builds_on) then
+    new.updated := old.updated;
+  else
+    new.updated := now();
+    if (new.kind, new.exact, new.new_text) is distinct from (old.kind, old.exact, old.new_text)
+       and new.ai_check is not distinct from old.ai_check then
+      new.ai_check := null;
+    end if;
+  end if;
   return new;
 end
 $$;

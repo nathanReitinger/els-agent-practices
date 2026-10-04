@@ -85,13 +85,31 @@ Within ten minutes, GitHub's list of the robot's runs (the repository's **Action
 
 robot.sql also keeps the database up to date by itself. Every ten minutes Supabase fetches [schema.sql](schema.sql) and robot.sql from GitHub and runs whichever has changed since it last ran it, schema.sql first. So a change to either file reaches the database within about ten minutes, and nobody has to paste it again. Each file runs all or nothing: if one fails, the database keeps its previous version, and the robot opens an issue with the error. Because whatever these two files say on GitHub runs with the database owner's rights, review changes to them as carefully as changes to the robot.
 
+## 8. Turn on the AI check of new rules (optional)
+
+When someone adds a rule or a section on Suggest Edits, or changes what a rule says, the page checks whether the change repeats or contradicts another rule. Without this step, it compares words. With it, an AI model (Anthropic's Claude Opus 5.5) reads the rule as published and as changed, with the whole file and the other open suggestions, and judges what the change means: moving words around, rephrasing, or narrowing a rule isn't flagged, and a contradiction in different words is. The person making the change sees what it found, with the model's reasons, and decides whether to keep the change; the maintainers see the same note on the suggestion. Moving words within a rule, fixing a typo, or changing one word (unless it's one like "never," "only," or a number) isn't sent at all.
+
+Each check is billed to the Anthropic account whose key you use. With the file at its current length, a check costs roughly 5 to 20 cents at Anthropic's [prices](https://platform.claude.com/docs/en/about-claude/pricing) when this was written ($4 per million input tokens and $20 per million output tokens for Claude Opus 5.5); the Console's Usage page shows the actual cost. To keep it down, the same question is never sent twice, each person can ask 15 times an hour, and everyone together 100 times a day. Past those limits, the page uses its word check.
+
+1. Sign in to the [Claude Console](https://platform.claude.com/), create an API key, and copy it. Consider setting a monthly spend limit under [Settings > Billing](https://platform.claude.com/settings/billing).
+2. In the project's **SQL Editor**, in a new query, run this, with the key between the quotes:
+
+   ```sql
+   select robot.set_anthropic_key('sk-ant-...');
+   ```
+
+   It answers "Saved." The key is kept encrypted in Supabase's Vault, like the GitHub token: don't put it anywhere else. To replace it, run the same line with the new key. To turn the check off, run `select robot.set_anthropic_key('off');`.
+
+The model, how hard it thinks, and the instructions it follows are in robot.sql (`robot.rule_check_body`); the limits are in `public.start_rule_check`.
+
 ## If something stops working
 
-The robot watches for three problems it can't fix itself. For each, it opens a GitHub issue that mentions the lead maintainer, so GitHub emails them, and it closes the issue by itself once things work again:
+The robot watches for four problems it can't fix itself. For each, it opens a GitHub issue that mentions the lead maintainer, so GitHub emails them, and it closes the issue by itself once things work again:
 
 - **"The Suggest Edits database isn't answering."** Usually Supabase paused the project. Restore it from the dashboard.
 - **"Supabase isn't starting the robot."** Usually the token was deleted. The issue says how to make a new one.
 - **"The database hasn't taken the latest supabase/ files."** Either a new version of schema.sql or robot.sql failed to run (the issue quotes the error; fix the file on GitHub, and the database tries again within ten minutes), or the database doesn't update itself (run robot.sql in the SQL Editor once more).
+- **"The AI check of new rules needs attention."** Its checks keep failing (usually the key's account is out of credit, or the key was deleted), or it reached its daily limit. Meanwhile the page uses its word check. The issue says what to do.
 
 One problem the robot can't see, because it never sends email: if Suggest Edits says **"The email couldn't be sent,"** open the project's [Auth logs](https://supabase.com/dashboard/project/_/logs/auth-logs) and find the error at that time.
 

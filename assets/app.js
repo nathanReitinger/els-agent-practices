@@ -541,7 +541,7 @@
       changeView(p),
       p.reason ? h("p", { class: "proposal-reason", text: `“${p.reason}”` }) : null,
       mode === "drafter" && p.builds_on ? buildsOnNote(p) : null,
-      mode === "drafter" && !FINAL.includes(p.status) ? similarNote(p) : null,
+      mode === "drafter" && !FINAL.includes(p.status) ? checkNote(p) : null,
       h("p", { class: "proposal-meta" }, ...joined([
         `Proposed by ${p.proposer?.name || "someone"}, ${formatDate(p.created)}`,
         p.section || null,
@@ -1092,7 +1092,7 @@
   const fromRow = (row) => ({
     id: `sb-${row.id}`, docId: row.id, kind: row.kind, exact: row.exact, prefix: row.prefix, suffix: row.suffix,
     new: row.new_text, reason: row.reason, base: row.base, created: row.created, updated: row.updated,
-    author: { id: row.author_id, email: row.author_email }, builds_on: row.builds_on || null,
+    author: { id: row.author_id, email: row.author_email }, builds_on: row.builds_on || null, aiCheck: row.ai_check || null,
   });
   const COLUMNS = { kind: "kind", exact: "exact", prefix: "prefix", suffix: "suffix", new: "new_text", reason: "reason", base: "base",
     builds_on: "builds_on" };
@@ -1165,6 +1165,10 @@
         return row.id;
       },
       remove: async (docId) => must(await client.from("suggestions").delete().eq("id", docId)),
+      // The AI check of new rules (supabase/robot.sql): ask, then look up the answer; and keep it with the suggestion.
+      startRuleCheck: async (request) => must(await client.rpc("start_rule_check", { request })),
+      ruleCheckResult: async (id) => must(await client.rpc("rule_check_result", { check_id: id })),
+      saveCheck: async (docId, check) => must(await client.from("suggestions").update({ ai_check: check }).eq("id", docId)),
       // Comments have ids made on this computer, so one sent twice (say, after the connection dropped) is added once.
       addComment: async (row) => must(await client.from("comments").upsert(row, { onConflict: "id", ignoreDuplicates: true })),
       deleteComment: async (id) => must(await client.from("comments").delete().eq("id", id)),
@@ -1217,6 +1221,7 @@
         return docId;
       },
       async remove(docId) { write(SUGGESTIONS, read(SUGGESTIONS, []).filter((s) => s.docId !== docId)); emit(); },
+      async startRuleCheck() { return { unavailable: "off" }; },  // no AI check here: the word check stands in
       async vote(proposalId, vote, step = "patch") {
         const user = me();
         const votes = read(VOTES, []).filter((v) => !(v.suggestion === proposalId && v.voter_id === user.id));
@@ -1251,7 +1256,8 @@
     voting: new Map(),  // a maintainer's choices on a card before voting (version number, buttons shown), kept on redraws
     comments: [], commentsReady: false, outbox: [], commentSpots: new Map(),  // comments and highlights, and ones not sent yet
     alsoHere: new Map(),  // a drawn suggestion's id: the other suggestions for the same words
-    checked: new Set(), lastChanges: [],  // new rules already compared with the others, and your changes as last saved
+    checked: new Set(), lastChanges: [],  // changes already checked against the other rules, and your changes as last saved
+    asked: new Map(), aiOn: null,  // the AI check's answers, by the change they're about; and whether it's on (null: not known yet)
     proposals: { records: [] },  // the robot's record (governance/proposals.json)
     others: [], saved: new Map(), undrawable: new Set(), undo: [], redo: [], lastGood: "",
     dirty: false, edits: 0, lastEdit: 0, busy: false, syncing: Promise.resolve(), timer: null,
@@ -1708,6 +1714,7 @@
       h("span", {}, "Editing as ", h("strong", { class: "mine-name", text: suggest.me.email }),
         isMaintainer() ? h("span", { class: "badge badge-soft", text: "maintainer" }) : ""),
       h("span", { class: `save-status${suggest.status.problem ? " problem" : ""}`, id: "save-status", "aria-live": "polite", text: suggest.status.text }),
+      h("span", { class: "check-status", id: "check-status", "aria-live": "polite", hidden: true }),
       h("button", { type: "button", class: "linklike", text: "Sign out", onclick: signOut }));
   }
 
@@ -2407,7 +2414,7 @@
         h("p", { class: "pop-head" }, h("strong", { text: KIND_LABELS[s.kind] || "Change" }), ` · suggested by ${record.proposer?.name || "someone"}, ${formatDate(s.created)}`),
         basis ? h("p", { class: "muted", text: `A different change for the same words as a suggestion by ${basis.proposer?.name || "someone"}.` }) : null,
         changeView(record), s.reason ? h("p", { class: "proposal-reason", text: `“${s.reason}”` }) : null,
-        similarNote(p), voteControls(p));
+        checkNote(p), voteControls(p));
       if (suggest.me) {
         const [open, form] = differentChangeForm(s);
         const say = h("textarea", { class: "c-input", rows: "2", placeholder: "Comment on this suggestion", "aria-label": "Your comment on this suggestion", hidden: true });
@@ -2506,36 +2513,73 @@
     return card;
   }
 
-  // ---- Is a new rule already there, or against another one? ----
-  // When someone adds a rule, a section's rules, or a sentence of six or more words, the page compares it with
-  // every rule in the text and every suggestion still open, by the words they share (not by meaning). A close
-  // match is shown as a likely repeat. A possible contradiction is one rule ruling out what the other starts with
-  // ("without a pilot" against "Pilot on 1 percent"), or a "never" or "do not" against a closely worded rule
-  // without one. The person decides whether to keep theirs.
+  // ---- Does a change repeat or contradict another rule? ----
+  // Once you move on from a new rule, a new section, or a change to what a rule says, the page checks it against
+  // the published text and everyone's open suggestions. If the lead maintainer has turned on the AI check
+  // (supabase/robot.sql), an AI model reads the rule before and after your change and judges what it means;
+  // otherwise the page compares words. Moving or reordering words within a rule, fixing a typo, or changing one word
+  // (other than one like "never," "only," or a number) isn't checked: that rarely changes what a rule asks for. A
+  // likely repeat or contradiction is shown beside the change, and you decide whether to keep it. The maintainers
+  // see what the check found beside the suggestion.
 
   const STOPWORDS = new Set(("a about after all also an and any are as at be been before but by can could did do does each every for from " +
     "has have how i if in into is it its just may me might more most must my no not of on only or other our own same shall should so " +
     "some such than that the their them then there these this those to too very was we were what when where which while who why will " +
     "with would you your").split(" "));
   const stemOf = (word) => (word.length > 4 ? word.replace(/(?:ings?|ed|es|s|ly)$/, "") : word);
-  const termsOf = (text) => (String(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter((w) => w.length > 2 && !STOPWORDS.has(w)).map(stemOf);
+  const wordsOf = (text) => (String(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter((w) => !STOPWORDS.has(w)).map(stemOf);
+  const termsOf = (text) => wordsOf(text).filter((w) => w.length > 2);
   const NEGATED = /\b(?:never|not|no|without|avoid|cannot|don't|do not|must not|should not)\s+(?:(?:a|an|the|to|be|any)\s+)?([\p{L}\p{N}]+)/giu;
   const negatedOf = (text) => new Set([...String(text).matchAll(NEGATED)].map((m) => stemOf(m[1].toLowerCase())));
   const leadOf = (text) => new Set(termsOf(text).slice(0, 2));
   const startsNegative = (text) => /^\s*(?:never|do not|don't|no|avoid)\b/i.test(text);
   const rulesOut = (a, b) => { const no = negatedOf(b); return [...negatedOf(a)].some((term) => leadOf(b).has(term) && !no.has(term)); };
+  // Words that change what a rule asks for, though comparing words leaves them out.
+  const LOGIC = /\b(?:never|not|no|none|without|avoid|cannot|can't|don't|always|only|must|should|may|every|all|any|unless|except)\b/gu;
+  const logicOf = (text) => new Set(String(text).toLowerCase().replaceAll("’", "'").match(LOGIC) || []);
 
-  function ruleCandidates(exceptId) {
-    const list = [];
-    for (const block of leafBlocks($("#doc"))) {
-      if (block.matches(".track-new, h1, h2, h3, h4, h1 + p") || frozen(block)) continue;
-      const box = block.cloneNode(true);
-      for (const extra of $$("ins.track, button, mark.c-mark > button", box)) extra.remove();
-      const text = squash(box.textContent.replaceAll(ZWSP, ""));
-      if (text.split(" ").length >= 4) list.push({ text, where: sectionOf(block, $("#doc")) || "the introduction" });
+  // Two spellings of one word, as when a typo is fixed.
+  function nearlySame(a, b) {
+    if (Math.min(a.length, b.length) < 4 || Math.abs(a.length - b.length) > 2) return false;
+    let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const next = [i];
+      for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      row = next;
+    }
+    return row[b.length] <= 2;
+  }
+
+  // What a change does to a rule's meaning: the words it brings in that weren't there before (typos fixed aside),
+  // and whether it adds or drops a word like "never" or "only". Moving words around does neither.
+  function meaningChange(before, after) {
+    const was = new Set(wordsOf(before)), now = new Set(wordsOf(after));
+    const removed = [...was].filter((w) => !now.has(w));
+    const added = [...now].filter((w) => !was.has(w) && !removed.some((r) => nearlySame(w, r)));
+    const logicBefore = logicOf(before), logicAfter = logicOf(after);
+    const logic = [...logicAfter].some((w) => !logicBefore.has(w)) || [...logicBefore].some((w) => !logicAfter.has(w));
+    return { added, logic, matters: logic || added.length >= 2 || added.some((w) => /\d/.test(w)) };
+  }
+
+  // A rule's words as published (nobody's changes in them), or as they read with your changes made.
+  function blockText(block, withMine) {
+    const box = block.cloneNode(true);
+    for (const extra of $$(withMine ? "del.track.mine, ins.track:not(.mine), button" : "ins.track, button", box)) extra.remove();
+    return squash(box.textContent.replaceAll(ZWSP, ""));
+  }
+
+  // The rules to compare a change with: every rule in the text except `skip` (as it reads with your changes, or as
+  // published), and the new words of every open suggestion except `exceptId` (and, with your changes, except yours,
+  // which are in the text already).
+  function ruleCandidates({ skip = [], withMine = false, exceptId = null } = {}) {
+    const doc = $("#doc"), list = [];
+    for (const block of leafBlocks(doc)) {
+      if (skip.includes(block) || block.matches("h1, h2, h3, h4, h5, h6, h1 + p") || frozen(block)) continue;
+      const text = blockText(block, withMine);
+      if (text.split(" ").length >= 4) list.push({ text, where: sectionOf(block, doc) || "the introduction" });
     }
     for (const s of suggest.remote || []) {
-      if (s.id === exceptId || isIgnored(s) || !isOpen(s)) continue;
+      if (s.id === exceptId || isIgnored(s) || !isOpen(s) || (withMine && isMine(s))) continue;
       const lines = s.kind === "section" ? String(s.new).split("\n").slice(1) : ["rule", "insert", "replace"].includes(s.kind) ? [s.new] : [];
       for (const line of lines) {
         if (squash(line).split(" ").length >= 4) list.push({ text: squash(line), where: `a suggestion by ${isMine(s) ? "you" : s.author?.email || "someone"}` });
@@ -2544,11 +2588,12 @@
     return list;
   }
 
-  // The rules and suggestions most like `text`: [{ text, where, score, kind: "repeat" | "conflict" }], best first.
-  function similarRules(text, exceptId) {
+  // The candidates most like `text`, by the words they share: [{ text, where, score, kind: "repeat" | "conflict" }],
+  // best first. A possible contradiction is one rule ruling out what the other starts with ("without a pilot"
+  // against "Pilot on 1 percent"), or a "never" or "do not" against a closely worded rule without one.
+  function similarRules(text, candidates) {
     const mine = termsOf(text);
     if (mine.length < 3) return [];
-    const candidates = ruleCandidates(exceptId).filter((c) => squash(c.text) !== squash(text));
     const docs = candidates.map((c) => termsOf(c.text));
     const df = new Map();
     for (const terms of [mine, ...docs]) for (const term of new Set(terms)) df.set(term, (df.get(term) || 0) + 1);
@@ -2573,48 +2618,235 @@
     return found.sort((x, y) => y.score - x.score).slice(0, 3);
   }
 
-  // For the maintainers, on a suggestion that adds words: what it may repeat or contradict.
-  function similarNote(p) {
-    if (FINAL_STATUS.has(p.status) || !["rule", "section", "insert", "replace"].includes(p.kind)) return null;
-    const lines = p.kind === "section" ? String(p.new || "").split("\n").slice(1) : [p.new];
-    const found = lines.flatMap((line) => (squash(line).split(" ").length >= 6 || p.kind !== "replace" ? similarRules(line, p.id) : []));
-    if (!found.length) return null;
-    return h("div", { class: "similar-note" }, ...found.slice(0, 2).map((m) => h("p", {},
-      h("strong", { text: m.kind === "repeat" ? "May repeat: " : "May contradict: " }), `“${cut(m.text, 120)}” (${m.where})`)));
+  // The word check of one change: its new words against the other rules, and, when it changes a word like "never",
+  // the rule as changed against rules it didn't seem to contradict before.
+  function wordCheck({ lines = [], before = "", after = "", logic = false }, candidates) {
+    const found = lines.flatMap((line) => similarRules(line, candidates));
+    if (logic && after) {
+      const known = new Set(similarRules(before, candidates).filter((m) => m.kind === "conflict").map((m) => m.text));
+      found.push(...similarRules(after, candidates).filter((m) => m.kind === "conflict" && !known.has(m.text)));
+    }
+    const seen = new Set();
+    return found.sort((x, y) => y.score - x.score).filter((m) => !seen.has(m.text) && seen.add(m.text)).slice(0, 3);
   }
 
-  // After your changes are saved: a new rule (or a long new sentence) that may repeat or contradict another gets a
-  // warning beside it, once you've moved on from it, asking whether to keep it.
+  // What to check for one of your changes, or null if there's nothing to: a new rule, a new section with at least
+  // one rule, or a rule whose meaning your changes alter (all your changes to it together, as it would read).
+  function checkSubject(change) {
+    const doc = $("#doc");
+    const blocks = [...new Set(change.marks.map((mark) => blockOf(mark) || mark))].filter((el) => el?.isConnected && doc.contains(el));
+    if (!blocks.length) return null;
+    const where = sectionOf(blocks[0], doc) || "the introduction";
+    if (change.kind === "rule") {
+      return { signature: `rule|${change.exact}|${change.new}`, kind: "rule", blocks, where, anchor: change.exact, lines: [change.new],
+        describe: `A new rule, added after the rule that ends “…${change.exact}” in the section “${where}”:\n“${change.new}”` };
+    }
+    if (change.kind === "section") {
+      const [title, ...rules] = change.new.split("\n");
+      if (!rules.length) return null;
+      return { signature: `section|${change.exact}|${change.new}`, kind: "section", blocks, where, lines: rules,
+        describe: `A new section, “${title}”, added after the rule that ends “…${change.exact}”, with these rules:\n${rules.map((rule) => `- ${rule}`).join("\n")}` };
+    }
+    const block = blocks[0];
+    if (/^H\d$/.test(block.tagName)) return null;  // a heading isn't a rule
+    const before = blockText(block, false), after = blockText(block, true);
+    if (after.split(" ").length < 3) return null;  // the rule taken out, or nearly
+    const { added, logic, matters } = meaningChange(before, after);
+    if (!matters) return null;  // moved or reordered words, a fixed typo, or one word changed
+    const lines = $$("ins.track.mine", block).map((ins) => squash(ins.textContent.replaceAll(ZWSP, "")))
+      .filter((text) => added.length >= 3 && text.split(" ").length >= 6);
+    return { signature: `edit|${before}|${after}`, kind: "edit", blocks, where, before, after, lines, logic,
+      describe: `A change to a rule in the section “${where}”.\nThe rule as published: “${before}”\nThe rule after the change: “${after}”` };
+  }
+
+  // The question for the AI check: the published file, the other open suggestions, and the change.
+  function checkRequest(subject, sids) {
+    const others = [];
+    for (const s of suggest.remote || []) {
+      if (sids.has(s.docId) || isIgnored(s) || !isOpen(s)) continue;
+      const at = `the words “…${squash(`${s.prefix} ${s.exact} ${s.suffix}`)}…”`;
+      const by = isMine(s) ? " (by the same author)" : "";
+      if (s.kind === "rule") others.push(`- A new rule after ${at}${by}: “${squash(s.new)}”`);
+      else if (s.kind === "section") {
+        const [title, ...rules] = String(s.new).split("\n");
+        others.push(`- A new section, “${title}”, after ${at}${by}, with the rules: ${rules.map((rule) => `“${squash(rule)}”`).join(" ")}`);
+      } else if (s.kind === "insert") others.push(`- Adds “${squash(s.new)}” after “${s.exact}” in ${at}${by}`);
+      else if (s.kind === "replace") others.push(`- Replaces “${s.exact}” with “${squash(s.new)}” in ${at}${by}`);
+      else if (s.kind === "delete") others.push(`- Removes “${s.exact}” from ${at}${by}`);
+    }
+    let text = "";
+    for (const line of others) {
+      if (text.length + line.length > 38000) break;
+      text += `${line}\n`;
+    }
+    return { document: suggest.markdown, others: text.trim(), change: subject.describe };
+  }
+
+  // The AI check of one change, asked once: its answer, or why there isn't one, is kept by the change's signature.
+  async function askAI(subject, sids) {
+    const entry = { status: "asking" };
+    suggest.asked.set(subject.signature, entry);
+    showChecking();
+    try {
+      const started = await suggest.backend.startRuleCheck(checkRequest(subject, sids));
+      if (!started?.id) {
+        if (started?.unavailable === "off") suggest.aiOn = false;
+        Object.assign(entry, { status: "unavailable", why: started?.unavailable || "" });
+        return;
+      }
+      suggest.aiOn = true;
+      for (let wait = 2000, until = Date.now() + 5 * 60000; ; wait = Math.min(wait * 1.25, 6000)) {
+        if (Date.now() > until) throw new Error("no answer in time");
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        const answer = await suggest.backend.ruleCheckResult(started.id);
+        if (answer?.status === "waiting") continue;
+        if (answer?.status !== "done") throw new Error(answer?.error || "no answer");
+        Object.assign(entry, { status: "done", result: answer.result, model: answer.model || "" });
+        await keepCheck(subject, entry);
+        return;
+      }
+    } catch (error) {
+      // A database without the AI check (supabase/robot.sql not run again yet) has no such function.
+      if (/PGRST202|42883/.test(error.code || "") || /could not find the function/i.test(error.message)) suggest.aiOn = false;
+      Object.assign(entry, { status: "failed", why: error.message });
+    } finally {
+      showChecking();
+      setTimeout(checkNewRules, 0);
+    }
+  }
+
+  // A short fingerprint of a text (cyrb53), to tell whether a saved check is about a change as it reads now.
+  function hashOf(text) {
+    let a = 0xdeadbeef, b = 0x41c6ce57;
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      a = Math.imul(a ^ c, 2654435761);
+      b = Math.imul(b ^ c, 1597334677);
+    }
+    a = Math.imul(a ^ (a >>> 16), 2246822507) ^ Math.imul(b ^ (b >>> 13), 3266489909);
+    b = Math.imul(b ^ (b >>> 16), 2246822507) ^ Math.imul(a ^ (a >>> 13), 3266489909);
+    return (4294967296 * (2097151 & b) + (a >>> 0)).toString(36);
+  }
+
+  // The AI's answer, kept with the suggestions it's about, if they still say what was checked.
+  async function keepCheck(subject, entry) {
+    const now = suggest.lastChanges.map(checkSubject).filter(Boolean);
+    if (!now.some((s) => s.signature === subject.signature)) return;
+    const check = { verdict: entry.result.verdict, findings: entry.result.findings || [], model: entry.model,
+      about: hashOf(subject.signature), at: new Date().toISOString() };
+    for (const change of suggest.lastChanges) {
+      if (checkSubject(change)?.signature !== subject.signature) continue;
+      for (const mark of change.marks) {
+        const id = mark.dataset.sid;
+        if (id && suggest.saved.has(id)) await suggest.backend.saveCheck?.(id, check).catch(() => {});
+      }
+    }
+    suggest.watcher?.refresh();  // so the list below the text shows it now
+  }
+
+  function showChecking() {
+    const box = $("#check-status");
+    if (!box) return;
+    const asking = [...suggest.asked.values()].some((entry) => entry.status === "asking");
+    box.hidden = !asking;
+    box.textContent = asking ? "Checking your change against the other rules…" : "";
+  }
+
+  const AI_KINDS = { repeats: ["repeat", "Repeats "], contradicts: ["conflict", "Contradicts "], tension: ["conflict", "Is in tension with "],
+    inconsistent: ["conflict", "Is inconsistent within itself"] };
+  const modelName = (id) => (String(id).match(/^claude-([a-z]+)-(\d+)-(\d+)/) || []).slice(1).reduce((name, part, i) =>
+    (i === 0 ? `Claude ${part[0].toUpperCase()}${part.slice(1)}` : `${name}${i === 1 ? " " : "."}${part}`), "") || "an AI model";
+
+  // After your changes are saved: a change that may repeat or contradict another rule gets a warning beside it,
+  // once you've moved on from it, asking whether to keep it.
   function checkNewRules() {
     if (!suggest.me || $(".rule-check")) return;
     const caret = getSelection().anchorNode;
+    const subjects = new Map();  // by signature, with the changes that make it up and their saved suggestions
     for (const change of suggest.lastChanges || []) {
-      if (!["rule", "section", "insert", "replace"].includes(change.kind)) continue;
-      const lines = change.kind === "section" ? change.new.split("\n").slice(1) : [change.new];
-      const text = lines.join(" ");
-      const signature = `${change.kind}|${change.exact}|${change.new}`;
-      if (suggest.checked.has(signature) || (change.kind !== "rule" && change.kind !== "section" && squash(text).split(" ").length < 6)) continue;
-      const blocks = change.marks.map((mark) => blockOf(mark) || mark).filter((el) => el?.isConnected);
-      if (!blocks.length || (caret && blocks.some((el) => el.contains(caret)))) continue;  // still writing it
-      const found = lines.flatMap((line) => similarRules(line).map((m) => ({ ...m, line }))).sort((x, y) => y.score - x.score).slice(0, 3);
-      if (!found.length) { suggest.checked.add(signature); continue; }
-      showRuleCheck(change, blocks[blocks.length - 1], found, signature);
+      const subject = checkSubject(change);
+      if (!subject || suggest.checked.has(subject.signature)) continue;
+      const entry = subjects.get(subject.signature) || { subject, changes: [], sids: new Set() };
+      entry.changes.push(change);
+      for (const mark of change.marks) if (mark.dataset.sid) entry.sids.add(mark.dataset.sid);
+      subjects.set(subject.signature, entry);
+    }
+    for (const { subject, changes, sids } of subjects.values()) {
+      if (caret && subject.blocks.some((el) => el.contains(caret))) continue;  // still writing it
+      const asked = suggest.asked.get(subject.signature);
+      // Checked by the AI before this page was opened (its answer is saved with the suggestion): not asked again.
+      const about = hashOf(subject.signature);
+      if (!asked && sids.size && [...sids].every((id) => (suggest.remote || []).find((s) => s.docId === id)?.aiCheck?.about === about)) {
+        suggest.checked.add(subject.signature);
+        continue;
+      }
+      if (!asked && suggest.aiOn !== false && suggest.backend?.startRuleCheck) { askAI(subject, sids); continue; }
+      if (asked?.status === "asking") continue;
+      const byAI = asked?.status === "done";
+      const found = byAI
+        ? (asked.result.findings || []).map((f) => ({ kind: AI_KINDS[f.kind]?.[0] || "conflict", label: AI_KINDS[f.kind]?.[1] || "", text: f.rule, where: f.where, explanation: f.explanation }))
+        : wordCheck(subject, ruleCandidates({ skip: subject.blocks, withMine: true }));
+      if (!found.length) {
+        suggest.checked.add(subject.signature);
+        if (byAI) hint(`Checked by ${modelName(asked.model)}: your change doesn't repeat or contradict another rule.`);
+        continue;
+      }
+      showRuleCheck(subject, changes, found, byAI ? asked.model : null);
       return;
     }
   }
 
-  function showRuleCheck(change, block, found, signature) {
-    const pop = h("div", { class: "spot-pop rule-check", role: "alertdialog", "aria-label": "This rule may repeat or contradict another" },
+  function showRuleCheck(subject, changes, found, model) {
+    const yours = subject.kind === "edit" ? `Your change makes the rule read: “${cut(subject.after, 200)}”`
+      : `Your ${subject.kind === "section" ? "section's rules" : "rule"}: “${cut(subject.lines.join(" "), 200)}”`;
+    const done = () => { suggest.checked.add(subject.signature); pop.remove(); };
+    const pop = h("div", { class: "spot-pop rule-check", role: "alertdialog", "aria-label": "This change may repeat or contradict another rule" },
       h("p", { class: "rule-check-title", text: "Before you keep this" }),
+      h("p", { class: "c-quote", text: yours }),
       ...found.map((m) => h("div", { class: `rule-match ${m.kind}` },
-        h("p", { class: "c-quote", text: `Your ${change.kind === "insert" || change.kind === "replace" ? "words" : "rule"}: “${cut(m.line, 140)}”` }),
-        h("p", {}, h("strong", { text: m.kind === "repeat" ? "Looks like " : "May contradict " }), `this rule in ${m.where}: “${cut(m.text, 180)}”`))),
-      h("p", {}, "This check compares words, not meaning, so it can be wrong. Do you still want to add it?"),
+        model ? h("p", {}, h("strong", { text: m.label }), m.text ? `“${cut(m.text, 220)}”${m.where ? ` (${m.where})` : ""}` : "")
+          : h("p", {}, h("strong", { text: m.kind === "repeat" ? "Looks like " : "May contradict " }), `this rule in ${m.where}: “${cut(m.text, 180)}”`),
+        m.explanation ? h("p", { class: "rule-why", text: m.explanation }) : null)),
+      h("p", { class: "muted", text: model ? `Checked by ${modelName(model)}, an AI model, which can be wrong. Do you still want to keep your change?`
+        : "This check compares words, not meaning, so it can be wrong. Do you still want to keep your change?" }),
       h("p", { class: "c-actions" },
-        action("Keep it", () => { suggest.checked.add(signature); pop.remove(); }, "button small"), " ",
-        action("Remove it", () => { pop.remove(); removeChange(change); }, "button secondary small")));
+        action("Keep it", done, "button small"), " ",
+        action(subject.kind === "edit" ? "Undo my changes to this rule" : "Remove it", () => { done(); changes.forEach(removeChange); }, "button secondary small")));
     document.body.append(pop);
-    placePop(pop, block.getBoundingClientRect());
+    placePop(pop, subject.blocks[subject.blocks.length - 1].getBoundingClientRect());
+  }
+
+  // For the maintainers, beside a suggestion: what the AI check found when it was made, or else what the word check
+  // finds now (for a change to a rule, only if it adds words, compared with the other rules).
+  function checkNote(p) {
+    if (FINAL_STATUS.has(p.status)) return null;
+    const check = p.aiCheck;
+    if (check?.verdict === "fine") {
+      return h("div", { class: "similar-note fine" }, h("p", { text: `Checked by ${modelName(check.model)}: no repeat or contradiction found.` }));
+    }
+    if (check?.verdict === "problem" && check.findings?.length) {
+      return h("div", { class: "similar-note" }, ...check.findings.slice(0, 3).map((f) => h("p", {},
+        h("strong", { text: AI_KINDS[f.kind]?.[1] || "" }), f.rule ? `“${cut(f.rule, 140)}”${f.where ? ` (${f.where})` : ""}` : "",
+        f.explanation ? h("span", { class: "rule-why", text: ` ${f.explanation}` }) : null)),
+        h("p", { class: "muted", text: `Found by ${modelName(check.model)}, an AI model, which can be wrong.` }));
+    }
+    if (!["rule", "section", "insert", "replace"].includes(p.kind)) return null;
+    let subject = { lines: p.kind === "section" ? String(p.new || "").split("\n").slice(1) : [p.new] }, skip = [];
+    if (p.kind === "insert" || p.kind === "replace") {
+      const index = sourceIndex(), found = locateQuote(index, p.old || "", p.before || "", p.after || "");
+      const block = found && blockOf(index.chars[found[0]].node);
+      if (!block) return null;
+      const before = blockText(block, false);
+      const after = p.kind === "insert" ? before.replace(p.old, `${p.old} ${p.new}`) : before.replace(p.old, p.new);
+      const { added, logic, matters } = meaningChange(before, after);
+      if (!matters) return null;
+      subject = { lines: added.length >= 3 && squash(p.new).split(" ").length >= 6 ? [p.new] : [], before, after, logic };
+      skip = [block];
+    }
+    const found = wordCheck(subject, ruleCandidates({ skip, exceptId: p.id }));
+    if (!found.length) return null;
+    return h("div", { class: "similar-note" }, ...found.slice(0, 2).map((m) => h("p", {},
+      h("strong", { text: m.kind === "repeat" ? "May repeat: " : "May contradict: " }), `“${cut(m.text, 120)}” (${m.where})`)));
   }
 
   // Take back one of your changes: added words go, struck words come back, a new rule or section goes.
@@ -2706,10 +2938,12 @@
   // A suggestion from the database as a proposal: the robot's record of it if that's up to date, or what's known
   // until the robot looks (within a few minutes).
   function asProposal(s, known) {
-    if (known && (FINAL_STATUS.has(known.status) || toTime(known.updated) === toTime(s.updated))) return s.builds_on ? { ...known, builds_on: s.builds_on } : known;
+    if (known && (FINAL_STATUS.has(known.status) || toTime(known.updated) === toTime(s.updated))) {
+      return { ...known, ...(s.builds_on ? { builds_on: s.builds_on } : {}), aiCheck: s.aiCheck || null };
+    }
     return { id: s.id, status: "new", kind: s.kind, old: s.exact, new: s.new, before: s.prefix, after: s.suffix, reason: s.reason,
       created: s.created, updated: s.updated, proposer: { name: s.author.email, email: s.author.email }, issue: known?.issue,
-      builds_on: s.builds_on || null };
+      builds_on: s.builds_on || null, aiCheck: s.aiCheck || null };
   }
 
   function currentProposals() {
