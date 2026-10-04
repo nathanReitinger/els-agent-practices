@@ -620,7 +620,7 @@
     },
     {
       "id": "sb-2fbddb08-a498-4642-a9fc-c2d5effef079",
-      "status": "open",
+      "status": "adopted",
       "based_on": "0.0.17",
       "issue": 14,
       "kind": "delete",
@@ -648,13 +648,25 @@
         ],
         "context": "AGENTS.md for Empirical Legal Scholars"
       },
-      "votes": [],
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-04T07:13:32.117378+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
       "support": 0,
-      "stale_votes": 0
+      "stale_votes": 0,
+      "decided": "2026-10-04T07:14:35.427917+00:00",
+      "version": "0.0.18",
+      "fingerprint": "5647d791699ca6ad3d8d55509b0766f454d13bcdaaf6be905308fd1b536bbcba",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -5 +5 @@\n-I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check.\n+You are my research assistant: make every result easy for me to check."
     },
     {
       "id": "sb-8a6183e6-ef5b-472e-a483-efe94501d7d5",
-      "status": "open",
+      "status": "adopted",
       "based_on": "0.0.17",
       "issue": 15,
       "kind": "insert",
@@ -675,16 +687,28 @@
       "section": "",
       "preview": {
         "before": [
-          "I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check."
+          "You are my research assistant: make every result easy for me to check."
         ],
         "after": [
-          "I am the author, and I answer for every number, quote, citation, and line of code. You are my research assistant: make every result easy for me to check. I am the author, and I answer—not you—for every number, quote, citation, and line of code."
+          "You are my research assistant: make every result easy for me to check. I am the author, and I answer—not you—for every number, quote, citation, and line of code."
         ],
         "context": "AGENTS.md for Empirical Legal Scholars"
       },
-      "votes": [],
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-04T07:13:31.040515+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
       "support": 0,
-      "stale_votes": 0
+      "stale_votes": 0,
+      "decided": "2026-10-04T07:14:35.427917+00:00",
+      "version": "0.0.19",
+      "fingerprint": "650939ce8e41233953ac1487679987e06de67e27510bc4a09732975d8a0b0586",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -5 +5 @@\n-You are my research assistant: make every result easy for me to check.\n+You are my research assistant: make every result easy for me to check. I am the author, and I answer—not you—for every number, quote, citation, and line of code."
     }
   ]
 }
