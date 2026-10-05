@@ -16,6 +16,7 @@ archive_pages() for each new version.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from html import escape
@@ -53,11 +54,30 @@ PREFS = ('<script>try{var d=document.documentElement,t=localStorage.getItem("els
          's=localStorage.getItem("els-size");if(t==="light"||t==="dark")d.dataset.theme=t;'
          'if(s&&!isNaN(+s))d.style.setProperty("--reading-scale",s)}catch(e){}</script>')
 
+
+
+def content_policy() -> str:
+    """What the pages may load and connect to, and nothing else (a Content-Security-Policy): the site itself, its
+    pinned libraries, its fonts, GitHub's API and files, and the Supabase project in versions.json. The one inline
+    script (PREFS) is allowed by its hash; WebAssembly is allowed for the Argon2id fingerprints."""
+    prefs = PREFS.removeprefix("<script>").removesuffix("</script>")
+    prefs_hash = base64.b64encode(hashlib.sha256(prefs.encode()).digest()).decode()
+    supabase = (json.loads((ROOT / "versions.json").read_text()).get("supabase") or {}).get("url", "").rstrip("/")
+    database = f" {supabase} {supabase.replace('https://', 'wss://', 1)}" if supabase.startswith("https://") else ""
+    return ("default-src 'none'; "
+            f"script-src 'self' https://cdn.jsdelivr.net 'sha256-{prefs_hash}' 'wasm-unsafe-eval'; "
+            "style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; "
+            f"connect-src 'self' https://api.github.com https://raw.githubusercontent.com{database}; "
+            "manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'")
+
+
 SHELL = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="{policy}">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>{title}</title>
   <meta name="description" content="{description}">
   <meta property="og:type" content="website">
@@ -108,7 +128,7 @@ SHELL = """<!doctype html>
   </div>
   <footer id="footer" class="site-footer"></footer>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js" integrity="sha384-a7SzOxErzJ3ZpQz0zJ32d67dSitNzPcbfybc/ykU9KJhMgZkwqfSxlhhdJRS+XGL" crossorigin="anonymous"></script>
   <script src="{root}/assets/app.js?v={asset}"></script>
 </body>
 </html>
@@ -144,6 +164,7 @@ def render(mode: str, root: str, title: str, description: str, version: str | No
         icon=ICON.format(color={"drafter": "8a5300", "history": "6e5332", "check": "1f6f43", "join": "2f4f8a",
                                 "maintainers": "4a3a7a", "declined": "6f6a72"}.get(mode, "8a2432")),
         prefs=PREFS,
+        policy=escape(content_policy()),
         fonts=FONTS,
         root=root,
         asset=asset_version(),

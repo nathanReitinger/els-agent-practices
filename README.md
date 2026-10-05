@@ -32,13 +32,15 @@ The rules are in [GOVERNANCE.md](GOVERNANCE.md); how to take part is in [CONTRIB
 | `versions.json` | Every version, with its fingerprint |
 | `CHANGELOG.md` | What changed in each version, and who proposed and approved it |
 | `governance/maintainers.json` | The maintainers, who approve changes, and the rules for deciding |
-| `governance/proposals.json` | Every suggestion and proposal, vote, and outcome (written by the robot) |
+| `governance/proposals.json` | Every suggestion and proposal, vote, and outcome, and every change to the maintainers (written by the robot) |
+| `SECURITY.md` | How to report a security problem, and what's protected |
 | `supabase/` | The database behind Suggest Edits (`schema.sql`), how Supabase starts the robot and runs the AI check of new rules (`robot.sql`), and how to set them up (`README.md`) |
 | `scripts/proposals.py` | The robot that counts votes and publishes approved changes |
 | `scripts/edits.py` | How a suggestion becomes an exact edit |
 | `scripts/release.py`, `scripts/fingerprint.py` | Publishing a version, and computing fingerprints |
 | `scripts/pages.py` | Writes the site's HTML pages |
 | `scripts/tests/` | Tests, run before every robot run |
+| `scripts/requirements.txt` | The robot's one Python dependency, pinned by hash |
 | `assets/`, `index.html`, `draft/`, `history/`, `maintainers/`, `declined/`, `check/`, `join/` | The website (GitHub Pages, no build step) |
 | `docs/` | How AGENTS.md was drafted and tested |
 

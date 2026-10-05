@@ -18,7 +18,7 @@ Open Suggest Edits. A popup asks you to verify an email address: enter any addre
 - To add a section, choose **+ New section** at the end of a section: type its heading, press Enter, and type its rules. A new section is one suggestion.
 - To offer a different change for words someone else changed, click their change and choose **Suggest a different change**. It's saved as your own suggestion, marked as building on theirs, and the maintainers choose.
 
-The address you verify is your name on the site: it's shown with your suggestions, and it's recorded with every change that's adopted. Every change is saved automatically, as one suggestion, so maintainers can approve some and disapprove others. Change it again, and the suggestion is updated; undo it, and it's withdrawn. Undo and Redo work as usual. You can add a reason to each suggestion in the list below the text.
+The address you verify is your name on the site: it's shown with your suggestions and comments, and it's recorded with every change that's adopted. That record is public and permanent, since the git history is never rewritten. Every change is saved automatically, as one suggestion, so maintainers can approve some and disapprove others. Change it again, and the suggestion is updated; undo it, and it's withdrawn. Undo and Redo work as usual. You can add a reason to each suggestion in the list below the text.
 
 Everyone sees everyone's suggestions in the text: your own in blue, other people's in orange, each with the suggester's email address. Clicking one shows the details. Readers' suggestions and votes are kept in the site's database (see [supabase/README.md](supabase/README.md)), which anyone can read.
 

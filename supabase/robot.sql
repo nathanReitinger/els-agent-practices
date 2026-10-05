@@ -213,6 +213,11 @@ begin
   exception when others then
     null;
   end;
+  begin
+    perform robot.keep_published_text(at);  -- for the AI check of new rules, below
+  exception when others then
+    null;
+  end;
 end
 $$;
 
@@ -221,7 +226,8 @@ $$;
 -- (Anthropic's Claude) whether the change makes the file repeat or contradict itself: against the published text
 -- and the other open suggestions. The model sees the rule before and after the change, so moving words around isn't
 -- taken for a repeat. Its answer is advice to the person making the change, who decides; the maintainers see it
--- beside the suggestion.
+-- beside the suggestion. The database supplies the published text itself (fetched from GitHub), and writes the
+-- answer onto the suggestion itself, so nobody can check a made-up file or put a made-up answer on a suggestion.
 --
 -- Anthropic's API needs a key, kept encrypted in Vault like the GitHub token, and each check is billed to the key's
 -- account. To turn the check on, or to replace the key, run this in a new query:
@@ -244,6 +250,57 @@ create table if not exists robot.rule_checks (
   created timestamptz not null default now()
 );
 create index if not exists rule_checks_fingerprint on robot.rule_checks (fingerprint);
+
+-- Who asked each question, about which of their suggestions (an answer goes onto those, if they still say what was
+-- checked), and the page's own name for it ("about"). Only those who asked can read the answer.
+create table if not exists robot.rule_check_askers (
+  check_id bigint not null references robot.rule_checks (id) on delete cascade,
+  asker uuid not null,
+  suggestions uuid[] not null default '{}',
+  change text not null default '',
+  about text not null default '',
+  written boolean not null default false,
+  primary key (check_id, asker)
+);
+
+-- The published text (draft/AGENTS.md on GitHub), fetched every ten minutes by the timer above. A question is always
+-- about this copy of the file, never one sent with the question.
+create table if not exists robot.published_text (
+  id integer primary key default 1 check (id = 1),
+  content text,
+  fetched_at timestamptz,
+  request_id bigint,
+  requested_at timestamptz
+);
+insert into robot.published_text (id) values (1) on conflict (id) do nothing;
+
+create or replace function robot.keep_published_text(at timestamptz default now()) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  t robot.published_text%rowtype;
+  r record;
+begin
+  select * into t from robot.published_text where id = 1;
+  if t.request_id is not null then
+    select status_code, content into r from net._http_response where id = t.request_id;
+    if found then
+      if r.status_code = 200 and coalesce(r.content, '') like '# %' then
+        update robot.published_text set content = r.content, fetched_at = at, request_id = null where id = 1;
+      else
+        update robot.published_text set request_id = null where id = 1;
+      end if;
+    elsif t.requested_at < at - interval '5 minutes' then
+      update robot.published_text set request_id = null where id = 1;  -- no answer: ask again
+    end if;
+  end if;
+  select * into t from robot.published_text where id = 1;
+  if t.request_id is null and (t.fetched_at is null or t.fetched_at < at - interval '10 minutes') then
+    update robot.published_text set requested_at = at, request_id = net.http_get(
+      url := 'https://raw.githubusercontent.com/nathanReitinger/els-agent-practices/main/draft/AGENTS.md',
+      timeout_milliseconds := 15000) where id = 1;
+  end if;
+end
+$$;
 create index if not exists rule_checks_created on robot.rule_checks (created);
 
 create or replace function robot.set_anthropic_key(key text) returns text
@@ -269,10 +326,11 @@ begin
 end
 $$;
 
--- The request to Anthropic's Messages API: the fixed instructions, then the question the page sends (the file as
--- published, the other open suggestions, and the change). The answer is JSON in a fixed form. The file is marked
--- for caching, so checks made within a few minutes of each other pay less for it.
-create or replace function robot.rule_check_body(request jsonb) returns jsonb
+-- The request to Anthropic's Messages API: the fixed instructions, the published file, and the question the page sends
+-- (the other open suggestions, and the change). The answer is JSON in a fixed form. The file is marked for caching,
+-- so checks made within a few minutes of each other pay less for it.
+drop function if exists robot.rule_check_body(jsonb);
+create or replace function robot.rule_check_body(request jsonb, document text) returns jsonb
 language sql stable set search_path = '' as $body$
   select jsonb_build_object(
     'model', 'claude-opus-5-5',
@@ -314,59 +372,77 @@ Judge meaning, not wording:
 Be precise and sparing: report only problems a careful maintainer would want fixed, and when unsure, report none. The verdict is "problem" if there is at least one finding, and "fine" with no findings otherwise. For each finding, quote the other rule or open suggestion exactly as it appears ("rule"; empty for kind "inconsistent"), say where it is ("where": the heading of its section, or "an open suggestion"), and explain the problem in one or two plain sentences ("explanation").$prompt$,
     'messages', jsonb_build_array(jsonb_build_object('role', 'user', 'content', jsonb_build_array(
       jsonb_build_object('type', 'text', 'cache_control', jsonb_build_object('type', 'ephemeral'),
-        'text', '<file>' || chr(10) || coalesce(request ->> 'document', '') || chr(10) || '</file>'),
+        'text', '<file>' || chr(10) || coalesce(document, '') || chr(10) || '</file>'),
       jsonb_build_object('type', 'text',
         'text', '<open_suggestions>' || chr(10) || coalesce(nullif(request ->> 'others', ''), '(none)') || chr(10) || '</open_suggestions>'),
       jsonb_build_object('type', 'text',
         'text', '<change>' || chr(10) || coalesce(request ->> 'change', '') || chr(10) || '</change>')))))
 $body$;
 
--- Ask: returns { "id": ... } to look up the answer with, or { "unavailable": why } ("off", "limit", "too long",
+-- Ask: the page sends { "others", "change", "suggestions": [its suggestions this is about], "about" }. Returns
+-- { "id": ... } to look up the answer with, or { "unavailable": why } ("off", "limit", "too long", "no text yet",
 -- "signed out"), and then the page uses its own check.
 create or replace function public.start_rule_check(request jsonb) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   me uuid := (select auth.uid());
   key text;
+  document text;
   body jsonb;
   question text;
-  check_id bigint;
+  the_check bigint;
+  mine uuid[];
 begin
   if me is null then
     return jsonb_build_object('unavailable', 'signed out');
   end if;
   if coalesce(jsonb_typeof(request), '') <> 'object'
-     or length(coalesce(request ->> 'document', '')) not between 1 and 40000
      or length(coalesce(request ->> 'others', '')) > 30000
-     or length(coalesce(request ->> 'change', '')) not between 1 and 6000 then
+     or length(coalesce(request ->> 'change', '')) not between 1 and 6000
+     or length(coalesce(request ->> 'about', '')) > 100
+     or coalesce(jsonb_typeof(request -> 'suggestions'), 'array') <> 'array'
+     or jsonb_array_length(coalesce(request -> 'suggestions', '[]')) > 20 then
     return jsonb_build_object('unavailable', 'too long');
   end if;
+  begin
+    mine := array(select x::uuid from jsonb_array_elements_text(coalesce(request -> 'suggestions', '[]')) x);
+  exception when invalid_text_representation then
+    return jsonb_build_object('unavailable', 'too long');
+  end;
   select decrypted_secret into key from vault.decrypted_secrets where name = 'anthropic_api_key';
   if coalesce(key, '') = '' then
     return jsonb_build_object('unavailable', 'off');
   end if;
-  body := robot.rule_check_body(request);
+  select content into document from robot.published_text where id = 1;
+  if document is null then
+    return jsonb_build_object('unavailable', 'no text yet');
+  end if;
+  body := robot.rule_check_body(request, document);
   question := md5(body::text);
-  select c.id into check_id from robot.rule_checks c
+  select c.id into the_check from robot.rule_checks c
     where c.fingerprint = question and c.error is null and c.created > now() - interval '30 days'
     order by c.id desc limit 1;
-  if check_id is not null then
-    return jsonb_build_object('id', check_id);  -- asked before: the same answer, at no cost
+  if the_check is null then
+    perform pg_advisory_xact_lock(hashtext('robot.rule_checks'));  -- one at a time, so the limits can't be outrun
+    if (select count(*) from robot.rule_checks c where c.asked_by = me and c.created > now() - interval '1 hour') >= 10
+       or (select count(*) from robot.rule_checks c where c.asked_by = me and c.created > now() - interval '1 day') >= 25
+       or (select count(*) from robot.rule_checks c where c.created > now() - interval '1 day') >= 80 then
+      return jsonb_build_object('unavailable', 'limit');
+    end if;
+    insert into robot.rule_checks (asked_by, fingerprint, model, request_id)
+      values (me, question, body ->> 'model', net.http_post(
+        url := 'https://api.anthropic.com/v1/messages',
+        body := body,
+        headers := jsonb_build_object('x-api-key', key, 'anthropic-version', '2023-06-01', 'content-type', 'application/json'),
+        timeout_milliseconds := 180000))
+      returning id into the_check;
   end if;
-  perform pg_advisory_xact_lock(hashtext('robot.rule_checks'));  -- one at a time, so the limits can't be outrun
-  if (select count(*) from robot.rule_checks c where c.asked_by = me and c.created > now() - interval '1 hour') >= 10
-     or (select count(*) from robot.rule_checks c where c.asked_by = me and c.created > now() - interval '1 day') >= 25
-     or (select count(*) from robot.rule_checks c where c.created > now() - interval '1 day') >= 80 then
-    return jsonb_build_object('unavailable', 'limit');
-  end if;
-  insert into robot.rule_checks (asked_by, fingerprint, model, request_id)
-    values (me, question, body ->> 'model', net.http_post(
-      url := 'https://api.anthropic.com/v1/messages',
-      body := body,
-      headers := jsonb_build_object('x-api-key', key, 'anthropic-version', '2023-06-01', 'content-type', 'application/json'),
-      timeout_milliseconds := 180000))
-    returning id into check_id;
-  return jsonb_build_object('id', check_id);
+  -- Asked before (the same answer, at no cost) or just now: either way, this reader asked it, about these.
+  insert into robot.rule_check_askers (check_id, asker, suggestions, change, about)
+    values (the_check, me, mine, request ->> 'change', coalesce(request ->> 'about', ''))
+    on conflict (check_id, asker) do update set suggestions = excluded.suggestions, change = excluded.change,
+      about = excluded.about, written = false;
+  return jsonb_build_object('id', the_check);
 end
 $$;
 
@@ -382,7 +458,8 @@ declare
   findings jsonb;
   problem text;
 begin
-  if (select auth.uid()) is null then
+  if (select auth.uid()) is null
+     or not exists (select 1 from robot.rule_check_askers a where a.check_id = rule_check_result.check_id and a.asker = (select auth.uid())) then
     return jsonb_build_object('status', 'unknown');
   end if;
   select * into c from robot.rule_checks where id = check_id;
@@ -390,6 +467,7 @@ begin
     return jsonb_build_object('status', 'unknown');
   end if;
   if c.result is not null then
+    perform robot.note_rule_check(check_id);
     return jsonb_build_object('status', 'done', 'result', c.result, 'model', c.model);
   end if;
   if c.error is not null then
@@ -432,7 +510,40 @@ begin
   findings := coalesce((select jsonb_agg(f) from (select f from jsonb_array_elements(report -> 'findings') f limit 5) kept), '[]'::jsonb);
   report := jsonb_build_object('verdict', case when jsonb_array_length(findings) > 0 then 'problem' else 'fine' end, 'findings', findings);
   update robot.rule_checks set result = report where id = check_id;
+  perform robot.note_rule_check(check_id);
   return jsonb_build_object('status', 'done', 'result', report, 'model', c.model);
+end
+$$;
+
+-- An answer goes onto the asker's suggestions it was about, once, and only onto those that are theirs and still say
+-- what was checked: every line of their new words is in the change that was asked about. (Each finding's text is kept
+-- to a reasonable length, and only text.)
+create or replace function robot.note_rule_check(check_id bigint) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  c robot.rule_checks%rowtype;
+  a robot.rule_check_askers%rowtype;
+  squeezed text;
+begin
+  select * into c from robot.rule_checks where id = check_id;
+  select * into a from robot.rule_check_askers where rule_check_askers.check_id = note_rule_check.check_id and asker = (select auth.uid());
+  if c.result is null or a.asker is null or a.written then
+    return;
+  end if;
+  squeezed := regexp_replace(a.change, '\s+', ' ', 'g');
+  update public.suggestions s
+    set ai_check = jsonb_build_object(
+      'verdict', c.result ->> 'verdict',
+      'findings', coalesce((select jsonb_agg(jsonb_build_object(
+          'kind', left(coalesce(f ->> 'kind', ''), 40), 'rule', left(coalesce(f ->> 'rule', ''), 2000),
+          'where', left(coalesce(f ->> 'where', ''), 200), 'explanation', left(coalesce(f ->> 'explanation', ''), 2000)))
+        from jsonb_array_elements(c.result -> 'findings') f), '[]'::jsonb),
+      'model', c.model, 'about', a.about, 'at', now())
+    where s.id = any(a.suggestions) and s.author_id = a.asker
+      and not exists (select 1 from regexp_split_to_table(s.new_text, '\n') line
+                      where btrim(regexp_replace(line, '\s+', ' ', 'g')) <> ''
+                        and position(btrim(regexp_replace(line, '\s+', ' ', 'g')) in squeezed) = 0);
+  update robot.rule_check_askers set written = true where rule_check_askers.check_id = note_rule_check.check_id and asker = a.asker;
 end
 $$;
 
@@ -448,7 +559,8 @@ language sql stable security definer set search_path = '' as $$
                        and (error is not null or (result is null and created < now() - interval '10 minutes'))),
     'daily_limit', 80,
     'last_error', (select error from robot.rule_checks where error is not null order by id desc limit 1),
-    'last_answer', (select max(created) from robot.rule_checks where result is not null))
+    'last_answer', (select max(created) from robot.rule_checks where result is not null),
+    'text_fetched_at', (select fetched_at from robot.published_text where id = 1))
 $$;
 
 revoke all on function public.start_rule_check(jsonb) from public, anon;

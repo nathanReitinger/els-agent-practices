@@ -663,6 +663,7 @@ class Robot:
         self.health: dict[str, str | None] = {}  # alert -> what's wrong, or None if it's fine
         self.data: dict | None = None  # Suggest Edits' data (suggestions, votes, ...), as read in this run
         self.maintainer_log: list[dict] = []  # requests to add or remove a maintainer, and what came of each
+        self.maintainer_changes: list[tuple[str, str, str, Maintainer]] = []  # made in this run: to announce
         self.gov = Governance(json.loads(MAINTAINERS.read_text()))
         self.manifest = json.loads(MANIFEST.read_text())
         self.site = self.manifest["site"]
@@ -806,8 +807,29 @@ class Robot:
         commit(f"{subject}\n\nAsked for on the Maintainers page by {lead.name} ({lead.email}), a lead maintainer.\n\n"
                f"Maintainer-request: {rid}", f"{lead.name} <{lead.email}>")
         self.gov = gov
+        self.maintainer_changes.append((action, name or existing.get("name") or email, email, lead))
         self.say(f"{subject}.")
         return outcome
+
+    def announce_maintainer_changes(self) -> None:
+        """Tell the lead maintainers about every change made to the list from the Maintainers page, in an issue that
+        mentions them (so GitHub emails them), closed at once. If no lead maintainer asked for it, they'll know."""
+        if not self.github or not self.maintainer_changes:
+            return
+        leads = [m.github for m in self.gov.maintainers if m.lead and m.github] or [m.github for m in self.gov.maintainers if m.github]
+        hello = " ".join(f"@{name}" for name in leads)
+        for action, name, email, lead in self.maintainer_changes:
+            done = "added as" if action == "add" else "removed as"
+            body = (f"{hello} {md(name)} ({md(email)}) was {done} a maintainer, as asked on the Maintainers page by "
+                    f"{md(lead.name)}, signed in as {md(lead.email)}.\n\nIf no lead maintainer asked for this, undo it on the "
+                    "Maintainers page (or in governance/maintainers.json), and check who can sign in with that address.")
+            try:
+                made = self.github.call("POST", "/issues", {"title": f"Maintainers: {'added' if action == 'add' else 'removed'} {name}",
+                                                          "body": body})
+                if made:
+                    self.github.call("PATCH", f"/issues/{made['number']}", {"state": "closed", "state_reason": "completed"})
+            except (urllib.error.URLError, TimeoutError, ValueError) as error:
+                self.say(f"Couldn't announce a change to the maintainers ({error}).")
 
     def site_data(self) -> dict[str, list[dict]] | None:
         """Suggest Edits' suggestions and votes; None if they couldn't be read (so nothing is withdrawn by mistake)."""
@@ -963,7 +985,7 @@ class Robot:
 
         # A suggestion changed after its issue was opened: say so on the issue (watchers get the new wording by email),
         # and count votes there only from then on.
-        self.notices = set()
+        self.notices: set[str] = set()
         for record in records.values():
             issue = issues.get(record["id"])
             opened = parse_time(issue["created_at"]) if issue and issue.get("created_at") else None
@@ -1038,6 +1060,7 @@ class Robot:
         if self.github and issues is not None:
             self.update_issues(records, issues)
         if self.github:
+            self.announce_maintainer_changes()
             self.check_starts()
             self.check_schema()
             self.check_rule_checks()
@@ -1144,6 +1167,11 @@ class Robot:
             limit = status.get("daily_limit") or 0
             if limit and (status.get("asked_today") or 0) >= limit:
                 problems.append(f"It reached its limit of {limit} checks a day, so the page is using its simpler check.")
+            fetched = status.get("text_fetched_at")
+            if "text_fetched_at" in status and (not fetched or (self.now - parse_time(fetched)).total_seconds() > 6 * 3600):
+                when = f"since {parse_time(fetched):%B %d, %Y, at %H:%M} UTC" if fetched else "yet"
+                problems.append(f"The database hasn't fetched the published AGENTS.md from GitHub {when}, so checks "
+                                "use an old copy, or can't run.")
         self.health["ai-check"] = " ".join(problems) or None
 
     def update_alerts(self) -> None:
@@ -1183,29 +1211,35 @@ class Robot:
                                  {"body": f"This is the same proposal as #{original['number']}; votes here are counted there too."})
                 self.github.call("PATCH", f"/issues/{duplicate['number']}", {"state": "closed", "state_reason": "not_planned"})
         for record in records.values():
-            issue = issues.get(record["id"])
-            if not issue or issue.get("state") == "closed":
-                continue
-            number = issue["number"]
-            if record["status"] in FINAL:
-                text, reason = outcome_comment(record, self.site)
-                marker = text.rsplit("\n", 1)[-1]
-                posted = any(marker in (c.get("body") or "") for c in self.github.pages(f"/issues/{number}/comments"))
-                if not posted:
-                    self.github.call("POST", f"/issues/{number}/comments", {"body": text})
-                self.github.call("PATCH", f"/issues/{number}", {"state": "closed", "state_reason": reason,
-                                                               "body": issue_body(record, self.gov, self.site)})
-                self.say(f"Closed issue #{number}: {record['status']}.")
-            else:
-                if record["id"] in getattr(self, "notices", ()):
-                    self.github.call("POST", f"/issues/{number}/comments", {"body": change_comment(record)})
-                body = issue_body(record, self.gov, self.site)
-                labels = [label["name"] if isinstance(label, dict) else label for label in issue.get("labels") or []]
-                changes = {"body": body} if body != (issue.get("body") or "") else {}
-                if "proposal" not in labels:  # opened on the Maintainers page by someone who can't set labels
-                    changes["labels"] = [*labels, "proposal"]
-                if changes:
-                    self.github.call("PATCH", f"/issues/{number}", changes)
+            try:
+                self.update_issue(record, issues.get(record["id"]))
+            except (urllib.error.URLError, TimeoutError, ValueError) as error:  # tried again next run
+                self.say(f"Couldn't update the issue for proposal {record['id']} ({error}).")
+
+    def update_issue(self, record: dict, issue: dict | None) -> None:
+        """Bring one proposal's issue up to date: a comment and closing once it's decided, or its new text and label."""
+        if not issue or issue.get("state") == "closed":
+            return
+        number = issue["number"]
+        if record["status"] in FINAL:
+            text, reason = outcome_comment(record, self.site)
+            marker = text.rsplit("\n", 1)[-1]
+            posted = any(marker in (c.get("body") or "") for c in self.github.pages(f"/issues/{number}/comments"))
+            if not posted:
+                self.github.call("POST", f"/issues/{number}/comments", {"body": text})
+            self.github.call("PATCH", f"/issues/{number}", {"state": "closed", "state_reason": reason,
+                                                           "body": issue_body(record, self.gov, self.site)})
+            self.say(f"Closed issue #{number}: {record['status']}.")
+        else:
+            if record["id"] in getattr(self, "notices", ()):
+                self.github.call("POST", f"/issues/{number}/comments", {"body": change_comment(record)})
+            body = issue_body(record, self.gov, self.site)
+            labels = [label["name"] if isinstance(label, dict) else label for label in issue.get("labels") or []]
+            changes = {"body": body} if body != (issue.get("body") or "") else {}
+            if "proposal" not in labels:  # opened before labels were used
+                changes["labels"] = [*labels, "proposal"]
+            if changes:
+                self.github.call("PATCH", f"/issues/{number}", changes)
 
 
 def main() -> None:
@@ -1234,7 +1268,7 @@ def main() -> None:
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as out:
-            out.write("### Proposals\n\n" + ("\n".join(f"- {e}" for e in robot.events) or "- Nothing to do.") + "\n")
+            out.write("### Proposals\n\n" + ("\n".join(f"- {md(e)}" for e in robot.events) or "- Nothing to do.") + "\n")
     if not robot.events:
         print("Nothing to do.")
 

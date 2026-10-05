@@ -49,9 +49,10 @@ alter table public.suggestions add column if not exists builds_on text
 alter table public.suggestions drop constraint if exists suggestions_new_text_visible;
 alter table public.suggestions add constraint suggestions_new_text_visible check (new_text !~ '[\u0001-\u0009\u000b-\u001f\u007f-\u009f\u00ad\u034f\u0600-\u0605\u061c\u06dd\u070f\u08e2\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff9-\ufffb\ue000-\uf8ff\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e0fff\U000f0000-\U0010ffff]') not valid;
 
--- What the AI check found about a suggestion (supabase/robot.sql), saved by its author's page so the maintainers
--- see it too: { "verdict": "fine" | "problem", "findings": [{ "kind", "rule", "where", "explanation" }, ...] }, at most
--- five findings, each an object. Anything else is refused, so a malformed note can't break the list of suggestions.
+-- What the AI check found about a suggestion, written by the database when the check is answered (supabase/robot.sql),
+-- so the maintainers see it too: { "verdict": "fine" | "problem", "findings": [{ "kind", "rule", "where",
+-- "explanation" }, ...] }, at most five findings, each an object. Anything else is refused, so a malformed note can't
+-- break the list of suggestions.
 alter table public.suggestions add column if not exists ai_check jsonb;
 create or replace function public.valid_ai_check(c jsonb) returns boolean
 language sql immutable set search_path = '' as $$
@@ -285,9 +286,12 @@ create policy "Authors change their own comments" on public.comments
   with check (author_id = (select auth.uid()));
 
 drop policy if exists "Authors delete their own comments" on public.comments;
+-- Not once someone else has replied: deleting a comment deletes its replies, and those aren't the author's to delete
+-- (they can resolve it instead).
 create policy "Authors delete their own comments" on public.comments
   for delete to authenticated
-  using (author_id = (select auth.uid()));
+  using (author_id = (select auth.uid())
+         and not exists (select 1 from public.comments r where r.parent = comments.id and r.author_id <> (select auth.uid())));
 
 -- Anyone signed in can mark a comment (not a reply) resolved, or open it again.
 create or replace function public.resolve_comment(comment_id uuid, done boolean) returns void
@@ -409,8 +413,21 @@ $$;
 
 grant select on public.suggestions, public.votes, public.comments to anon, authenticated;
 grant insert, update, delete on public.suggestions, public.votes, public.comments to authenticated;
+-- Every column of their own suggestions but the AI check's note, which the database writes (supabase/robot.sql).
+revoke insert, update on public.suggestions from authenticated;
+grant insert (kind, exact, prefix, suffix, new_text, reason, base, builds_on) on public.suggestions to authenticated;
+grant update (kind, exact, prefix, suffix, new_text, reason, base, builds_on) on public.suggestions to authenticated;
 revoke insert, update, delete, truncate on public.suggestions, public.votes, public.comments from anon;
 revoke all on public.maintainer_requests from anon, authenticated;
+-- Nothing the site uses, so nobody has it.
+revoke truncate, references, trigger on public.suggestions, public.votes, public.comments from anon, authenticated;
+
+-- Each reader's rows, found quickly (the limits above count them).
+create index if not exists suggestions_author on public.suggestions (author_id);
+create index if not exists comments_author on public.comments (author_id);
+create index if not exists comments_parent on public.comments (parent);
+create index if not exists votes_voter on public.votes (voter_id);
+create index if not exists maintainer_requests_by on public.maintainer_requests (requested_by);
 grant select on public.maintainer_requests to anon, authenticated;
 grant insert on public.maintainer_requests to authenticated;
 

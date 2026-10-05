@@ -755,6 +755,18 @@ class GitHubRunTest(RunTest):
         self.robot_online(site, now="2026-10-03T12:50:00Z")
         self.assertEqual(self.ledger()["sb-p2"]["status"], "adopted")
 
+    def test_a_change_to_the_maintainers_is_announced_to_the_lead_maintainers(self):
+        request = {"id": "r1", "requested_by": "id-lead", "requested_email": LEAD_EMAIL, "action": "add", "name": "Jane Doe",
+                   "email": "jane@example.edu", "github": "", "created": "2026-10-03T11:50:00+00:00"}
+        self.robot_online({**NO_SITE, "maintainer_requests": [request]})
+        [issue] = [i for i in self.github.issues.values() if i["title"].startswith("Maintainers:")]
+        self.assertEqual(issue["title"], "Maintainers: added Jane Doe")
+        self.assertIn("@nathanReitinger", issue["body"])
+        self.assertIn("was added as a maintainer, as asked on the Maintainers page by Nathan Reitinger", issue["body"])
+        self.assertEqual(issue["state"], "closed")
+        self.robot_online({**NO_SITE, "maintainer_requests": [request]}, now="2026-10-03T12:10:00Z")  # once only
+        self.assertEqual(len([i for i in self.github.issues.values() if i["title"].startswith("Maintainers:")]), 1)
+
     def test_an_issue_opened_by_someone_else_doesnt_count(self):
         """Only the robot's own issues stand for proposals: one anyone else opens with a proposal's marker, or with
         the marker hidden in its text, gets no votes and no updates, and the robot opens its own."""
@@ -889,6 +901,10 @@ class GitHubRunTest(RunTest):
         self.assertEqual(self.alerts(), [])
         self.robot_online(status(asked_today=100))
         self.assertIn("limit of 100 checks a day", self.alerts()[0]["body"])
+        self.robot_online(status(text_fetched_at="2026-10-03T11:00:00+00:00"))  # an hour ago: fine
+        self.assertEqual(self.alerts(), [])
+        self.robot_online(status(text_fetched_at="2026-10-03T01:00:00+00:00"))
+        self.assertIn("hasn't fetched the published AGENTS.md from GitHub since October 03, 2026", self.alerts()[0]["body"])
 
     def test_no_issue_until_supabase_starts_the_robot(self):
         self.robot_online()

@@ -118,6 +118,13 @@ def sync_draft() -> bool:
     return True
 
 
+def as_text(text: str) -> str:
+    """A summary (which may quote a reader's words) shown as plain text in Markdown: no formatting, HTML, links, or
+    @mentions."""
+    text = " ".join((text or "").split()).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return re.sub(r"([\\`*_\[\]|~#!])", r"\\\1", text).replace("@", "@\u2060")
+
+
 def publish(version: str, summary: str, details: list[str] | tuple[str, ...] = (), today: str | None = None) -> dict:
     """Publish draft/AGENTS.md as `version`. Returns the new entry in versions.json."""
     manifest = json.loads(MANIFEST.read_text())
@@ -156,7 +163,7 @@ def publish(version: str, summary: str, details: list[str] | tuple[str, ...] = (
     manifest["versions"].insert(0, entry)
     MANIFEST.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
 
-    block = f"## [{version}] - {today}\n\n{summary}\n"
+    block = f"## [{version}] - {today}\n\n{as_text(summary)}\n"
     if details:
         block += "\n" + "\n".join(details) + "\n"
     block += f"\nArgon2id fingerprint: `{value}`\n"

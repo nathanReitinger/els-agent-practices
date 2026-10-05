@@ -34,6 +34,10 @@
   const { mode = "published", root = ".", version: pageVersion } = document.body.dataset;
   const html = document.documentElement;
   const isLocal = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+  // What Markdown may become on these pages: text, lists, tables, links, and code. No styles, forms, images, media,
+  // or embedded documents, even if a published version somehow contained them.
+  const SANITIZE = { FORBID_TAGS: ["style", "form", "input", "textarea", "select", "button", "iframe", "frame", "object", "embed",
+    "img", "picture", "video", "audio", "source", "svg", "math", "link", "meta", "base"], FORBID_ATTR: ["style", "srcset"] };
   const rev = new URLSearchParams(location.search).get("rev");
 
   const $ = (sel, scope = document) => scope.querySelector(sel);
@@ -163,7 +167,7 @@
   function fillDoc(article, markdown) {
     currentMarkdown = markdown;
     article.classList.remove("raw");
-    article.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+    article.innerHTML = DOMPurify.sanitize(marked.parse(markdown), SANITIZE);
     markHeadings(article);
     addCopyButtons(article);
     for (const link of $$("a[href^='http']", article)) Object.assign(link, newTab);
@@ -1176,7 +1180,6 @@
       // The AI check of new rules (supabase/robot.sql): ask, then look up the answer; and keep it with the suggestion.
       startRuleCheck: async (request) => must(await client.rpc("start_rule_check", { request })),
       ruleCheckResult: async (id) => must(await client.rpc("rule_check_result", { check_id: id })),
-      saveCheck: async (docId, check) => must(await client.from("suggestions").update({ ai_check: check }).eq("id", docId)),
       // Comments have ids made on this computer, so one sent twice (say, after the connection dropped) is added once.
       addComment: async (row) => must(await client.from("comments").upsert(row, { onConflict: "id", ignoreDuplicates: true })),
       deleteComment: async (id) => must(await client.from("comments").delete().eq("id", id)),
@@ -1682,10 +1685,10 @@
     const say = (text) => { step.note = text; note.textContent = text; };
     if (step.step === "code") {
       const code = h("input", { type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "10", spellcheck: "false",
-        class: "key-input code-input", placeholder: "123456", "aria-label": "The 6-digit code from the email" });
+        class: "key-input code-input", placeholder: "Code", "aria-label": "The code from the email" });
       const verify = async () => {
         const value = code.value.replace(/\D/g, "");
-        if (value.length < 6) { say("Enter the 6-digit code from the email."); return code.focus(); }
+        if (value.length < 6) { say("Enter the code from the email."); return code.focus(); }
         say("Checking…");
         try {
           await backend.verifyCode(step.email, value);
@@ -1702,7 +1705,7 @@
       setTimeout(() => code.focus(), 0);
       return [
         h("h2", { text: "Check your email" }),
-        h("p", {}, "We sent a 6-digit code to ", h("strong", { text: step.email }), ". Enter it here to start editing."),
+        h("p", {}, "We sent a code to ", h("strong", { text: step.email }), ". Enter it here to start editing."),
         h("div", { class: "gate-row" }, code, action("Verify", verify, "button")),
         h("p", { class: "gate-links" },
           h("button", { type: "button", class: "linklike", text: "Send a new code", onclick: again }), " · ",
@@ -1728,10 +1731,10 @@
     setTimeout(() => email.focus(), 0);
     return [
       h("h2", { text: "Verify an email address to edit" }),
-      h("p", { text: "You need to verify an email address in order to edit this document. Enter any email address you can check, and we'll send it a 6-digit code." }),
+      h("p", { text: "You need to verify an email address in order to edit this document. Enter any email address you can check, and we'll send it a code." }),
       h("div", { class: "gate-row" }, email, action("Send code", send, "button")),
       note,
-      h("p", { class: "gate-fine", text: "The address you verify is your name here: it's shown with your suggestions." }),
+      h("p", { class: "gate-fine", text: "The address you verify is your name here, and it's public: it's shown with everything you suggest, comment, or highlight, and it stays in the project's permanent public record (its git history, which is never rewritten), including in any change that's adopted. Use an address you're comfortable showing." }),
       readInstead];
   }
 
@@ -2449,8 +2452,9 @@
     const item = (c) => h("div", { class: `c-item${c.pending ? " c-pending" : ""}` },
       h("p", { class: "c-head" }, h("strong", { text: c.author.email }), ` · ${formatDate(c.created)}${c.pending ? " · not sent yet" : ""}`),
       h("p", { class: "c-body", text: c.body }),
-      mine(c) ? h("p", { class: "c-actions" }, h("button", { type: "button", class: "linklike", text: c === root ? "Delete the comment" : "Delete",
-        onclick: () => deleteComment(c) })) : null);
+      // A comment someone else has replied to can't be deleted (their replies would go with it): it can be resolved.
+      mine(c) && !(c === root && replies.some((r) => !mine(r))) ? h("p", { class: "c-actions" }, h("button", { type: "button", class: "linklike",
+        text: c === root ? "Delete the comment" : "Delete", onclick: () => deleteComment(c) })) : null);
     const box = h("div", { class: `c-thread${root.resolved ? " resolved" : ""}`, "data-thread": root.id },
       root.resolved ? h("p", { class: "c-state", text: `Resolved${root.resolvedBy ? ` by ${root.resolvedBy}` : ""}` }) : null,
       item(root), ...replies.map(item));
@@ -2743,7 +2747,8 @@
       describe: `A change to a rule in the section “${where}”.\nThe rule as published: “${before}”\nThe rule after the change: “${after}”` };
   }
 
-  // The question for the AI check: the published file, the other open suggestions, and the change.
+  // The question for the AI check: the other open suggestions, the change, and which of your suggestions it is (the
+  // database adds the published file itself, and writes the answer onto those suggestions).
   function checkRequest(subject, sids) {
     const others = [];
     for (const s of suggest.remote || []) {
@@ -2763,7 +2768,7 @@
       if (text.length + line.length > 38000) break;
       text += `${line}\n`;
     }
-    return { document: suggest.markdown, others: text.trim(), change: subject.describe };
+    return { others: text.trim(), change: subject.describe, suggestions: [...sids].slice(0, 20), about: hashOf(subject.signature) };
   }
 
   // The AI check of one change, asked once: its answer, or why there isn't one, is kept by the change's signature.
@@ -2788,7 +2793,7 @@
         const result = aiCheckOf(answer.result);
         if (!result) throw new Error("the answer wasn't in the expected form");
         Object.assign(entry, { status: "done", result, model: answer.model || "" });
-        await keepCheck(subject, entry);
+        await keepCheck();
         return;
       }
     } catch (error) {
@@ -2814,20 +2819,9 @@
     return (4294967296 * (2097151 & b) + (a >>> 0)).toString(36);
   }
 
-  // The AI's answer, kept with the suggestions it's about, if they still say what was checked.
-  async function keepCheck(subject, entry) {
-    const now = suggest.lastChanges.map(checkSubject).filter(Boolean);
-    if (!now.some((s) => s.signature === subject.signature)) return;
-    const check = { verdict: entry.result.verdict, findings: entry.result.findings || [], model: entry.model,
-      about: hashOf(subject.signature), at: new Date().toISOString() };
-    for (const change of suggest.lastChanges) {
-      if (checkSubject(change)?.signature !== subject.signature) continue;
-      for (const mark of change.marks) {
-        const id = mark.dataset.sid;
-        if (id && suggest.saved.has(id)) await suggest.backend.saveCheck?.(id, check).catch(() => {});
-      }
-    }
-    suggest.watcher?.refresh();  // so the list below the text shows it now
+  // The database has written the answer onto the suggestions it's about: show it in the list below the text now.
+  async function keepCheck() {
+    suggest.watcher?.refresh();
   }
 
   function showChecking() {
@@ -3321,7 +3315,7 @@
       h("details", { class: "how" },
         h("summary", {}, h("h2", { text: "How it works" })),
         h("ol", { class: "steps" },
-          h("li", {}, h("strong", { text: "Verify your email. " }), "Enter your email address and the 6-digit code we send you. You stay signed in on this computer. You don't need GitHub."),
+          h("li", {}, h("strong", { text: "Verify your email. " }), "Enter your email address and the code we send you. You stay signed in on this computer. You don't need GitHub."),
           h("li", {}, h("strong", { text: "Edit. " }), "Words you delete are struck out, and words you type appear in blue, labeled with your email address. Press Enter at the end of a rule to add a new one. Every change is saved automatically, as its own suggestion; Undo and Redo work as usual."),
           h("li", {}, h("strong", { text: "A maintainer decides. " }), "The ", h("a", { href: at("maintainers/"), text: "maintainers" }),
             " approve or disapprove each suggestion. ", ruleSentence(governance?.rules)),
@@ -3445,7 +3439,7 @@
   // One line of Markdown as the block it renders to: a paragraph, a list item (keeping its number), or a heading.
   function blockFor(line) {
     const box = h("div");
-    box.innerHTML = DOMPurify.sanitize(marked.parse(line));
+    box.innerHTML = DOMPurify.sanitize(marked.parse(line), SANITIZE);
     const block = leafBlocks(box)[0] || h("p", { text: line });
     const number = line.match(/^\s*(\d+)\.\s/);
     if (number && block.tagName === "LI") block.value = Number(number[1]);
