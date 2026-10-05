@@ -1,6 +1,6 @@
 # Setting up sign-in for Suggest Edits
 
-Suggest Edits keeps everyone's suggestions and votes in a free [Supabase](https://supabase.com) project. Readers sign in with a 6-digit code that Supabase emails them, and their email address is their name on the site. This is a one-time setup for the lead maintainer; it takes about fifteen minutes.
+Suggest Edits keeps everyone's suggestions and votes in a free [Supabase](https://supabase.com) project. Readers sign in with a code that Supabase emails them, and their email address is their name on the site. This is a one-time setup for the lead maintainer; it takes about fifteen minutes.
 
 Nothing secret goes into this repository. The two values the site needs, the project's address and its publishable key, are public by design: the key lets visitors do only what [schema.sql](schema.sql) allows (read everything; change only their own suggestions and votes). The email account's password goes only into Supabase's settings.
 
@@ -104,16 +104,37 @@ Each check is billed to the Anthropic account whose key you use. With the file a
 
 The model, how hard it thinks, and the instructions it follows are in robot.sql (`robot.rule_check_body`); the limits are in `public.start_rule_check`.
 
+## 9. Email the maintainers about new suggestions and comments (optional)
+
+With this step, each maintainer gets an email when someone suggests a change or comments on Suggest Edits: who wrote what, and a link straight to it on the page. A maintainer gets at most one email an hour, listing everything new since their last one; on the site's Maintainers page, each maintainer can choose at most one a day instead, or none. A suggestion is sent once nobody has changed it for ten minutes, so half-typed ones aren't. If it's changed after the maintainers heard about it, they hear again, and a maintainer whose vote was on the earlier wording is told that it no longer counts. Nobody is sent what they wrote themselves, or anything from an account in `ignored_accounts`.
+
+The database writes the emails ([robot.sql](robot.sql)), and a small Supabase Edge Function, [functions/email-maintainers/index.ts](functions/email-maintainers/index.ts), sends them through the Gmail account that sends the sign-in codes (or any email account whose SMTP server takes TLS on port 465). The function takes no message from whoever calls it. The database gives it a one-time key, and with that key it collects the emails waiting in the database, so nobody can use it to send anything else.
+
+1. Make a new [app password](https://myaccount.google.com/apppasswords) for the Gmail account. (A separate one from the sign-in codes' lets you replace either without the other.)
+2. In the project's dashboard, open **Edge Functions**, then **Secrets**, and add two secrets: `SMTP_USER`, the Gmail address, and `SMTP_PASSWORD`, the app password, typed without spaces. For an account that isn't Gmail, add `SMTP_HOST` too, and `SMTP_PORT` if it isn't 465. (Supabase doesn't let functions use ports 25 or 587, so the port must be one that uses TLS from the start.) Never put the password in this repository.
+3. Still under **Edge Functions**, choose **Deploy a new function**, then **Via Editor**. Name it `email-maintainers`, replace everything in the editor with the whole of [functions/email-maintainers/index.ts](functions/email-maintainers/index.ts), and choose **Deploy function**.
+4. Open the function's settings and turn off **Verify JWT with legacy secret** (older dashboards call it **Enforce JWT Verification**), then save. The database calls the function without anyone's sign-in, and the function checks each call itself.
+5. In the **SQL Editor**, in a new query, run:
+
+   ```sql
+   select robot.set_mail('on');
+   ```
+
+   It answers "On." Within a few minutes each maintainer, you included, gets a first email saying the emails are on. If yours doesn't come, the robot opens an issue within an hour that says why.
+
+To turn the emails off, run `select robot.set_mail('off');`. A Gmail account can send about 500 emails a day, sign-in codes included, so these stop at 100 a day; anything new then waits for the next email. Unlike the two SQL files, the function doesn't update itself: if a newer index.ts is ever committed, deploy it again (step 3); the robot opens an issue if the database expects a newer version than the one deployed.
+
 ## If something stops working
 
-The robot watches for four problems it can't fix itself. For each, it opens a GitHub issue that mentions the lead maintainer, so GitHub emails them, and it closes the issue by itself once things work again:
+The robot watches for five problems it can't fix itself. For each, it opens a GitHub issue that mentions the lead maintainer, so GitHub emails them, and it closes the issue by itself once things work again:
 
 - **"The Suggest Edits database isn't answering."** Usually Supabase paused the project. Restore it from the dashboard.
 - **"Supabase isn't starting the robot."** Usually the token was deleted. The issue says how to make a new one.
 - **"The database hasn't taken the latest supabase/ files."** Either a new version of schema.sql or robot.sql failed to run (the issue quotes the error; fix the file on GitHub, and the database tries again within ten minutes), or the database doesn't update itself (run robot.sql in the SQL Editor once more).
 - **"The AI check of new rules needs attention."** Its checks keep failing (usually the key's account is out of credit, or the key was deleted), it reached its daily limit, or the database hasn't been able to fetch the published AGENTS.md from GitHub. Meanwhile the page uses its word check. The issue says what to do.
+- **"The emails to the maintainers aren't going out."** The function that sends them isn't there, Supabase turns away the database's calls to it (JWT verification is on), or sending keeps failing (usually the app password was revoked, or the account reached its daily limit). Meanwhile the emails wait, for a few hours at most, and everything is still on the site. The issue says what to do.
 
-One problem the robot can't see, because it never sends email: if Suggest Edits says **"The email couldn't be sent,"** open the project's [Auth logs](https://supabase.com/dashboard/project/_/logs/auth-logs) and find the error at that time.
+One problem the robot can't see, because the sign-in codes go out from Supabase's own email settings: if Suggest Edits says **"The email couldn't be sent,"** open the project's [Auth logs](https://supabase.com/dashboard/project/_/logs/auth-logs) and find the error at that time.
 
 - **"535 5.7.8 Username and Password not accepted"** means Gmail refused the login in the [SMTP settings](https://supabase.com/dashboard/project/_/auth/smtp). The username, password, and sender email must all belong to one Gmail account, and the password must be a current [app password](https://myaccount.google.com/apppasswords) for it, typed without spaces. Changing that account's password, or turning off its 2-Step Verification, cancels its app passwords: make a new one, and save it in Supabase again. (Supabase hides the saved password, so retype it whenever you save that form.)
 - **An email with a link instead of a code** means the template for that email (first-time addresses get **Confirm sign up**; returning ones get **Magic link or OTP**) is missing `{{ .Token }}`.
@@ -123,5 +144,5 @@ The robot also keeps GitHub from switching off its schedule: GitHub does that af
 ## Good to know
 
 - **Free projects pause after a week without use.** The robot reads the database every time it runs, which counts as use. If the project is ever paused, restore it from the Supabase dashboard; nothing is lost.
-- **Who can see what.** Suggestions, votes, comments, and highlights are public, with the email address of the person who made them, as the site says when someone signs in. Readers' sign-ins are in the project's Authentication page, which only you can see.
+- **Who can see what.** Suggestions, votes, comments, and highlights are public, with the email address of the person who made them, as the site says when someone signs in. With step 9, the maintainers also get suggestions and comments by email, with the same address. Readers' sign-ins are in the project's Authentication page, which only you can see.
 - **Removing someone's suggestions.** Add their email address to `ignored_accounts.site` in governance/maintainers.json: the robot then ignores everything from it, its open suggestions are withdrawn, and the site hides its comments and highlights.

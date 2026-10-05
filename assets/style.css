@@ -631,6 +631,12 @@ details.how[open] > summary { margin-bottom: 0.7rem; }
 .manage-list ul { margin: 0; padding-left: 1.2rem; }
 .manage-remove { font-family: var(--sans); font-size: 0.88rem; }
 .manage-confirm .button { margin-left: 0.2rem; }
+/* Emails to a maintainer: how often, on the Maintainers page. */
+.email-choice { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.5rem 0 0.3rem; padding: 0; border: 0; font-size: 0.92rem; }
+.email-choice label { display: flex; align-items: center; gap: 0.45rem; width: fit-content; cursor: pointer; }
+.email-choice input { margin: 0; accent-color: var(--accent); }
+/* A suggestion or comment opened from a link in one of those emails. */
+.proposal.from-link, .comment-card.from-link { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 /* Suggest Edits: until a reader verifies an email address, the page shows only a popup asking them to. */
 .gated #intro, .gated .file, .gated #after, .gated #toc { display: none !important; }

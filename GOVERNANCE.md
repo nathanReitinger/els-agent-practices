@@ -33,6 +33,7 @@ Anyone who has verified an email address can comment on words, highlight them, c
 ## Deciding
 
 - A maintainer verifies their listed email address on Suggest Edits. Each waiting suggestion then has **Approve** and **Disapprove** buttons: click the suggestion in the text, or use the list below it. A vote starts the robot, which acts on it within a minute or two.
+- Maintainers hear about new suggestions and comments by email, at the address listed for them: at most one email an hour, listing what's new, with a link to each. On the [Maintainers](https://nathanreitinger.github.io/els-agent-practices/maintainers/) page, each maintainer can choose at most one a day instead, or none. (The lead maintainer turns these emails on; supabase/README.md, step 9.)
 - Maintainers can also vote on a suggestion's GitHub issue: comment `/approve` or `/reject` (replying to GitHub's notification email works too).
 - When approving, a maintainer chooses which number of the new version goes up: the last (the default), the middle, or the first.
 - Only a maintainer's latest vote counts. A vote cast before the suggestion was last changed doesn't count, so a suggestion can't be changed after it's approved.

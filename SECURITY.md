@@ -12,8 +12,9 @@ If you find a security problem in this site, its database, or the robot that pub
 - **The database.** Anyone can read suggestions, votes, and comments; each signed-in reader can write only their own, within daily limits. The GitHub token and the Anthropic key are kept only in Supabase's Vault, never in this repository. The AI check runs on the database's own copy of the published file, and only the database writes its answers.
 - **The pages.** A Content-Security-Policy limits what the pages load and connect to; readers' text is always shown as text; Markdown is sanitized with a strict allowlist; the libraries are pinned, with integrity hashes.
 - **The robot.** Its workflow's actions are pinned to commits, its one Python dependency is installed by hash, and it trusts only the issues it opened itself.
+- **Emails to the maintainers.** The email account's app password is a secret of the Supabase Edge Function that sends them (supabase/functions/email-maintainers), never in this repository. The function sends only what the database wrote for the maintainers, collected with a one-time key from the database, so nobody can use it to send anything else. Readers' words go out as plain text on single lines, cut to length, with no way to add a header or a recipient; each maintainer gets at most one email an hour, and all of them together at most 100 a day.
 
 ## Worth knowing
 
-- The email address a reader signs in with is public, and it stays in the git history, which is never rewritten.
+- The email address a reader signs in with is public, and it stays in the git history, which is never rewritten. The emails to the maintainers show it too, beside what that reader suggested or wrote.
 - Whoever can push to this repository's main branch can change what runs in the database: supabase/schema.sql and supabase/robot.sql run there with the database owner's rights. Keep two-factor authentication on, and give write access only to people you'd trust with the database.

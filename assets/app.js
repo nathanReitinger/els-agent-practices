@@ -1184,6 +1184,9 @@
       addComment: async (row) => must(await client.from("comments").upsert(row, { onConflict: "id", ignoreDuplicates: true })),
       deleteComment: async (id) => must(await client.from("comments").delete().eq("id", id)),
       resolveComment: async (id, done) => must(await client.rpc("resolve_comment", { comment_id: id, done })),
+      // How often a maintainer gets the emails about new suggestions and comments (supabase/robot.sql writes them).
+      emailSettings: async () => must(await client.rpc("email_settings")),
+      setEmailSettings: async (how) => must(await client.rpc("set_email_settings", { how })),
       async vote(proposalId, vote, step = "patch", seen = null) {
         const upsert = (row) => client.from("votes").upsert(row, { onConflict: "suggestion,voter_id" });
         let result = await upsert({ suggestion: proposalId, vote, version_step: step, seen });
@@ -1236,6 +1239,8 @@
       },
       async remove(docId) { write(SUGGESTIONS, read(SUGGESTIONS, []).filter((s) => s.docId !== docId)); emit(); },
       async startRuleCheck() { return { unavailable: "off" }; },  // no AI check here: the word check stands in
+      async emailSettings() { return { how: read("els-local-email", "hourly"), on: true, preview: true }; },  // no emails are sent
+      async setEmailSettings(how) { write("els-local-email", how); return { how, on: true, preview: true }; },
       async maintainerRequests() { return read("els-local-maintainer-requests", []); },
       async requestMaintainerChange(row) {
         const list = read("els-local-maintainer-requests", []);
@@ -1734,7 +1739,7 @@
       h("p", { text: "You need to verify an email address in order to edit this document. Enter any email address you can check, and we'll send it a code." }),
       h("div", { class: "gate-row" }, email, action("Send code", send, "button")),
       note,
-      h("p", { class: "gate-fine", text: "The address you verify is your name here, and it's public: it's shown with everything you suggest, comment, or highlight, and it stays in the project's permanent public record (its git history, which is never rewritten), including in any change that's adopted. Use an address you're comfortable showing." }),
+      h("p", { class: "gate-fine", text: "The address you verify is your name here, and it's public: it's shown with everything you suggest, comment, or highlight (and in the emails that tell the maintainers about your suggestions and comments), and it stays in the project's permanent public record (its git history, which is never rewritten), including in any change that's adopted. Use an address you're comfortable showing." }),
       readInstead];
   }
 
@@ -2574,7 +2579,7 @@
       mark.scrollIntoView({ behavior: "smooth", block: "center" });
       setTimeout(() => openSpot(root.suggestion ? [root.suggestion] : [], root.suggestion ? [] : [root.id], mark.getBoundingClientRect()), 450);
     };
-    const card = h("article", { class: "comment-card" },
+    const card = h("article", { class: "comment-card", id: `comment-${root.id}` },
       h("p", { class: "c-head" }, h("strong", { text: root.author.email }), ` · ${formatDate(root.created)}${root.pending ? " · not sent yet" : ""}`),
       root.exact ? h("p", { class: "c-quote", text: `On “${cut(root.exact, 110)}”${placed === false ? " (those words have changed since)" : ""}` })
         : on ? h("p", { class: "c-quote", text: `On a suggestion by ${on.proposer?.name || "someone"}` }) : null,
@@ -3150,6 +3155,7 @@
       h("p", { class: "muted" }, "Suggestions that maintainers disapprove, and ones that are withdrawn or can't be applied, move to the ",
         h("a", { href: at("declined/"), text: "Declined page" }), closed.length ? ` (${closed.length} so far)` : "",
         ". Every suggestion, vote, and outcome is also recorded in ", external(LEDGER_PATH, repoFile(cfg, LEDGER_PATH)), "."));
+    jumpToLinked(section);
     const count = $("#proposal-count");
     if (count) {
       count.replaceChildren(open.length
@@ -3158,6 +3164,30 @@
           : h("span", { text: "No suggestions yet. Yours could be the first." }));
     }
   }
+
+  // A link from an email to the maintainers (…/draft/#proposal-sb-…, or #comment-…) opens at that suggestion or comment
+  // once the list below the text is drawn; if it isn't waiting any more, the page says so. Once for each link followed.
+  function jumpToLinked(section) {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (jumpToLinked.done || !/^(proposal|comment)-/.test(id)) return;
+    const target = document.getElementById(id);
+    if (target && section.contains(target)) {
+      jumpToLinked.done = true;
+      for (const was of $$(".from-link")) was.classList.remove("from-link");
+      target.classList.add("from-link");
+      target.scrollIntoView({ behavior: "instant", block: "center" });
+      document.fonts?.ready.then(() => target.scrollIntoView({ behavior: "instant", block: "center" }));
+    } else if (suggest.remote && suggest.commentsReady) {
+      jumpToLinked.done = true;
+      hint(id.startsWith("comment-") ? "That comment isn't open any more: it was resolved or deleted."
+        : "That suggestion isn't waiting any more: it was decided (see History, or the Declined page) or withdrawn.");
+    }
+  }
+  addEventListener("hashchange", () => {
+    jumpToLinked.done = false;
+    const section = $("#proposals");
+    if (section && mode === "drafter") jumpToLinked(section);
+  });
 
   // ---- Starting up ----
 
@@ -3954,7 +3984,7 @@
   // this page. The page saves each request; the robot makes the change in governance/maintainers.json within a few
   // minutes, in a commit under the lead maintainer's name, and keeps what came of it in governance/proposals.json.
   // A new maintainer's votes count from the moment they're added. A lead maintainer is removed only by editing that file.
-  async function manageMaintainers(cfg, governance, listBox, box) {
+  async function manageMaintainers(cfg, governance, listBox, box, emailsBox) {
     const useLocal = isLocal && new URLSearchParams(location.search).get("backend") === "local";
     let backend = null;
     try {
@@ -4039,10 +4069,48 @@
           h("ul", {}, ...recent.map((r) => h("li", { text: done(r) })))) : null].filter(Boolean));
       if (waiting.length) timer = setTimeout(async () => { await load(); render(); }, 30000);
     }
+    // Emails to a maintainer about new suggestions and comments (supabase/robot.sql writes them): as they come, at most
+    // one an hour (the default); at most one a day; or none. Each maintainer chooses for themselves, signed in.
+    const HOW = { hourly: "As they come, at most one an hour", daily: "At most one a day", off: "None" };
+    const SAVED = { hourly: "Saved. You'll get at most one email an hour.", daily: "Saved. You'll get at most one email a day.",
+      off: "Saved. You won't get these emails." };
+    async function renderEmails() {
+      const listed = !!user && (governance?.maintainers || []).some((m) => sameEmail(m.email, user.email));
+      let settings = null;
+      try {
+        settings = listed && backend.emailSettings ? await backend.emailSettings() : null;
+      } catch { /* a database without the emails yet: supabase/robot.sql adds them */ }
+      if (!settings) { emailsBox.hidden = true; return; }
+      const said = h("p", { class: "manage-status", "aria-live": "polite" });
+      const choose = async (how) => {
+        said.textContent = "Saving…";
+        try {
+          settings = await backend.setEmailSettings(how);
+          said.textContent = SAVED[settings.how] || "Saved.";
+        } catch (error) {
+          said.textContent = `Not saved (${error.message}). Please try again.`;
+          const was = choices.querySelector(`input[value="${settings.how}"]`);
+          if (was) was.checked = true;
+        }
+      };
+      const choices = h("fieldset", { class: "email-choice" }, h("legend", { class: "visually-hidden", text: "How often you get these emails" }),
+        ...Object.entries(HOW).map(([value, label]) => h("label", {},
+          h("input", { type: "radio", name: "email-how", value, checked: settings.how === value, onchange: () => choose(value) }), ` ${label}`)));
+      emailsBox.replaceChildren(...[
+        h("h2", { text: "Emails to you" }),
+        h("p", { class: "muted" }, "When someone suggests a change or comments on Suggest Edits, you get an email at ",
+          h("strong", { text: user.email }), " listing what's new, with a link to each. Nothing you write yourself is sent to you."),
+        choices, said,
+        settings.preview ? h("p", { class: "muted", text: "(This preview sends no emails.)" })
+          : settings.on ? null : h("p", { class: "muted", text: "The emails aren't on yet: the lead maintainer turns them on (supabase/README.md, step 9). Your choice is kept until then." }),
+      ].filter(Boolean));
+      emailsBox.hidden = false;
+    }
     backend.onUser(async (who) => {
       user = who;
       await load();
       render();
+      await renderEmails();
     });
   }
 
@@ -4052,11 +4120,12 @@
     const rules = governance?.rules || {};
     const listBox = h("div", {}, maintainerList(governance));
     const manage = h("section", { class: "manage", id: "manage", "aria-label": "Add or remove maintainers" });
+    const emails = h("section", { class: "manage emails", id: "emails", "aria-label": "Emails to you", hidden: true });
     $("#intro").replaceChildren(h("section", { class: "intro" },
       h("h1", { text: "Maintainers" }),
       h("p", { class: "lede", text: "The maintainers decide which suggested changes go into AGENTS.md." }),
-      listBox, manage));
-    manageMaintainers(cfg, governance, listBox, manage);
+      listBox, emails, manage));
+    manageMaintainers(cfg, governance, listBox, manage, emails);
     $("#after").replaceChildren(h("section", { class: "versions", id: "how" },
       h("details", { class: "how" },
         h("summary", {}, h("h2", { text: "What maintainers do" })),

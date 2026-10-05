@@ -906,6 +906,68 @@ class GitHubRunTest(RunTest):
         self.robot_online(status(text_fetched_at="2026-10-03T01:00:00+00:00"))
         self.assertIn("hasn't fetched the published AGENTS.md from GitHub since October 03, 2026", self.alerts()[0]["body"])
 
+    def test_an_issue_when_the_emails_dont_go_out(self):
+        """The emails to the maintainers (supabase/robot.sql): an issue if the function that sends them is missing or
+        turned away, if sending keeps failing, or if they stop being written or fetched; none while they're off or
+        working, or in the half hour after they're turned on."""
+        self.set_supabase(starts_robot=True)
+        self.github.runs = [{"created_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "event": "workflow_dispatch"}]
+
+        def status(**fields):
+            return {**NO_SITE, "mail_status": {
+                "on": True, "turned_on": "2026-10-03T08:00:00+00:00", "called_at": "2026-10-03T11:55:00+00:00",
+                "call_status": 200, "call_error": None, "answered_at": "2026-10-03T11:55:00+00:00", "function_version": 1,
+                "wanted_version": 1, "write_error": None, "waiting": 0, "oldest_waiting": None, "written_today": 5,
+                "sent_today": 5, "failed_today": 0, "daily_limit": 100, "last_error": None,
+                "maintainers_fetched_at": "2026-10-03T11:50:00+00:00", "settings_fetched_at": "2026-10-03T11:50:00+00:00",
+                **fields}}
+
+        def problem(**fields):
+            """The issue opened for this status, which closes once the emails work again."""
+            self.robot_online(status(**fields))
+            [issue] = self.alerts()
+            self.assertEqual(issue["title"], "The emails to the maintainers aren't going out")
+            self.assertIn("@nathanReitinger", issue["body"])
+            self.assertIn("robot.set_mail('off')", issue["body"])
+            self.robot_online(status())
+            self.assertEqual(self.alerts(), [])
+            return issue["body"]
+
+        self.robot_online(status())
+        self.assertEqual(self.alerts(), [])
+        missing = {"call_status": 404, "call_error": "Requested function was not found", "answered_at": None}
+        self.robot_online(status(on=False, **missing))  # off: nothing to report
+        self.assertEqual(self.alerts(), [])
+        self.robot_online(status(turned_on="2026-10-03T11:50:00+00:00", **missing))  # just turned on: give it time
+        self.assertEqual(self.alerts(), [])
+        self.assertIn("Supabase answers that email-maintainers was not found.", problem(**missing))
+        self.assertIn("(“Missing authorization header”): its JWT verification needs to be off",
+                      problem(call_status=401, call_error="Missing authorization header", answered_at="2026-10-03T10:00:00+00:00"))
+        self.assertIn("says: SMTP\\_USER and SMTP\\_PASSWORD aren't set",  # escaped for Markdown, shown as typed
+                      problem(call_error="SMTP_USER and SMTP_PASSWORD aren't set: add them under Edge Functions, then Secrets"))
+        self.robot_online(status(call_error="couldn't collect the emails: the database answered 401: Invalid API key",
+                                 waiting=1, oldest_waiting="2026-10-03T11:30:00+00:00"))
+        self.assertEqual(self.alerts(), [])  # half an hour: it may pass
+        self.assertIn("says: couldn't collect the emails: the database answered 401: Invalid API key",
+                      problem(call_error="couldn't collect the emails: the database answered 401: Invalid API key",
+                              waiting=1, oldest_waiting="2026-10-03T10:30:00+00:00"))
+        self.robot_online(status(sent_today=0, failed_today=2, last_error="signing in: 535 5.7.8 Username and Password not accepted."))
+        self.assertEqual(self.alerts(), [])  # two failures could be a passing outage
+        body = problem(sent_today=0, failed_today=3, last_error="signing in: 535 5.7.8 Username and Password not accepted.")
+        self.assertIn("3 emails failed and none went out. The last error: “signing in: 535 5.7.8 Username and Password not accepted.”", body)
+        self.assertIn("change `SMTP_PASSWORD`", body)
+        self.robot_online(status(waiting=2, oldest_waiting="2026-10-03T11:00:00+00:00"))  # an hour: retries take that long
+        self.assertEqual(self.alerts(), [])
+        self.assertIn("waiting to go out since October 03, 2026, at 09:00 UTC",
+                      problem(waiting=2, oldest_waiting="2026-10-03T09:00:00+00:00"))
+        self.assertIn("couldn't write them: “relation \"public.comments\" does not exist”",
+                      problem(write_error='relation "public.comments" does not exist'))
+        self.assertIn("limit of 100 emails a day", problem(written_today=100))
+        self.assertIn("hasn't fetched governance/maintainers.json from GitHub since October 03, 2026, at 01:00 UTC",
+                      problem(maintainers_fetched_at="2026-10-03T01:00:00+00:00"))
+        self.assertIn("hasn't fetched versions.json from GitHub yet", problem(settings_fetched_at=None))
+        self.assertIn("older version (0; the database expects 1)", problem(function_version=0))
+
     def test_no_issue_until_supabase_starts_the_robot(self):
         self.robot_online()
         self.assertEqual(self.alerts(), [])

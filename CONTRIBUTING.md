@@ -5,7 +5,7 @@ This project is one file, **AGENTS.md**: standing instructions for AI agents wor
 ## Suggest a change (no GitHub needed)
 
 1. Open [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/).
-2. Verify an email address: enter any address you can check, then the 6-digit code the site emails to it. That address is your name on the site, and everyone can see it. It stays in the project's public record for good (the git history is never rewritten), so use an address you're comfortable showing.
+2. Verify an email address: enter any address you can check, then the code the site emails to it. That address is your name on the site, and everyone can see it. It stays in the project's public record for good (the git history is never rewritten), so use an address you're comfortable showing.
 3. Edit the text as in Word with track changes on: deleted words are struck out, and new words appear in blue under your name. Press Enter at the end of a rule to add a new one. To add a section, choose **+ New section** at the end of a section, type its heading, press Enter, and type its rules. Every change is saved automatically as a suggestion.
 
 When you add a rule or a section, or change what a rule says, the page checks your change against the rules in the text and the open suggestions. If the lead maintainer has turned on the AI check, an AI model reads it for its meaning; otherwise the page compares words. Moving words within a rule, fixing a typo, or changing one word isn't checked, unless the word is one like "never," "only," or a number. If your change looks like a repeat, or like it contradicts a rule, the page says which (and, from the AI, why) and asks whether you still want it.
@@ -28,6 +28,8 @@ People who use and shape AGENTS.md talk with each other in a Google group, agent
 ## Approve or disapprove (maintainers)
 
 Verify the email address listed for you in `governance/maintainers.json` on [Suggest Edits](https://nathanreitinger.github.io/els-agent-practices/draft/). Then click a suggestion in the text, or use the list below it, and choose **Approve** or **Disapprove**. You can also comment `/approve` or `/reject` on a suggestion's GitHub issue (replying to GitHub's notification email works too).
+
+Once the lead maintainer has turned them on, you get an email when someone suggests a change or comments, at most one an hour, with a link to each suggestion and comment. To get them once a day, or not at all, sign in and choose on the [Maintainers](https://nathanreitinger.github.io/els-agent-practices/maintainers/) page.
 
 ## Check a copy
 

@@ -87,9 +87,12 @@ ALERTS = {
     "wake": "Supabase isn't starting the robot",
     "schema": "The database hasn't taken the latest supabase/ files",
     "ai-check": "The AI check of new rules needs attention",
+    "mail": "The emails to the maintainers aren't going out",
 }
 # The AI check of new rules (supabase/robot.sql): this many failures in a day, with no success, means it's broken.
 AI_CHECK_FAILURES = 3
+# The emails to the maintainers (supabase/robot.sql): likewise, this many emails failing in a day, none sent.
+MAIL_FAILURES = 3
 LEDGER_ABOUT = ("Every suggestion made on the Suggest Edits page, its votes, and its outcome, and every request to add or "
                 "remove a maintainer and what came of it. Written by scripts/proposals.py; don't edit it by hand.")
 # A request to add or remove a maintainer that's older than this when the robot first sees it isn't carried out.
@@ -420,6 +423,24 @@ def alert_body(kind: str, detail: str, repo: str, leads: list[str]) -> str:
             "2. If it reached its daily limit, that's unusually heavy use, or someone misusing it. The count falls as the "
             "day's checks age out. The limits are in `public.start_rule_check`, in `supabase/robot.sql`.",
             "3. To turn the AI check off, run `select robot.set_anthropic_key('off');` in the SQL Editor.",
+        ]
+    elif kind == "mail":
+        lines = [
+            f"{hello} When someone suggests a change or comments on Suggest Edits, the database writes each maintainer an "
+            f"email, and a Supabase Edge Function, `email-maintainers`, sends it (`supabase/robot.sql`). {md(detail)}",
+            "",
+            "Until this is fixed, the emails wait, for a few hours at most, and everything is still on the site. Nothing "
+            "else is affected.",
+            "",
+            "What to do:",
+            "",
+            "1. If sending fails, look at the email account that sends them: its app password may have been revoked or "
+            "changed, or it may have reached its sending limit for the day. To give the function a new app password, open "
+            "the project in the [Supabase dashboard](https://supabase.com/dashboard/projects), then **Edge Functions**, "
+            "then **Secrets**, and change `SMTP_PASSWORD`.",
+            "2. If the function isn't there, isn't answering, or is an older version, follow step 9 of "
+            "`supabase/README.md` again.",
+            "3. To turn the emails off, run `select robot.set_mail('off');` in the project's **SQL Editor**.",
         ]
     else:
         token = (f"https://github.com/settings/personal-access-tokens/new?name=Start+the+ELS+robot"
@@ -1064,6 +1085,7 @@ class Robot:
             self.check_starts()
             self.check_schema()
             self.check_rule_checks()
+            self.check_mail()
             self.update_alerts()
 
     def heartbeat(self) -> None:
@@ -1173,6 +1195,67 @@ class Robot:
                 problems.append(f"The database hasn't fetched the published AGENTS.md from GitHub {when}, so checks "
                                 "use an old copy, or can't run.")
         self.health["ai-check"] = " ".join(problems) or None
+
+    def check_mail(self) -> None:
+        """If the emails to the maintainers are on (supabase/robot.sql), check that they go out: that the function that
+        sends them (supabase/functions/email-maintainers) is there and answers, that sending doesn't keep failing (say,
+        the email account's password changed), that the database can write them, and that they haven't reached their
+        daily limit."""
+        config = self.manifest.get("supabase") or {}
+        if not config.get("starts_robot"):
+            return
+        if self.o.site_data:  # tests: the status is in the same file as the suggestions, or not checked
+            if "mail_status" not in (self.data or {}):
+                return
+            status = self.data["mail_status"]
+        else:
+            try:
+                status = get_json(f"{config['url'].rstrip('/')}/rest/v1/rpc/mail_status", site_headers(config["key"]))
+            except (urllib.error.URLError, TimeoutError, ValueError):
+                return  # not installed yet (the schema alert covers that), or the database isn't answering
+        problems = []
+        if status and status.get("on"):
+            def hours(field: str) -> float | None:
+                return (self.now - parse_time(status[field])).total_seconds() / 3600 if status.get(field) else None
+
+            def since(field: str) -> str:
+                return f"since {parse_time(status[field]):%B %d, %Y, at %H:%M} UTC" if status.get(field) else "yet"
+
+            settled = (hours("turned_on") or 0) > 0.5  # on for half an hour: everything has had time to start
+            code, error = status.get("call_status"), status.get("call_error")
+            answered = hours("answered_at")
+            if settled and (answered is None or answered > 1):
+                if code == 404:
+                    problems.append("The function that sends them isn't there: Supabase answers that email-maintainers was "
+                                    "not found.")
+                elif code == 401 and not (error or "").startswith("wrong key"):
+                    problems.append(f"Supabase turns away the database's calls to the function that sends them (“{error}”): "
+                                    "its JWT verification needs to be off.")
+                else:
+                    problems.append(f"The function that sends them hasn't answered properly {since('answered_at')}. Its last "
+                                    f"answer: “{code or 'none'}{': ' + error if error else ''}”")
+            elif code == 200 and error and ("SMTP_" in error or (hours("oldest_waiting") or 0) > 1):
+                problems.append(f"The function that sends them says: {error}.")  # its settings, or what keeps failing
+            failed, sent = status.get("failed_today") or 0, status.get("sent_today") or 0
+            if failed >= MAIL_FAILURES and not sent:
+                problems.append(f"In the past day, {failed} emails failed and none went out. The last error: "
+                                f"“{status.get('last_error') or 'none recorded'}”")
+            elif (hours("oldest_waiting") or 0) > 2 and not problems:
+                problems.append(f"Emails have been waiting to go out {since('oldest_waiting')}.")
+            if status.get("write_error"):
+                problems.append(f"The database couldn't write them: “{status['write_error']}”")
+            limit = status.get("daily_limit") or 0
+            if limit and (status.get("written_today") or 0) >= limit:
+                problems.append(f"They reached their limit of {limit} emails a day, so what's new waits until the count falls.")
+            for field, path in (("maintainers_fetched_at", "governance/maintainers.json"), ("settings_fetched_at", "versions.json")):
+                if settled and (hours(field) is None or hours(field) > 6):
+                    problems.append(f"The database hasn't fetched {path} from GitHub {since(field)}, so it may be writing "
+                                    "to the wrong people, or not at all.")
+            wanted, version = status.get("wanted_version"), status.get("function_version")
+            if isinstance(wanted, int) and isinstance(version, int) and version < wanted:
+                problems.append(f"The function that sends them is an older version ({version}; the database expects "
+                                f"{wanted}). Deploy supabase/functions/email-maintainers/index.ts again.")
+        self.health["mail"] = " ".join(problems) or None
 
     def update_alerts(self) -> None:
         """Open an issue for each problem found in this run, and close the issue for each that's fixed."""

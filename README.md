@@ -34,7 +34,7 @@ The rules are in [GOVERNANCE.md](GOVERNANCE.md); how to take part is in [CONTRIB
 | `governance/maintainers.json` | The maintainers, who approve changes, and the rules for deciding |
 | `governance/proposals.json` | Every suggestion and proposal, vote, and outcome, and every change to the maintainers (written by the robot) |
 | `SECURITY.md` | How to report a security problem, and what's protected |
-| `supabase/` | The database behind Suggest Edits (`schema.sql`), how Supabase starts the robot and runs the AI check of new rules (`robot.sql`), and how to set them up (`README.md`) |
+| `supabase/` | The database behind Suggest Edits (`schema.sql`); how Supabase starts the robot, runs the AI check of new rules, and writes the emails to the maintainers (`robot.sql`); the function that sends those emails (`functions/email-maintainers/`); and how to set them up (`README.md`) |
 | `scripts/proposals.py` | The robot that counts votes and publishes approved changes |
 | `scripts/edits.py` | How a suggestion becomes an exact edit |
 | `scripts/release.py`, `scripts/fingerprint.py` | Publishing a version, and computing fingerprints |
