@@ -42,12 +42,30 @@ alter table public.suggestions add constraint suggestions_new_text_check check (
 alter table public.suggestions add column if not exists builds_on text
   check (builds_on is null or char_length(builds_on) between 1 and 100);
 
+-- New words a reader can see: no invisible characters (zero-width, direction controls, tags, private use, variation
+-- selectors, fillers, or controls other than a line break). The robot refuses them too, and HTML and hidden link
+-- parts (scripts/edits.py), so nothing goes into AGENTS.md that its readers can't see but an agent reading it would.
+-- (Rows saved before this rule aren't checked again.)
+alter table public.suggestions drop constraint if exists suggestions_new_text_visible;
+alter table public.suggestions add constraint suggestions_new_text_visible check (new_text !~ '[\u0001-\u0009\u000b-\u001f\u007f-\u009f\u00ad\u034f\u0600-\u0605\u061c\u06dd\u070f\u08e2\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff9-\ufffb\ue000-\uf8ff\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e0fff\U000f0000-\U0010ffff]') not valid;
+
 -- What the AI check found about a suggestion (supabase/robot.sql), saved by its author's page so the maintainers
--- see it too: { "verdict": "fine" | "problem", "findings": [...] }.
+-- see it too: { "verdict": "fine" | "problem", "findings": [{ "kind", "rule", "where", "explanation" }, ...] }, at most
+-- five findings, each an object. Anything else is refused, so a malformed note can't break the list of suggestions.
 alter table public.suggestions add column if not exists ai_check jsonb;
+create or replace function public.valid_ai_check(c jsonb) returns boolean
+language sql immutable set search_path = '' as $$
+  select c is null or coalesce(
+    jsonb_typeof(c) = 'object' and length(c::text) <= 20000
+    and c ->> 'verdict' in ('fine', 'problem')
+    and jsonb_typeof(c -> 'findings') = 'array' and jsonb_array_length(c -> 'findings') <= 5
+    and not exists (select 1 from jsonb_array_elements(c -> 'findings') f
+                    where jsonb_typeof(f) <> 'object'
+                       or exists (select 1 from jsonb_each(f) e where jsonb_typeof(e.value) not in ('string', 'null'))),
+    false)
+$$;
 alter table public.suggestions drop constraint if exists suggestions_ai_check_check;
-alter table public.suggestions add constraint suggestions_ai_check_check
-  check (ai_check is null or (jsonb_typeof(ai_check) = 'object' and length(ai_check::text) <= 20000));
+alter table public.suggestions add constraint suggestions_ai_check_check check (public.valid_ai_check(ai_check)) not valid;
 
 -- The database, not the reader's browser, sets who wrote a suggestion and when, and keeps it that way. Saving the AI
 -- check's note isn't an edit: it doesn't move "updated" (so votes already cast still count). An edit to the change
@@ -122,6 +140,10 @@ create table if not exists public.votes (
   primary key (suggestion, voter_id)
 );
 
+-- Which version of the suggestion the voter saw: its "updated" time on their page. Once a suggestion has been
+-- edited, a vote counts only for the version it was cast on, so nobody can change a suggestion under an approval.
+alter table public.votes add column if not exists seen timestamptz;
+
 -- For an approval, which number of the version goes up if it adopts the suggestion: the last (patch, the default),
 -- the middle (minor), or the first (major). Added after the first release of this file, so it's added separately.
 alter table public.votes add column if not exists version_step text not null default 'patch'
@@ -129,7 +151,20 @@ alter table public.votes add column if not exists version_step text not null def
 
 create or replace function public.stamp_vote() returns trigger
 language plpgsql set search_path = '' as $$
+declare
+  there boolean;
 begin
+  -- A vote on a suggestion made on the site must be on one that exists.
+  if tg_op = 'INSERT' and new.suggestion like 'sb-%' then
+    begin
+      there := exists (select 1 from public.suggestions s where s.id = substr(new.suggestion, 4)::uuid);
+    exception when invalid_text_representation then
+      there := false;
+    end;
+    if not there then
+      raise exception 'There''s no suggestion %.', new.suggestion using errcode = 'foreign_key_violation';
+    end if;
+  end if;
   if tg_op = 'UPDATE' then
     new.suggestion := old.suggestion;
     new.voter_id := old.voter_id;
@@ -318,6 +353,56 @@ create policy "Signed-in readers make requests as themselves" on public.maintain
     and requested_email = (select auth.jwt() ->> 'email')
     and (select count(*) from public.maintainer_requests r where r.requested_by = (select auth.uid())) < 200
   );
+
+-- ---------- Limits on what one reader can write ----------
+-- Each signed-in reader can add at most so many rows a day to each table, counted as they're added (deleting a row
+-- doesn't give it back, and many rows sent at once count one by one), so nobody can fill the database, the robot's
+-- record, or everyone's page. The counts are kept here, out of the site's reach. Every row needs a signed-in address.
+
+create table if not exists public.daily_writes (
+  author uuid not null,
+  day date not null,
+  what text not null,
+  n integer not null default 0,
+  primary key (author, day, what)
+);
+alter table public.daily_writes enable row level security;  -- no policies: the site can't read or write it
+revoke all on public.daily_writes from anon, authenticated;
+
+create or replace function public.count_write() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := (select auth.uid());
+  used integer;
+begin
+  if me is null then
+    return new;  -- the database's owner (setting up, or keeping itself up to date) isn't counted
+  end if;
+  insert into public.daily_writes as d (author, day, what, n) values (me, current_date, tg_table_name, 1)
+    on conflict (author, day, what) do update set n = d.n + 1
+    returning d.n into used;
+  if used > tg_argv[0]::integer then
+    raise exception 'That''s more % than one person can add in a day (%). Try again tomorrow.',
+      replace(tg_table_name, '_', ' '), tg_argv[0] using errcode = 'check_violation';
+  end if;
+  return new;
+end
+$$;
+revoke all on function public.count_write() from public, anon, authenticated;
+
+do $$
+declare
+  t record;
+begin
+  for t in select * from (values ('suggestions', 1000, 'author_email'), ('votes', 1000, 'voter_email'),
+                                 ('comments', 2000, 'author_email'), ('maintainer_requests', 50, 'requested_email')) v(name, cap, email) loop
+    execute format('drop trigger if exists count_write on public.%I', t.name);
+    execute format('create trigger count_write before insert on public.%I for each row execute function public.count_write(%L)', t.name, t.cap);
+    execute format('alter table public.%I drop constraint if exists %I', t.name, t.name || '_email_given');
+    execute format('alter table public.%I add constraint %I check (%I <> %L) not valid', t.name, t.name || '_email_given', t.email, '');
+  end loop;
+end
+$$;
 
 -- ---------- Who may do what ----------
 -- Anyone may read; only signed-in readers may write, and the policies above limit them to their own rows.

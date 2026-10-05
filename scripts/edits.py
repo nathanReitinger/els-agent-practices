@@ -46,7 +46,27 @@ REASONS = {
                  "in place. Choose a different place for it.",
     "no-change": "The new words are the same as the selected words.",
     "unchecked": "The change couldn't be made exactly as proposed. A maintainer will make it by hand if it's approved.",
+    "hidden": "The new words contain something a reader wouldn't see on the page but an AI agent reading the file would: "
+              "invisible characters, HTML, an image, a link definition, or a link's hidden title. Type the words plainly.",
 }
+
+# What a reader of the rendered page can't see but an agent reading the Markdown would. A change that adds any of it
+# is refused, so nothing in AGENTS.md is hidden from the people who approve it.
+_FILLERS = set("\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0")  # characters that show as nothing
+_HTML = re.compile(r"<(?!https?://[^\s<>]+>|mailto:[^\s<>]+>)[A-Za-z/!?]")  # a tag or comment; autolinks are fine
+_LINK_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:", re.M)
+_IMAGE = re.compile(r"!\[")
+_LINK_TITLE = re.compile(r"\]\([^)\s]*\s+[\"'(]")
+
+
+def hidden_content(text: str) -> bool:
+    """Whether new words carry anything a reader of the page wouldn't see."""
+    for ch in text:
+        category, code = unicodedata.category(ch), ord(ch)
+        if category in ("Cf", "Co", "Cs", "Cn") or (category == "Cc" and ch != "\n") or ch in _FILLERS \
+                or 0xFE00 <= code <= 0xFE0F or 0xE0100 <= code <= 0xE01EF:
+            return True
+    return any(pattern.search(text) for pattern in (_HTML, _LINK_DEFINITION, _IMAGE, _LINK_TITLE))
 
 
 class Refused(Exception):
@@ -663,6 +683,8 @@ def apply(source: str, kind: str, exact: str, prefix: str = "", suffix: str = ""
     """Make one proposed change to `source`, or raise Refused."""
     if kind not in KINDS:
         raise ValueError(f"unknown kind of change: {kind}")
+    if hidden_content(new_text or ""):
+        raise Refused("hidden")
     doc = Doc(source)
     a, b = locate(doc, exact, prefix, suffix)
     s, e = doc.offsets[a], doc.offsets[b - 1] + 1

@@ -596,6 +596,9 @@
 
   const ZWSP = "​";
   const BLOCKS = "p, li, h1, h2, h3, h4, h5, h6";
+  // Characters nobody would see in the text, but an agent reading the file would: left out of what you type (the
+  // robot and the database refuse them too).
+  const HIDDEN_CHAR = /[\p{Cf}\p{Co}\p{Cs}\p{Cn}\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0\ufe00-\ufe0f\u{e0100}-\u{e01ef}\x00-\x08\x0b-\x1f\x7f-\x9f]/u;
 
   const elementOf = (node) => (node?.nodeType === 1 ? node : node?.parentElement);
   const within = (node, selector) => {
@@ -711,7 +714,7 @@
   }
 
   function typeText(text) {
-    text = String(text || "").replace(/[\r\n]+/g, " ");
+    text = [...String(text || "").replace(/[\r\n]+/g, " ")].filter((ch) => !HIDDEN_CHAR.test(ch)).join("");
     const sel = getSelection();
     if (!text || !sel.rangeCount) return;
     let range = sel.getRangeAt(0);
@@ -971,7 +974,7 @@
         if (within(node, "button")) continue;
         const ins = mineIns(node), del = ins ? null : myDel(node);
         const type = ins ? "ins" : del ? "del" : "orig";
-        for (const ch of node.data) if (ch !== ZWSP) chars.push({ ch, type, mark: ins || del });
+        for (const ch of node.data) if (ch !== ZWSP && !(ins && HIDDEN_CHAR.test(ch))) chars.push({ ch, type, mark: ins || del });
       }
       return { block, chars, isNew: block.classList.contains("track-new") };
     });
@@ -1178,9 +1181,12 @@
       addComment: async (row) => must(await client.from("comments").upsert(row, { onConflict: "id", ignoreDuplicates: true })),
       deleteComment: async (id) => must(await client.from("comments").delete().eq("id", id)),
       resolveComment: async (id, done) => must(await client.rpc("resolve_comment", { comment_id: id, done })),
-      async vote(proposalId, vote, step = "patch") {
+      async vote(proposalId, vote, step = "patch", seen = null) {
         const upsert = (row) => client.from("votes").upsert(row, { onConflict: "suggestion,voter_id" });
-        let result = await upsert({ suggestion: proposalId, vote, version_step: step });
+        let result = await upsert({ suggestion: proposalId, vote, version_step: step, seen });
+        if (result.error && /seen/.test(result.error.message)) {
+          result = await upsert({ suggestion: proposalId, vote, version_step: step });  // a database from before "seen"
+        }
         if (result.error && /version_step/.test(result.error.message) && step === "patch") {
           result = await upsert({ suggestion: proposalId, vote });  // a database set up before version steps
         }
@@ -1233,10 +1239,10 @@
         list.push({ ...row, id: crypto.randomUUID(), requested_email: me()?.email || "", created: new Date().toISOString() });
         write("els-local-maintainer-requests", list);
       },
-      async vote(proposalId, vote, step = "patch") {
+      async vote(proposalId, vote, step = "patch", seen = null) {
         const user = me();
         const votes = read(VOTES, []).filter((v) => !(v.suggestion === proposalId && v.voter_id === user.id));
-        votes.push({ suggestion: proposalId, voter_id: user.id, voter_email: user.email, vote, version_step: step, at: new Date().toISOString() });
+        votes.push({ suggestion: proposalId, voter_id: user.id, voter_email: user.email, vote, version_step: step, seen, at: new Date().toISOString() });
         write(VOTES, votes);
         emit();
       },
@@ -1802,6 +1808,9 @@
 
   // What the robot will decide, from the maintainers' votes on Suggest Edits: the same rule as scripts/proposals.py
   // (decide). An approval decides with the biggest version step any approving maintainer chose.
+  // Once a suggestion has been edited, a vote counts only if it was cast on the version shown now (as the robot counts).
+  const onThisVersion = (v, p) => !(toTime(p.updated) > toTime(p.created)) || toTime(v.seen) === toTime(p.updated);
+
   function decisionFor(p) {
     const rules = suggest.governance?.rules || {};
     const maintainers = (suggest.governance?.maintainers || []).filter((m) => m.email);
@@ -1812,6 +1821,7 @@
       if (v.suggestion !== p.id || !(toTime(v.at) >= since)) continue;
       const m = maintainers.find((x) => sameEmail(x.email, v.voter_email));
       if (!m || (m.since && toTime(v.at) < toTime(m.since))) continue;  // not a maintainer's vote, or cast before they were one
+      if (!onThisVersion(v, p)) continue;  // cast on an earlier version of it
       if (v.vote === "approve" && rules.maintainers_may_approve_their_own_proposals === false && sameEmail(m.email, proposer)) continue;
       const known = latest.get(m.email.toLowerCase());
       if (!known || toTime(v.at) > toTime(known.at)) latest.set(m.email.toLowerCase(), v);
@@ -1924,7 +1934,7 @@
       const chosen = vote === "approve" ? step.value : "patch";
       suggest.voting.delete(p.id);
       const me = suggest.me, at = new Date(Math.max(Date.now(), toTime(p.updated) || 0)).toISOString();
-      const mine = { suggestion: p.id, voter_id: me.id, voter_email: me.email, vote, version_step: chosen, at };
+      const mine = { suggestion: p.id, voter_id: me.id, voter_email: me.email, vote, version_step: chosen, seen: p.updated || null, at };
       const others = (list) => list.filter((v) => !(v.suggestion === p.id && v.voter_id === me.id));
       suggest.pendingVotes = [...others(suggest.pendingVotes), mine];
       suggest.votes = [...others(suggest.votes), mine];
@@ -1935,7 +1945,7 @@
         : decided?.kind === "decline" ? "Disapproved. It's gone from the text, and it's in the queue to move to the Declined page."
           : `${vote === "approve" ? "Approved" : "Disapproved"}. It needs more maintainers' votes to be decided.`);
       try {
-        await suggest.backend.vote(p.id, vote, chosen);
+        await suggest.backend.vote(p.id, vote, chosen, p.updated || null);
         watchForPublication(true);
         suggest.watcher?.refresh();
       } catch (error) {
@@ -1951,7 +1961,7 @@
     const disapprove = action("Disapprove", () => cast("reject"), "button secondary small");
     if (p.status === "needs-fix") { approve.disabled = true; approve.title = "It needs a fix before it can be approved"; }
     const me = (suggest.governance?.maintainers || []).find((m) => sameEmail(m.email, suggest.me.email));
-    const current = mine && toTime(mine.at) >= Math.max(toTime(p.updated) || 0, toTime(me?.since) || 0);
+    const current = mine && toTime(mine.at) >= Math.max(toTime(p.updated) || 0, toTime(me?.since) || 0) && onThisVersion(mine, p);
     if (current) say(mine.vote === "approve" ? "You approved it." : "You disapproved it.", "done");
     const buttons = h("p", { class: "vote-buttons" }, approve, " ", step, " ", disapprove);
     if (!["approved", "disapproved"].includes(p.status)) return h("div", { class: "vote" }, buttons, status);
@@ -2775,7 +2785,9 @@
         const answer = await suggest.backend.ruleCheckResult(started.id);
         if (answer?.status === "waiting") continue;
         if (answer?.status !== "done") throw new Error(answer?.error || "no answer");
-        Object.assign(entry, { status: "done", result: answer.result, model: answer.model || "" });
+        const result = aiCheckOf(answer.result);
+        if (!result) throw new Error("the answer wasn't in the expected form");
+        Object.assign(entry, { status: "done", result, model: answer.model || "" });
         await keepCheck(subject, entry);
         return;
       }
@@ -2826,6 +2838,17 @@
     box.textContent = asking ? "Checking your change against the other rules…" : "";
   }
 
+  // An AI check's answer as the page uses it, or null if it isn't one: a verdict, and findings that are objects.
+  function aiCheckOf(value) {
+    if (!value || typeof value !== "object" || !["fine", "problem"].includes(value.verdict) || !Array.isArray(value.findings)) return null;
+    const text = (x) => (typeof x === "string" ? x : "");
+    const findings = value.findings.filter((f) => f && typeof f === "object" && !Array.isArray(f)).slice(0, 5)
+      .map((f) => ({ kind: text(f.kind), rule: text(f.rule), where: text(f.where), explanation: text(f.explanation) }))
+      .filter((f) => f.rule || f.explanation);  // a finding that says nothing isn't one
+    if (value.verdict === "problem" && !findings.length) return null;
+    return { verdict: findings.length ? "problem" : "fine", findings, model: text(value.model), about: text(value.about) };
+  }
+
   const AI_KINDS = { repeats: ["repeat", "Repeats "], contradicts: ["conflict", "Contradicts "], tension: ["conflict", "Is in tension with "],
     inconsistent: ["conflict", "Is inconsistent within itself"] };
   const modelName = (id) => (String(id).match(/^claude-([a-z]+)-(\d+)-(\d+)/) || []).slice(1).reduce((name, part, i) =>
@@ -2851,7 +2874,7 @@
       const asked = suggest.asked.get(subject.signature);
       // Checked by the AI before this page was opened (its answer is saved with the suggestion): not asked again.
       const about = hashOf(subject.signature);
-      if (!asked && sids.size && [...sids].every((id) => (suggest.remote || []).find((s) => s.docId === id)?.aiCheck?.about === about)) {
+      if (!asked && sids.size && [...sids].every((id) => aiCheckOf((suggest.remote || []).find((s) => s.docId === id)?.aiCheck)?.about === about)) {
         suggest.checked.add(subject.signature);
         continue;
       }
@@ -2895,7 +2918,7 @@
   // finds now (for a change to a rule, only if it adds words, compared with the other rules).
   function checkNote(p) {
     if (FINAL_STATUS.has(p.status)) return null;
-    const check = p.aiCheck;
+    const check = aiCheckOf(p.aiCheck);
     if (check?.verdict === "fine") {
       return h("div", { class: "similar-note fine" }, h("p", { text: `Checked by ${modelName(check.model)}: no repeat or contradiction found.` }));
     }
@@ -3087,7 +3110,14 @@
     const justDone = adopted.filter((p) => renderProposals.queued?.has(p.id));
     renderProposals.published = [...justDone, ...(renderProposals.published || [])];
     renderProposals.queued = new Set(queue.map((p) => p.id));
-    const card = (p) => proposalCard(p, cfg, rules, [reasonField(p), voteControls(p)]);
+    const card = (p) => {
+      try {
+        return proposalCard(p, cfg, rules, [reasonField(p), voteControls(p)]);
+      } catch (error) {
+        console.error(error);
+        return h("article", { class: "proposal", id: `proposal-${p.id}` }, h("p", { class: "muted", text: "This suggestion couldn't be shown here." }));
+      }
+    };
     const thisWeek = adopted.filter((p) => Date.now() - (toTime(p.decided) || 0) < WEEK).length;
     const openComments = comments.filter((c) => c.kind === "comment" && !c.parent && !c.resolved)
       .sort((a, b) => (b.created || "").localeCompare(a.created || ""));

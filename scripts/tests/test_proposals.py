@@ -40,10 +40,11 @@ def suggestion(id, kind, exact, prefix="", suffix="", new="", email="jane@exampl
             "updated": updated or created}
 
 
-def site_vote(suggestion, email, vote, at="2026-10-03T11:00:00.123456+00:00", step="patch"):
-    """A row of the Suggest Edits database's votes table, as its API returns it."""
+def site_vote(suggestion, email, vote, at="2026-10-03T11:00:00.123456+00:00", step="patch", seen=None):
+    """A row of the Suggest Edits database's votes table, as its API returns it. `seen`: the version of the suggestion
+    the voter saw (its "updated" time)."""
     return {"suggestion": suggestion, "voter_id": f"id-{email}", "voter_email": email, "vote": vote, "at": at,
-            "version_step": step}
+            "version_step": step, "seen": seen}
 
 
 def site_suggestions(email="reader@example.org", start=0):
@@ -109,7 +110,9 @@ class VotesTest(unittest.TestCase):
         self.assertEqual((votes, support), ([], 1))
 
     def test_votes_in_github_comments(self):
-        cases = {"Approve": "approve", "approved!": "approve", "/approve": "approve", "**Approve.** Good catch.": "approve",
+        cases = {"> Approve, I think\n\nNo, wait: this breaks rule 2.": None, "/reject\n\n> Approve": "reject",
+                 "\n\n/approve\n> On Oct 3, someone wrote:": "approve",
+                 "Approve": "approve", "approved!": "approve", "/approve": "approve", "**Approve.** Good catch.": "approve",
                  "Reject — this conflicts with rule 2": "reject", "/reject": "reject", "rejects": "reject",
                  "I approve": None, "Approval pending": None, "+1": None, "": None}
         for text, expected in cases.items():
@@ -428,7 +431,12 @@ class RunTest(unittest.TestCase):
         ledger = self.ledger()
         self.assertEqual((ledger[ids[1]]["status"], ledger[ids[1]]["note"]), ("withdrawn", "The proposer withdrew it."))
         self.assertEqual((ledger[ids[3]]["status"], ledger[ids[3]]["stale_votes"]), ("open", 1))
-        votes.append(site_vote(ids[3], LEAD_EMAIL, "approve", at="2026-10-03T12:40:00+00:00"))
+        # A vote cast after the edit but on the page's older version (the edit made while the maintainer read it) doesn't
+        # count either: it has to be on the version there now.
+        votes.append(site_vote(ids[3], LEAD_EMAIL, "approve", at="2026-10-03T12:40:00+00:00", seen=rows[3]["created"]))
+        self.robot({"suggestions": [rows[3]], "votes": votes}, now="2026-10-03T12:45:00Z")
+        self.assertEqual((self.ledger()[ids[3]]["status"], self.ledger()[ids[3]]["stale_votes"]), ("open", 1))
+        votes.append(site_vote(ids[3], LEAD_EMAIL, "approve", at="2026-10-03T12:50:00+00:00", seen=rows[3]["updated"]))
         self.robot({"suggestions": [rows[3]], "votes": votes}, now="2026-10-03T13:00:00Z")
         self.assertEqual(self.ledger()[ids[3]]["status"], "adopted")
         self.assertIn("- Name the model and its exact version in every log.\n", (self.repo / "draft" / "AGENTS.md").read_text())
@@ -503,6 +511,7 @@ class FetchSiteTest(unittest.TestCase):
         import threading
         self.requests = []
         self.missing = set()  # tables the stand-in doesn't have, as a database set up before they were added
+        self.page_size = 1000  # the most rows the stand-in sends at once (Supabase's max rows)
         rows = [{"id": str(i), "created": f"{i:06d}"} for i in range(1500)]
         test = self
 
@@ -526,7 +535,7 @@ class FetchSiteTest(unittest.TestCase):
                 table = (rows if url.path == "/rest/v1/suggestions"
                          else [{"id": "r1", "action": "add"}] if url.path == "/rest/v1/maintainer_requests"
                          else [{"suggestion": "sb-1", "vote": "approve"}])
-                offset, limit = int(query.get("offset", 0)), int(query.get("limit", 1000))
+                offset, limit = int(query.get("offset", 0)), min(int(query.get("limit", 1000)), test.page_size)
                 body = json.dumps(table[offset:offset + limit]).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -548,13 +557,19 @@ class FetchSiteTest(unittest.TestCase):
         self.assertEqual(data["votes"], [{"suggestion": "sb-1", "vote": "approve"}])
         self.assertEqual(data["maintainer_requests"], [{"id": "r1", "action": "add"}])
         paths = [(path, query.get("offset")) for path, query, _ in self.requests]
-        self.assertEqual(paths, [("/rest/v1/suggestions", "0"), ("/rest/v1/suggestions", "1000"), ("/rest/v1/votes", "0"),
-                                 ("/rest/v1/maintainer_requests", "0")])
+        self.assertEqual(paths, [("/rest/v1/suggestions", "0"), ("/rest/v1/suggestions", "1000"), ("/rest/v1/suggestions", "1500"),
+                                 ("/rest/v1/votes", "0"), ("/rest/v1/votes", "1"),
+                                 ("/rest/v1/maintainer_requests", "0"), ("/rest/v1/maintainer_requests", "1")])
         headers = self.requests[0][2]
         self.assertEqual(headers.get("apikey"), "sb_publishable_test")
         self.assertNotIn("authorization", headers)  # a publishable key isn't a JWT
         fetch_site(self.url, "eyJhbGciOiJIUzI1NiJ9.e30.x")
         self.assertEqual(self.requests[-1][2].get("authorization"), "Bearer eyJhbGciOiJIUzI1NiJ9.e30.x")
+
+    def test_every_row_when_the_database_sends_fewer_at_a_time(self):
+        """A database set to send fewer rows at once: every row is still read (none is taken for withdrawn)."""
+        self.page_size = 100
+        self.assertEqual(len(fetch_site(self.url, "sb_publishable_test")["suggestions"]), 1500)
 
     def test_a_database_without_the_maintainer_requests_table(self):
         self.missing = {"maintainer_requests"}
@@ -719,6 +734,26 @@ class GitHubRunTest(RunTest):
         self.robot_online(site, now="2026-10-03T13:15:00Z")
         self.assertEqual(self.origin_git("rev-parse", "main"), head)
         self.assertEqual(len([c for c in self.github.comments[number] if c["user"]["type"] == "Bot"]), 1)
+
+    def test_a_change_after_the_issue_is_opened_is_shown_there_and_needs_new_votes(self):
+        """A proposal edited after its issue was opened: the robot comments with the new version, and a vote on GitHub
+        counts only after that comment (an email reply to the old version doesn't adopt the new one)."""
+        site = self.some("p2")
+        self.robot_online(site)
+        [number] = self.github.issues
+        self.github.issues[number]["created_at"] = "2026-10-03T12:00:00Z"
+        site["suggestions"][0] = {**site["suggestions"][0], "reason": "simpler", "updated": "2026-10-03T12:10:00+00:00"}
+        self.github.add_comment(number, "nathanReitinger", "/approve", when="2026-10-03T12:20:00Z")  # replying to the old email
+        self.robot_online(site, now="2026-10-03T12:30:00Z")
+        self.assertEqual(self.ledger()["sb-p2"]["status"], "open")
+        notices = [c["body"] for c in self.github.comments[number] if c["user"]["type"] == "Bot" and "This proposal changed" in c["body"]]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("vote again", notices[0])
+        self.robot_online(site, now="2026-10-03T12:35:00Z")  # no second notice for the same change
+        self.assertEqual(len([c for c in self.github.comments[number] if "This proposal changed" in c["body"]]), 1)
+        self.github.add_comment(number, "nathanReitinger", "/approve", when="2026-10-03T12:40:00Z")
+        self.robot_online(site, now="2026-10-03T12:50:00Z")
+        self.assertEqual(self.ledger()["sb-p2"]["status"], "adopted")
 
     def test_an_issue_opened_by_someone_else_doesnt_count(self):
         """Only the robot's own issues stand for proposals: one anyone else opens with a proposal's marker, or with

@@ -230,7 +230,8 @@ $$;
 --
 -- To turn it off again: select robot.set_anthropic_key('off');
 -- Without a key, the page uses its own simpler check, which compares words. To keep the cost down, the same question
--- is never asked twice, each person can ask 15 times an hour, and everyone together 100 times a day.
+-- is never asked twice, each person can ask 10 times an hour and 25 times a day, and everyone together 80 times a day.
+-- Set a monthly spend limit for the key's account in the Claude Console too.
 
 create table if not exists robot.rule_checks (
   id bigint generated always as identity primary key,
@@ -275,7 +276,7 @@ create or replace function robot.rule_check_body(request jsonb) returns jsonb
 language sql stable set search_path = '' as $body$
   select jsonb_build_object(
     'model', 'claude-opus-5-5',
-    'max_tokens', 16000,
+    'max_tokens', 12000,
     'output_config', jsonb_build_object(
       'effort', 'high',
       'format', jsonb_build_object('type', 'json_schema', 'schema', jsonb_build_object(
@@ -335,9 +336,9 @@ begin
     return jsonb_build_object('unavailable', 'signed out');
   end if;
   if coalesce(jsonb_typeof(request), '') <> 'object'
-     or length(coalesce(request ->> 'document', '')) not between 1 and 60000
-     or length(coalesce(request ->> 'others', '')) > 40000
-     or length(coalesce(request ->> 'change', '')) not between 1 and 10000 then
+     or length(coalesce(request ->> 'document', '')) not between 1 and 40000
+     or length(coalesce(request ->> 'others', '')) > 30000
+     or length(coalesce(request ->> 'change', '')) not between 1 and 6000 then
     return jsonb_build_object('unavailable', 'too long');
   end if;
   select decrypted_secret into key from vault.decrypted_secrets where name = 'anthropic_api_key';
@@ -352,8 +353,10 @@ begin
   if check_id is not null then
     return jsonb_build_object('id', check_id);  -- asked before: the same answer, at no cost
   end if;
-  if (select count(*) from robot.rule_checks c where c.asked_by = me and c.created > now() - interval '1 hour') >= 15
-     or (select count(*) from robot.rule_checks c where c.created > now() - interval '1 day') >= 100 then
+  perform pg_advisory_xact_lock(hashtext('robot.rule_checks'));  -- one at a time, so the limits can't be outrun
+  if (select count(*) from robot.rule_checks c where c.asked_by = me and c.created > now() - interval '1 hour') >= 10
+     or (select count(*) from robot.rule_checks c where c.asked_by = me and c.created > now() - interval '1 day') >= 25
+     or (select count(*) from robot.rule_checks c where c.created > now() - interval '1 day') >= 80 then
     return jsonb_build_object('unavailable', 'limit');
   end if;
   insert into robot.rule_checks (asked_by, fingerprint, model, request_id)
@@ -443,7 +446,7 @@ language sql stable security definer set search_path = '' as $$
     'answered_today', (select count(*) from robot.rule_checks where result is not null and created > now() - interval '1 day'),
     'failed_today', (select count(*) from robot.rule_checks where created > now() - interval '1 day'
                        and (error is not null or (result is null and created < now() - interval '10 minutes'))),
-    'daily_limit', 100,
+    'daily_limit', 80,
     'last_error', (select error from robot.rule_checks where error is not null order by id desc limit 1),
     'last_answer', (select max(created) from robot.rule_checks where result is not null))
 $$;

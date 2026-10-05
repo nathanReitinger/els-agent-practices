@@ -65,6 +65,7 @@ BOT_IDENTITY = {"GIT_COMMITTER_NAME": BOT_NAME, "GIT_COMMITTER_EMAIL": BOT_EMAIL
                 "GIT_AUTHOR_NAME": BOT_NAME, "GIT_AUTHOR_EMAIL": BOT_EMAIL}
 FINAL = ("adopted", "declined", "withdrawn", "cannot-apply")
 NEW_ISSUES_PER_RUN = 10
+NEW_ISSUES_PER_PROPOSER = 3  # in one run, so one person's flood of suggestions doesn't flood everyone's email
 # A suggestion on Suggest Edits is saved while it's typed, so its GitHub issue waits until it has been left alone
 # this long. (Votes on it count right away.)
 SETTLE_MINUTES = 10
@@ -155,8 +156,10 @@ TOKENS = re.compile(r"\s+|[\w'’-]+|[^\s\w]")
 
 def vote_of(text: str) -> str | None:
     """'approve' or 'reject' if a comment on a suggestion's GitHub issue starts with that word (/approve, Approve,
-    /reject...), otherwise None."""
-    match = _VOTE.match(html.unescape(text or "").replace("\r", "").strip())
+    /reject...), otherwise None. Quoted lines (an email reply's copy of an earlier comment) don't count."""
+    lines = [line.strip() for line in html.unescape(text or "").replace("\r", "").split("\n")]
+    first = next((line for line in lines if line and not line.startswith(">")), "")
+    match = _VOTE.match(first)
     if not match:
         return None
     return "approve" if match.group(1).lower().startswith("approv") else "reject"
@@ -260,6 +263,10 @@ def is_proposer(maintainer: Maintainer, proposer: dict) -> bool:
 
 def count_votes(record: dict, comments: list[dict], gov: Governance,
                 site_votes: list[dict] = ()) -> tuple[list[Vote], int, int]:
+    # Once a suggestion has been edited, a vote must be on the version there now: on Suggest Edits, the version the
+    # voter saw ("seen"); on GitHub, cast after the robot's comment showing the change.
+    edited = bool(record.get("created")) and parse_time(record["updated"]) > parse_time(record["created"])
+    github_since = max(parse_time(record["updated"]), parse_time(record.get("changed_notice") or record["updated"]))
     """Each maintainer's latest vote cast since the suggestion was last edited (and since they became a maintainer);
     others in favor; votes made stale by an edit.
 
@@ -271,14 +278,14 @@ def count_votes(record: dict, comments: list[dict], gov: Governance,
     support: set[str] = set()
 
     def consider(maintainer: Maintainer | None, vote: str, when: dt.datetime, via: str, link: str, voter: str,
-                 step: str = "patch") -> None:
+                 step: str = "patch", current: bool = True) -> None:
         if maintainer is not None and maintainer.since and when < maintainer.since:
             maintainer = None  # cast before they became a maintainer: it counts as a reader's
         if maintainer is None:
             if vote == "approve":
                 support.add(voter)
             return
-        if when < since:
+        if when < since or not current:
             stale.add(maintainer.name)
             return
         if vote == "approve" and not gov.self_approval and is_proposer(maintainer, record["proposer"]):
@@ -292,13 +299,16 @@ def count_votes(record: dict, comments: list[dict], gov: Governance,
             continue
         vote = vote_of(comment.get("body", ""))
         if vote:
-            consider(gov.by_github(login), vote, parse_time(comment.get("updated_at") or comment["created_at"]),
-                     "GitHub", comment.get("html_url", ""), f"github:{login}")
+            when = parse_time(comment.get("updated_at") or comment["created_at"])
+            consider(gov.by_github(login), vote, when, "GitHub", comment.get("html_url", ""), f"github:{login}",
+                     current=when >= github_since)
     for row in site_votes:
         email = row.get("voter_email") or ""
         if row.get("vote") in ("approve", "reject") and email.lower() not in gov.ignored_site:
             step = row.get("version_step") if row.get("version_step") in release.STEPS else "patch"
-            consider(gov.by_email(email), row["vote"], parse_time(row["at"]), SITE, "", f"site:{email.lower()}", step)
+            seen = row.get("seen")
+            consider(gov.by_email(email), row["vote"], parse_time(row["at"]), SITE, "", f"site:{email.lower()}", step,
+                     current=not edited or (bool(seen) and parse_time(seen) == since))
     votes = sorted(latest.values(), key=lambda v: v.when)
     return votes, len(support), len(stale - set(latest))
 
@@ -333,7 +343,7 @@ def fetch_site(url: str, key: str) -> dict[str, list[dict]]:
             query = urllib.parse.urlencode({"select": "*", "order": order, "limit": 1000, "offset": len(rows)})
             batch = get_json(f"{url.rstrip('/')}/rest/v1/{name}?{query}", site_headers(key))
             rows.extend(batch)
-            if len(batch) < 1000:
+            if not batch:  # an empty page: there's no more (a short page might just be the database's page size)
                 return rows
     def optional(name: str, order: str) -> list[dict]:
         try:
@@ -599,10 +609,22 @@ def issue_body(record: dict, gov: Governance, site: str) -> str:
         f"**Maintainers:** approve or disapprove it on [{SITE}]({site}draft/#proposals), signed in with your email; "
         "or reply `/approve` or `/reject` here (replying to the notification email works too). "
         f"{gov.rule_sentence()} "
-        "Only a maintainer's latest vote counts, and votes cast before the proposal was last edited don't count.",
+        "Only a maintainer's latest vote counts, and only a vote on the version shown here: after an edit, the "
+        "robot comments with the new version, and votes before that comment don't count.",
         "",
         f"<!-- proposal:{record['id']} -->",
     ]
+    return "\n".join(lines)
+
+
+def change_comment(record: dict) -> str:
+    """The comment on a proposal's issue when the proposal changes after the issue was opened."""
+    preview = record.get("preview") or {}
+    lines = [f"**This proposal changed** ({parse_time(record['updated']):%B %d, %Y, at %H:%M} UTC). It now reads:", "",
+             f"**{md(phrase(record, limit=200))}**", ""]
+    if preview.get("before") or preview.get("after"):
+        lines += [f"> {line}" for line in track_changes(preview)] + [""]
+    lines.append("A vote here counts only if it comes after this comment, so if you voted before, vote again.")
     return "\n".join(lines)
 
 
@@ -834,10 +856,29 @@ class Robot:
                 "problems": problems, "proposer": site_proposer(email), "created": row["created"], "updated": row["updated"],
                 "link": f"{self.site}draft/#proposals",
             })
-        for record in records.values():
-            if record["id"].startswith("sb-") and record["status"] not in FINAL and record["id"] not in seen:
-                record.update(status="withdrawn", note="The proposer withdrew it.", decided=self.now.isoformat())
-                self.say(f"Suggestion {record['id']} was withdrawn.")
+        missing = [r for r in records.values() if r["id"].startswith("sb-") and r["status"] not in FINAL and r["id"] not in seen]
+        there = self.still_there([r["id"][3:] for r in missing]) if missing else set()
+        for record in missing:
+            if record["id"][3:] in there:  # missed while reading (rows moved between pages): it's still there
+                continue
+            record.update(status="withdrawn", note="The proposer withdrew it.", decided=self.now.isoformat())
+            self.say(f"Suggestion {record['id']} was withdrawn.")
+
+    def still_there(self, ids: list[str]) -> set[str]:
+        """Of these suggestions missing from what was read, the ones that are in the database after all. Withdrawing
+        can't be undone, so if the database doesn't answer, they're all taken to be there."""
+        config = self.manifest.get("supabase") or {}
+        if self.o.site_data or not (config.get("url") and config.get("key")):
+            return set()
+        there: set[str] = set()
+        for start in range(0, len(ids), 50):
+            query = urllib.parse.urlencode({"select": "id", "id": f"in.({','.join(ids[start:start + 50])})"})
+            try:
+                there |= {row["id"] for row in get_json(f"{config['url'].rstrip('/')}/rest/v1/suggestions?{query}",
+                                                         site_headers(config["key"]))}
+            except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
+                return set(ids)
+        return there
 
     def evaluate(self, record: dict, text: str) -> edits.Edit | None:
         """Check a proposal against the current text, and set its status, note, and preview."""
@@ -920,6 +961,17 @@ class Robot:
             if not record.get("issue") and record["id"] in issues:
                 record["issue"] = issues[record["id"]]["number"]
 
+        # A suggestion changed after its issue was opened: say so on the issue (watchers get the new wording by email),
+        # and count votes there only from then on.
+        self.notices = set()
+        for record in records.values():
+            issue = issues.get(record["id"])
+            opened = parse_time(issue["created_at"]) if issue and issue.get("created_at") else None
+            if record["status"] not in FINAL and opened and parse_time(record["updated"]) > opened \
+                    and record.get("noticed") != record["updated"]:
+                record.update(noticed=record["updated"], changed_notice=self.now.isoformat())
+                self.notices.add(record["id"])
+
         text = DRAFT.read_text() if not self.o.dry_run else draft
         pending = sorted((r for r in records.values() if r["status"] not in FINAL), key=lambda r: (r["created"], r["id"]))
         adopted = False
@@ -954,9 +1006,20 @@ class Robot:
         waiting = [r for r in records.values() if not r.get("issue") and r["status"] == "open" and settled(r)]
         if waiting and self.github.write:
             self.github.ensure_label()
-        for record in sorted(waiting, key=lambda r: r["created"])[:NEW_ISSUES_PER_RUN]:
+        per_proposer: dict[str, int] = {}
+        chosen = []
+        for record in sorted(waiting, key=lambda r: r["created"]):
+            who = (record.get("proposer") or {}).get("email") or (record.get("proposer") or {}).get("name") or ""
+            if per_proposer.get(who, 0) < NEW_ISSUES_PER_PROPOSER:
+                per_proposer[who] = per_proposer.get(who, 0) + 1
+                chosen.append(record)
+        for record in chosen[:NEW_ISSUES_PER_RUN]:
             body = issue_body(record, self.gov, self.site)
-            made = self.github.call("POST", "/issues", {"title": issue_title(record), "body": body, "labels": ["proposal"]})
+            try:
+                made = self.github.call("POST", "/issues", {"title": issue_title(record), "body": body, "labels": ["proposal"]})
+            except (urllib.error.URLError, TimeoutError, ValueError) as error:  # tried again next run
+                self.say(f"Couldn't open an issue for proposal {record['id']} ({error}).")
+                continue
             if made:
                 record["issue"] = made["number"]
                 issues[record["id"]] = made
@@ -1134,6 +1197,8 @@ class Robot:
                                                                "body": issue_body(record, self.gov, self.site)})
                 self.say(f"Closed issue #{number}: {record['status']}.")
             else:
+                if record["id"] in getattr(self, "notices", ()):
+                    self.github.call("POST", f"/issues/{number}/comments", {"body": change_comment(record)})
                 body = issue_body(record, self.gov, self.site)
                 labels = [label["name"] if isinstance(label, dict) else label for label in issue.get("labels") or []]
                 changes = {"body": body} if body != (issue.get("body") or "") else {}
