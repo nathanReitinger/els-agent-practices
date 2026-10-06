@@ -592,8 +592,9 @@ grant execute on function public.rule_check_status() to anon, authenticated;
 -- Nobody is sent what they wrote themselves, or anything from an account the lead maintainer has listed to ignore.
 --
 -- The database writes the emails, and a small Supabase Edge Function (supabase/functions/email-maintainers) sends
--- them through an email account's SMTP server, such as the Gmail account that sends the sign-in codes. The account's
--- password is one of that function's secrets in Supabase, never in this repository. The function takes no message
+-- them through an email account's SMTP server: a Gmail account that isn't any maintainer's own address, since Gmail
+-- keeps mail an account sends to itself out of its inbox. The account's password is one of that function's secrets in
+-- Supabase, never in this repository. The function takes no message
 -- from whoever calls it: the database calls it with a one-time key, and it uses the key to collect the emails
 -- waiting here, so it can't be used to send anything else. supabase/README.md, step 9, sets it up. Then, to turn the
 -- emails on, run this in a new query (and 'off' to turn them off again):

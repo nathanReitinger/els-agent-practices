@@ -7,13 +7,14 @@
 // whoever calls it, so it can't be used to send anything else, and without the database's key it does nothing.
 //
 // Set it up once, in the Supabase dashboard (supabase/README.md, step 9):
-//   1. Edge Functions, then Secrets: add SMTP_USER, the account's address (such as the Gmail address that sends the
-//      sign-in codes), and SMTP_PASSWORD, an app password for it. For an account that isn't Gmail, add SMTP_HOST too,
-//      and SMTP_PORT if it isn't 465. The port must use TLS from the start: Supabase doesn't allow ports 25 and 587.
+//   1. Edge Functions, then Secrets: add SMTP_USER, the account's address (a Gmail address that isn't any maintainer's
+//      own: Gmail keeps mail an account sends to itself out of its inbox), and SMTP_PASSWORD, an app password for it.
+//      For an account that isn't Gmail, add SMTP_HOST too, and SMTP_PORT if it isn't 465. The port must use TLS from
+//      the start: Supabase doesn't allow ports 25 and 587.
 //   2. Edge Functions, then Deploy a new function, then Via Editor: name it email-maintainers, replace the code with
 //      this file, and deploy it.
-//   3. In the function's settings, turn off JWT verification: the database calls it without anyone's sign-in, and
-//      the function checks each call itself, as above.
+//   3. On the function's Details tab, turn off "Verify JWT with legacy secret": the database calls it without anyone's
+//      sign-in, and the function checks each call itself, as above. (Check it again after any redeploy.)
 // The password is a secret of this function in Supabase, never in the repository.
 //
 // It uses no libraries: the few SMTP commands it needs are written out here, so nothing is downloaded when it's
@@ -43,7 +44,7 @@ Deno.serve(async (request) => {
     // not JSON: no key
   }
   if (!/^[0-9a-f]{64}$/.test(key)) return answer({ error: "no key" }, 401);
-  const user = setting("SMTP_USER"), password = setting("SMTP_PASSWORD");
+  const user = setting("SMTP_USER"), password = appPassword(setting("SMTP_PASSWORD"));
   if (!ADDRESS.test(user) || !password) {
     return answer({ error: "SMTP_USER and SMTP_PASSWORD aren't set: add them under Edge Functions, then Secrets" });
   }
@@ -262,6 +263,11 @@ function base64(text: string): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(binary);
+}
+
+// Google shows an app password as four groups of four letters, with spaces between them, which aren't part of it.
+function appPassword(text: string): string {
+  return /^[a-z]{4}( [a-z]{4}){3}$/i.test(text) ? text.replace(/ /g, "") : text;
 }
 
 function helloName(): string {
