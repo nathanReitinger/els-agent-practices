@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.20] - 2026-10-06
+
+Added “Raise this for me to review and make a decision on them.” after “log.” (Non-negotiable rules).
+
+- Proposed by emilio@⁠northwestern.edu (Suggest Edits) on 2026-10-06
+- Approved by Nathan Reitinger (Suggest Edits, 2026-10-06)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals> · Discussion: <https://github.com/nathanReitinger/els-agent-practices/issues/17>
+
+Argon2id fingerprint: `07cacbdb0b76a7d6415e7b3c5c2a309861b535253fe32bfb4e4e95ad651a0579`
+
+
 ## [0.0.19] - 2026-10-04
 
 Added “I am the author, and I answer—not you—for every number, quote, citation, and li…” after “check.”.

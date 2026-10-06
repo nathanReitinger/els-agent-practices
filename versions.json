@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": true
   },
-  "latest": "0.0.19",
+  "latest": "0.0.20",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.20",
+      "date": "2026-10-06",
+      "summary": "Added “Raise this for me to review and make a decision on them.” after “log.” (Non-negotiable rules).",
+      "fingerprint": "07cacbdb0b76a7d6415e7b3c5c2a309861b535253fe32bfb4e4e95ad651a0579",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.19",
       "date": "2026-10-04",
