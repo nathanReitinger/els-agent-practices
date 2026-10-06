@@ -1022,6 +1022,24 @@ class GitHubRunTest(RunTest):
         self.assertIn("Version 0.0.3: Replaced", log)
         self.assertEqual(self.origin_git("tag", "--list", "v0.0.3"), "v0.0.3")
 
+    def test_a_copy_made_before_another_run_published_starts_again(self):
+        # Two runs queued back to back: GitHub checks out the second at the commit that started it, from before
+        # the first published, but its fetch brings the first one's new tag. It must start over, not publish twice.
+        stale = self.dir / "stale"
+        subprocess.run(["git", "clone", "--quiet", str(self.origin), str(stale)], check=True)
+        out = self.robot_online(self.some("p1"))
+        self.assertIn("Adopted proposal sb-p1 as version 0.0.3", out)
+        subprocess.run(["git", "-C", str(stale), "fetch", "--quiet", "origin", "refs/tags/*:refs/tags/*"], check=True)
+        self.site_file.write_text(json.dumps(self.some("p1")))
+        env = {**NO_GIT_SETTINGS, "GH_TOKEN": "test-token", "REPO": "owner/name", "GITHUB_API_URL": self.github.url}
+        result = subprocess.run([sys.executable, "scripts/proposals.py", "--site-data", str(self.site_file), "--push",
+                                 "--now", "2026-10-03T12:10:00Z"], cwd=stale, capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("starting again from GitHub's copy", result.stderr)
+        self.assertNotIn("Adopted", result.stdout)
+        self.assertEqual(self.origin_git("tag", "--list", "v*").split(), ["v0.0.2", "v0.0.3"])
+        self.assertEqual(self.origin_git("log", "--format=%s", "main").count("Version 0.0.3:"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

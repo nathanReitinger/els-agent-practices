@@ -108,6 +108,10 @@ class PushRejected(Exception):
     pass
 
 
+class BehindGitHub(Exception):
+    """Another run published a version after this copy was made."""
+
+
 # ---------- Small helpers ----------
 
 def parse_time(value: str) -> dt.datetime:
@@ -707,6 +711,9 @@ class Robot:
     def publish(self, summary: str, details: list[str], message: str, author: str | None = None,
                 step: str = "patch") -> dict:
         version = self.next_version(step)
+        if git("tag", "--list", f"v{version}"):
+            # Its tag came with the fetch, but its commit isn't in this copy: another run got there first.
+            raise BehindGitHub(f"version {version} is already published")
         entry = release.publish(version, summary, details, today=self.now.date().isoformat())
         commit(message.replace("{version}", version).replace("{fingerprint}", entry["fingerprint"]), author)
         git("tag", "-a", f"v{version}", "-m", f"Version {version}", "-m", f"Argon2id fingerprint: {entry['fingerprint']}",
@@ -1340,8 +1347,11 @@ def main() -> None:
         try:
             robot.run()
             break
-        except PushRejected as rejected:
-            print(f"GitHub rejected the push ({rejected}); starting again from GitHub's copy.", file=sys.stderr)
+        except (PushRejected, BehindGitHub) as problem:
+            if not options.push:
+                raise SystemExit(f"This copy is behind GitHub's ({problem}). Pull, then run again.")
+            what = "GitHub rejected the push" if isinstance(problem, PushRejected) else "This copy is behind GitHub's"
+            print(f"{what} ({problem}); starting again from GitHub's copy.", file=sys.stderr)
             for tag in robot.tags:
                 git("tag", "-d", tag)
             git("fetch", "--quiet", "origin", "main", "--tags")
