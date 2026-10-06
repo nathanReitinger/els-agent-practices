@@ -712,7 +712,7 @@
     },
     {
       "id": "sb-aabfcc2a-4c08-462d-b772-909bf7ca836d",
-      "status": "open",
+      "status": "adopted",
       "based_on": "0.0.19",
       "issue": 17,
       "kind": "insert",
@@ -740,9 +740,21 @@
         ],
         "context": "Never invent values, results, or sources, and never fill a gap with a placeholder."
       },
-      "votes": [],
+      "votes": [
+        {
+          "name": "Nathan Reitinger",
+          "vote": "approve",
+          "when": "2026-10-06T19:55:34.787728+00:00",
+          "via": "Suggest Edits",
+          "link": ""
+        }
+      ],
       "support": 0,
-      "stale_votes": 0
+      "stale_votes": 0,
+      "decided": "2026-10-06T19:56:58.728731+00:00",
+      "version": "0.0.20",
+      "fingerprint": "07cacbdb0b76a7d6415e7b3c5c2a309861b535253fe32bfb4e4e95ad651a0579",
+      "diff": "--- AGENTS.md (before)\n+++ AGENTS.md (after)\n@@ -12 +12 @@\n-4. Never make an analytic choice silently. Record every exclusion, deduplication, merge rule, imputation, recode, category collapse, and ruling on an ambiguous case in the project's decision log.\n+4. Never make an analytic choice silently. Record every exclusion, deduplication, merge rule, imputation, recode, category collapse, and ruling on an ambiguous case in the project's decision log. Raise this for me to review and make a decision on them."
     },
     {
       "id": "sb-ebb6962e-2181-4d84-b63a-87b479343c65",
@@ -772,7 +784,7 @@
         "after": [
           "Never cite a case, statute, article, or quotation from memory, even in conversation. Retrieve the source first from a reliable website, or label the reference \"unverified, from memory.\""
         ],
-        "context": "Never make an analytic choice silently. Record every exclusion, deduplication, merge rule, imputation, recode, category collapse, and ruling on an ambiguous case in the project's decision log."
+        "context": "Never make an analytic choice silently. Record every exclusion, deduplication, merge rule, imputation, recode, category collapse, and ruling on an ambiguous case in the project's decision log. Raise this for me to review and make a decision on them."
       },
       "votes": [],
       "support": 0,
