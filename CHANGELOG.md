@@ -6,6 +6,17 @@ Everything before 1.0 is a comment draft: nothing is final.
 
 <!-- releases -->
 
+## [0.0.21] - 2026-11-09
+
+Added “from a reliable website” after “first” (Non-negotiable rules).
+
+- Proposed by emilio@⁠northwestern.edu (Suggest Edits) on 2026-10-06
+- Approved by Nathan Reitinger (Suggest Edits, 2026-11-09)
+- Proposal: <https://nathanreitinger.github.io/els-agent-practices/draft/#proposals> · Discussion: <https://github.com/nathanReitinger/els-agent-practices/issues/18>
+
+Argon2id fingerprint: `cef0eae8d5ed107ae8af2dec578831cf26c445c2086e4c8f25baeb8106849f65`
+
+
 ## [0.0.20] - 2026-10-06
 
 Added “Raise this for me to review and make a decision on them.” after “log.” (Non-negotiable rules).

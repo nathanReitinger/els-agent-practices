@@ -18,7 +18,7 @@
     "key": "sb_publishable_5-H-ee1q3eogGHZNdlpjFw_CFT_hxsW",
     "starts_robot": true
   },
-  "latest": "0.0.20",
+  "latest": "0.0.21",
   "fingerprint": {
     "method": "Argon2id (RFC 9106, version 0x13)",
     "covers": "the file without line 3, with carriage returns and a leading byte-order mark removed, as UTF-8",
@@ -29,6 +29,15 @@
     "length_bytes": 32
   },
   "versions": [
+    {
+      "version": "0.0.21",
+      "date": "2026-11-09",
+      "summary": "Added “from a reliable website” after “first” (Non-negotiable rules).",
+      "fingerprint": "cef0eae8d5ed107ae8af2dec578831cf26c445c2086e4c8f25baeb8106849f65",
+      "files": [
+        "AGENTS.md"
+      ]
+    },
     {
       "version": "0.0.20",
       "date": "2026-10-06",
