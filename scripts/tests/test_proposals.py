@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from fingerprint import fingerprint  # noqa: E402
-from proposals import Governance, count_votes, decide, fetch_site, parse_time, vote_of  # noqa: E402
+from proposals import HEARTBEAT_DAYS, Governance, count_votes, decide, fetch_site, parse_time, vote_of  # noqa: E402
 from release import next_version  # noqa: E402
 
 # Like GitHub's machines: no git settings from this computer, and no guessing a name or email from it. Nothing from
@@ -483,14 +483,21 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.ledger(), {})
 
     def test_an_empty_commit_after_a_month_without_any(self):
-        self.robot(now="2026-12-20T12:00:00Z")
+        # The scratch repository's commits carry today's date (setUp's, and the record the robot makes first), so
+        # "a month later" must be counted from today. A fixed date stops being a month later once today is less than
+        # HEARTBEAT_DAYS before it: this test had "2026-12-20" and failed from 2026-11-20 on, stopping the robot.
+        today = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        def later(days):
+            return (today + dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        month = HEARTBEAT_DAYS + 1
+        self.robot(now=later(month))
         self.assertEqual(self.git("log", "-1", "--format=%s"), "Robot: still running")
         self.assertEqual(self.git("show", "--format=", "--name-only", "HEAD"), "")  # empty: no file changed
         self.assertEqual(self.git("log", "-1", "--format=%an"), "github-actions[bot]")
         head = self.git("rev-parse", "HEAD")
-        self.robot(now="2026-12-21T12:00:00Z")  # a day later: nothing to do
+        self.robot(now=later(month + 1))  # a day later: nothing to do
         self.assertEqual(self.git("rev-parse", "HEAD"), head)
-        self.robot(None, "--dry-run", now="2026-12-20T12:00:00Z")
+        self.robot(None, "--dry-run", now=later(month))
         self.assertEqual(self.git("rev-parse", "HEAD"), head)
 
     def test_a_changed_frozen_version_stops_the_robot(self):
